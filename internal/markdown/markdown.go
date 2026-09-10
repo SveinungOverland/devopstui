@@ -8,6 +8,7 @@ package markdown
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -22,14 +23,22 @@ import (
 // "notty"). Empty means auto. Tests set it to "ascii".
 var Style string
 
-// FromHTML converts an HTML description to Markdown. Plain text passes
-// through unchanged.
+// htmlTag matches the tags Azure DevOps' HTML editor emits. Markdown with a
+// stray "<" (a comparison, a generic) does not match.
+var htmlTag = regexp.MustCompile(`(?i)</?(div|p|br|span|b|i|u|strong|em|ul|ol|li|a|h[1-6]|table|thead|tbody|tr|td|th|pre|code|img|blockquote|hr)\b[^>]*>`)
+
+// LooksLikeHTML reports whether a field value is HTML rather than Markdown.
+// Azure DevOps returns raw Markdown for fields in Markdown mode and HTML
+// for the rest; the SDK drops the format flag so we sniff the content.
+func LooksLikeHTML(s string) bool {
+	return htmlTag.MatchString(s)
+}
+
+// FromHTML converts an HTML description to Markdown. Markdown and plain
+// text pass through unchanged.
 func FromHTML(h string) string {
 	h = strings.TrimSpace(h)
-	if h == "" {
-		return ""
-	}
-	if !strings.Contains(h, "<") {
+	if h == "" || !LooksLikeHTML(h) {
 		return h
 	}
 	md, err := htmltomd.ConvertString(h)

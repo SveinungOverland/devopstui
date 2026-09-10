@@ -23,7 +23,15 @@ type Config struct {
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
 	// then the built-in editor. "inline" forces the built-in one.
 	Editor string `yaml:"editor,omitempty"`
+	// DescriptionFormat is how descriptions are written back: "markdown"
+	// (default; the field is switched to Azure DevOps' native Markdown mode)
+	// or "html" (Markdown is converted to HTML, for organisations that
+	// have not enabled Markdown on work items).
+	DescriptionFormat string `yaml:"description_format,omitempty"`
 }
+
+// WriteHTML reports whether descriptions should be sent as HTML.
+func (c Config) WriteHTML() bool { return c.DescriptionFormat == "html" }
 
 // EditorCommand returns the external editor to use, or "" for the built-in.
 func (c Config) EditorCommand() string {

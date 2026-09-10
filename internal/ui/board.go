@@ -16,13 +16,17 @@ type board struct {
 	col, row int
 	offsetC  int
 	selected map[int]bool
+	progress map[int]progress
 }
 
 func newBoard() *board { return &board{selected: map[int]bool{}} }
 
-func (b *board) setItems(def model.Board, items []*model.WorkItem) {
+// setItems buckets the requirement-level items into columns. cfg decides
+// whether bugs are cards or tasks.
+func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.BacklogConfig) {
 	cur := b.current()
 	b.def = def
+	b.progress = computeProgress(items, cfg.TaskLevel)
 	b.cols = make([][]*model.WorkItem, len(def.Columns))
 	stateToCol := map[string]int{}
 	for i, c := range def.Columns {
@@ -34,7 +38,7 @@ func (b *board) setItems(def model.Board, items []*model.WorkItem) {
 		}
 	}
 	for _, it := range items {
-		if it.Kind == model.KindTask || it.Kind == model.KindEpic || it.Kind == model.KindFeature {
+		if cfg.TaskLevel(it) || it.Kind == model.KindEpic || it.Kind == model.KindFeature {
 			continue // board shows the requirement level
 		}
 		ci, ok := stateToCol[it.BoardColumn]
@@ -210,6 +214,9 @@ func (b *board) renderCard(it *model.WorkItem, w int, cur bool) []string {
 		mark = sSelected.Render("●")
 	}
 	l1 := mark + kindStyle(it.Kind).Render(it.Kind.Tag()) + " " + sMuted.Render(fmt.Sprintf("%d", it.ID))
+	if p, ok := b.progress[it.ID]; ok {
+		l1 += " " + p.badge()
+	}
 	right := sMuted.Render(initials(it.AssignedTo))
 	if it.Effort > 0 {
 		right = sMuted.Render(fmtEffort(it.Effort)+" ") + right

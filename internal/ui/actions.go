@@ -77,6 +77,52 @@ func (a *App) nextIteration() (model.Iteration, bool) {
 	return model.Iteration{}, false
 }
 
+// ------------------------------------------------------------ create
+
+// createChild prompts for a title and creates a child under the highlighted
+// item: Feature under Epic, requirement under Feature, task under a
+// requirement. On a task, the sibling's parent is used. With nothing
+// highlighted a requirement is created in the current sprint.
+func (a *App) createChild() tea.Cmd {
+	cfg := a.ctx.Backlog
+	parent := a.currentItem()
+	if parent != nil && cfg.TaskLevel(parent) {
+		parent = a.lookup(parent.ParentID) // new sibling task
+	}
+	typ := cfg.ChildType(parent)
+	if typ == "" {
+		return a.setFlash(fmt.Sprintf("%s cannot have children", parent.Type), true)
+	}
+	n := model.NewItem{Type: typ, IterationPath: a.ctx.Iteration.Path, AreaPath: a.ctx.Project}
+	title := "New " + typ + " in " + a.ctx.Iteration.Name
+	if parent != nil {
+		n.ParentID = parent.ID
+		n.IterationPath = parent.IterationPath
+		if parent.AreaPath != "" {
+			n.AreaPath = parent.AreaPath
+		}
+		title = fmt.Sprintf("New %s under #%d %s", typ, parent.ID, trunc(parent.Title, 30))
+	}
+	if a.view == viewSprint || a.view == viewBoard {
+		n.IterationPath = a.ctx.Iteration.Path // keep new work in the sprint you are looking at
+	}
+	a.popup = newPrompt(title, "", func(v string) tea.Cmd {
+		if v == "" {
+			return nil
+		}
+		n.Title = v
+		a.busy = "creating " + typ
+		project := a.ctx.Project
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			it, err := a.client.Create(ctx, project, n)
+			return createdMsg{item: it, err: err}
+		}
+	})
+	return nil
+}
+
 // ------------------------------------------------------------ single update
 
 func (a *App) update(it *model.WorkItem, patches ...model.Patch) tea.Cmd {

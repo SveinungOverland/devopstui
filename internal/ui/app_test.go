@@ -216,9 +216,23 @@ func TestViewsAndPopups(t *testing.T) {
 	h := newHarness(t, 140, 40)
 	h.keys("3")
 	h.dump("09-board")
-	if !strings.Contains(h.app.View(), "Committed") {
+	v := h.app.View()
+	if !strings.Contains(v, "Committed") {
 		t.Error("board missing column")
 	}
+	if !strings.Contains(v, "Rotate signing keys quarterly.") { // description of the highlighted card
+		t.Error("board preview pane missing")
+	}
+	h.keys("z")
+	h.dump("23-board-nopreview")
+	if strings.Contains(h.app.View(), "Rotate signing keys quarterly.") {
+		t.Error("z should hide the board preview")
+	}
+	h.keys("z", "l")
+	if !strings.Contains(h.app.View(), "Accept invite and create account.") {
+		t.Error("preview should follow the cursor after toggling back on")
+	}
+	h.keys("h") // back to the first column
 	h.keys("l", "L") // move column right: single write, no confirm
 	if len(h.fake.Updates) != 1 || h.fake.Updates[0].Patches[0].Value != "Committed" {
 		t.Fatalf("column move updates = %+v", h.fake.Updates)
@@ -409,6 +423,112 @@ func TestExternalEditorSelection(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected an exec command")
+	}
+}
+
+func TestChildProgress(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1013) // PBI with tasks 1015 (To Do), 1016 (Done), 1017 (To Do)
+	h.app.refreshDetail()
+	v := h.app.View()
+	h.dump("24-progress")
+	if !strings.Contains(v, "1/3") {
+		t.Error("tree row should show 1/3 task progress")
+	}
+	if !strings.Contains(v, "1/3 tasks done") {
+		t.Error("detail should summarise tasks")
+	}
+	if !strings.Contains(v, "Load test with tracing on") {
+		t.Error("detail should list child tasks")
+	}
+	if !strings.Contains(v, "h remaining") {
+		t.Error("detail should sum remaining work")
+	}
+	// Hidden done tasks still count: toggle closed off (default) and check badge unchanged.
+	h.keys("c")
+	if !strings.Contains(h.app.View(), "1/3") {
+		t.Error("badge must count hidden done tasks")
+	}
+	// Board card shows the badge too.
+	h.keys("3")
+	h.app.board.jumpTo(1013)
+	if !strings.Contains(h.app.View(), "1013 1/3") {
+		t.Errorf("board card missing progress badge")
+	}
+}
+
+func TestBugsAsTasksLeaveTheBoard(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.ctx.Backlog.BugsBehavior = "asTasks"
+	h.app.board.setItems(h.app.currentBoard(), h.app.sprint.all, h.app.ctx.Backlog)
+	h.keys("3")
+	for _, col := range h.app.board.cols {
+		for _, it := range col {
+			if it.Kind == 5 { // KindBug
+				t.Fatalf("bug %d should not be a card when bugs are tasks", it.ID)
+			}
+		}
+	}
+	// And it counts towards its parent's progress.
+	h.app.sprint.rebuild()
+	if p := h.app.sprint.progress[1012]; p.total != 1 { // bug 1020 under feature 1012
+		t.Errorf("feature progress = %+v, want 1 bug counted", p)
+	}
+}
+
+func TestCreateChild(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1013) // PBI → new task
+	h.keys("n")
+	p, ok := h.app.popup.(*prompt)
+	if !ok {
+		t.Fatalf("expected title prompt, got %T", h.app.popup)
+	}
+	if !strings.Contains(p.title, "New Task under #1013") {
+		t.Errorf("prompt title = %q", p.title)
+	}
+	h.keys("W", "r", "i", "t", "e", " ", "d", "o", "c", "s", "enter")
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].Parent != 1013 {
+		t.Fatalf("create not recorded: %+v", h.fake.Updates)
+	}
+	created := h.fake.Updates[0].ID
+	if got := h.app.sprint.currentID(); got != created {
+		t.Errorf("cursor should land on the new item %d, got %d", created, got)
+	}
+	if it := h.app.lookup(created); it == nil || it.Type != "Task" || it.Title != "Write docs" || it.IterationPath != "Platform\\Sprint 42" {
+		t.Fatalf("created item = %+v", it)
+	}
+	// On a task, n creates a sibling under the same PBI.
+	h.keys("n")
+	if p := h.app.popup.(*prompt); !strings.Contains(p.title, "under #1013") {
+		t.Errorf("sibling prompt title = %q", p.title)
+	}
+	h.keys("esc")
+	// Feature → PBI, Epic → Feature.
+	h.app.sprint.jumpTo(1012)
+	h.keys("n")
+	if p := h.app.popup.(*prompt); !strings.HasPrefix(p.title, "New Product Backlog Item") {
+		t.Errorf("feature child title = %q", p.title)
+	}
+	h.keys("esc")
+	h.app.sprint.jumpTo(1010)
+	h.keys("n")
+	if p := h.app.popup.(*prompt); !strings.HasPrefix(p.title, "New Feature") {
+		t.Errorf("epic child title = %q", p.title)
+	}
+	h.keys("esc")
+}
+
+func TestDashboardShowsParent(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.keys("1")
+	h.dump("25-dash-parents")
+	v := h.app.View()
+	if !strings.Contains(v, "Add trace header to publisher  ↑ Propagate") {
+		t.Error("task row on the dashboard should keep its title and show its parent PBI")
+	}
+	if !strings.Contains(v, "1/3") {
+		t.Error("dashboard badge should count all loaded tasks, not only mine")
 	}
 }
 

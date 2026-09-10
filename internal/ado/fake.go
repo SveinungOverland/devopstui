@@ -54,7 +54,12 @@ func NewFake() *Fake {
 	backlog := "Platform"
 
 	add := func(id, parent int, typ, title, state, who, iter string, effort float64, prio int) {
+		var remaining float64
+		if KindOf(typ) == model.KindTask && state != "Done" {
+			remaining = float64(2 + id%5)
+		}
 		f.items[id] = &model.WorkItem{
+			RemainingWork: remaining,
 			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
@@ -76,6 +81,9 @@ func NewFake() *Fake {
 	add(1014, 1012, "Product Backlog Item", "Trace dashboard in Grafana", "Committed", "Alex Kim", cur, 3, 2)
 	add(1015, 1013, "Task", "Add trace header to publisher", "To Do", "Sveinung Øverland", cur, 0, 0)
 	add(1016, 1013, "Task", "Read trace header in consumer", "Done", "Sveinung Øverland", cur, 0, 0)
+	add(1017, 1013, "Task", "Load test with tracing on", "To Do", "", cur, 0, 0)
+	add(1018, 1014, "Task", "Wire Grafana datasource", "In Progress", "Alex Kim", cur, 0, 0)
+	add(1019, 1014, "Task", "Build panel JSON", "Done", "Alex Kim", cur, 0, 0)
 	add(1020, 1012, "Bug", "Spans lost when retry budget exhausted", "Approved", "Sveinung Øverland", cur, 2, 1)
 	add(1021, 0, "Product Backlog Item", "Rotate signing keys quarterly", "New", "", cur, 3, 4)
 	add(1022, 0, "Bug", "Login page flickers on Safari", "New", "Priya Natarajan", cur, 1, 2)
@@ -180,6 +188,40 @@ func (f *Fake) Boards(ctx context.Context, project, team string) ([]model.Board,
 		{Name: "In Progress", States: []string{"In Progress"}},
 		{Name: "Done", States: []string{"Done"}},
 	}}}, f.wait(ctx)
+}
+
+func (f *Fake) BacklogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error) {
+	return model.BacklogConfig{
+		RequirementType: "Product Backlog Item", TaskType: "Task", FeatureType: "Feature", EpicType: "Epic",
+		BugsBehavior: "asRequirements",
+	}, f.wait(ctx)
+}
+
+func (f *Fake) Create(ctx context.Context, project string, n model.NewItem) (*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if strings.TrimSpace(n.Title) == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+	id := f.nextID
+	f.nextID++
+	state := "New"
+	if KindOf(n.Type) == model.KindTask {
+		state = "To Do"
+	}
+	it := &model.WorkItem{
+		ID: id, Rev: 1, Type: n.Type, Kind: KindOf(n.Type), Title: n.Title, State: state, BoardColumn: state,
+		IterationPath: n.IterationPath, AreaPath: n.AreaPath, ParentID: n.ParentID,
+		ChangedDate: time.Now(), ChangedBy: f.me,
+		URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+	}
+	f.items[id] = it
+	f.Updates = append(f.Updates, FakeUpdate{ID: id, Parent: n.ParentID, Patches: []model.Patch{{Field: model.FieldTitle, Value: n.Title}, {Field: model.FieldWorkItemType, Value: n.Type}}})
+	c := *it
+	return &c, nil
 }
 
 func (f *Fake) States(ctx context.Context, project, typ string) ([]string, error) {
@@ -300,6 +342,8 @@ func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (
 			it.Description = p.Value.(string)
 		case model.FieldEffort, model.FieldStoryPoints:
 			it.Effort = p.Value.(float64)
+		case model.FieldRemainingWork:
+			it.RemainingWork = p.Value.(float64)
 		case model.FieldPriority:
 			it.Priority = p.Value.(int)
 		}

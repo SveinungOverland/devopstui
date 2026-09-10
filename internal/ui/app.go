@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,8 @@ type App struct {
 	board                 *board
 	detail                viewport.Model
 	focusDetail           bool
+	previewList           bool // detail pane beside list views
+	previewBoard          bool // detail pane beside the board
 
 	popup     popup
 	cmd       cmdbar
@@ -69,6 +72,8 @@ type App struct {
 
 	flash    string
 	flashErr bool
+
+	pendingJump int // item to select once the next load lands (after create)
 }
 
 // New builds the app. The client may be a Fake for demo mode.
@@ -86,13 +91,43 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		loading: map[viewID]bool{},
 		cmd:     newCmdbar(),
 		view:    viewSprint,
+
+		previewList:  true,
+		previewBoard: true,
 	}
 	a.dash.flat = true
 	a.dash.showIter = true
+	a.wireLists()
 	a.ctx.Org = cfg.Org
 	a.ctx.Project = cfg.Project
 	a.ctx.Team = cfg.Team
 	return a
+}
+
+// wireLists gives the lists their callbacks into the app.
+func (a *App) wireLists() {
+	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+		l.taskLevel = func(w *model.WorkItem) bool { return a.ctx.Backlog.TaskLevel(w) }
+		l.parentTitle = func(id int) string {
+			if p := a.lookup(id); p != nil {
+				return p.Title
+			}
+			return ""
+		}
+	}
+	a.dash.progressItems = func() []*model.WorkItem {
+		seen := map[int]bool{}
+		var out []*model.WorkItem
+		for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+			for _, it := range l.all {
+				if !seen[it.ID] {
+					seen[it.ID] = true
+					out = append(out, it)
+				}
+			}
+		}
+		return out
+	}
 }
 
 // ------------------------------------------------------------ messages
@@ -103,7 +138,13 @@ type contextLoadedMsg struct {
 	teams      []model.Team
 	iterations []model.Iteration
 	boards     []model.Board
+	backlog    model.BacklogConfig
 	err        error
+}
+
+type createdMsg struct {
+	item *model.WorkItem
+	err  error
 }
 
 type itemsLoadedMsg struct {
@@ -169,6 +210,10 @@ func (a *App) loadContext() tea.Cmd {
 			return m
 		}
 		if m.boards, err = a.client.Boards(ctx, project, team); err != nil {
+			m.err = err
+			return m
+		}
+		if m.backlog, err = a.client.BacklogConfig(ctx, project, team); err != nil {
 			m.err = err
 		}
 		return m
@@ -237,11 +282,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.view {
 		case viewSprint:
 			a.sprint.setItems(msg.items, msg.external)
-			a.board.setItems(a.currentBoard(), msg.items)
+			a.board.setItems(a.currentBoard(), msg.items, a.ctx.Backlog)
 		case viewBacklog:
 			a.backlog.setItems(msg.items, nil)
 		case viewDash:
 			a.dash.setItems(msg.items, nil)
+		}
+		if a.pendingJump != 0 {
+			if l := a.activeList(); l != nil {
+				if _, ok := l.tree.Get(a.pendingJump); ok {
+					l.expandAll()
+					l.jumpTo(a.pendingJump)
+					a.pendingJump = 0
+				}
+			} else if a.view == viewBoard {
+				a.board.jumpTo(a.pendingJump)
+				a.pendingJump = 0
+			}
 		}
 		a.refreshDetail()
 		return a, nil
@@ -253,6 +310,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.applyUpdate(msg.item)
 		return a, a.setFlash(fmt.Sprintf("saved #%d", msg.item.ID), false)
+
+	case createdMsg:
+		a.busy = ""
+		if msg.err != nil {
+			return a, a.setFlash(msg.err.Error(), true)
+		}
+		a.pendingJump = msg.item.ID
+		return a, tea.Batch(a.reloadAll(), a.setFlash(fmt.Sprintf("created %s #%d", msg.item.Type, msg.item.ID), false))
 
 	case bulkDoneMsg:
 		a.busy = ""
@@ -329,6 +394,7 @@ func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
 	}
 	a.iterations = msg.iterations
 	a.boards = msg.boards
+	a.ctx.Backlog = msg.backlog
 	if a.ctx.Iteration.Path == "" {
 		a.ctx.Iteration = a.currentIteration()
 	}
@@ -451,9 +517,16 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.CurSprint):
 		return a.setIteration(a.currentIteration())
 	case key.Matches(msg, keys.Focus):
-		if a.detailWidth() > 0 || a.view != viewBoard {
-			a.focusDetail = true
+		a.focusDetail = true
+		a.refreshDetail()
+		return nil
+	case key.Matches(msg, keys.Preview):
+		if a.view == viewBoard {
+			a.previewBoard = !a.previewBoard
+		} else {
+			a.previewList = !a.previewList
 		}
+		a.refreshDetail()
 		return nil
 	case key.Matches(msg, keys.Open):
 		return a.openBrowser()
@@ -461,6 +534,9 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.yank()
 	}
 
+	if key.Matches(msg, keys.New) {
+		return a.createChild()
+	}
 	if a.view == viewBoard {
 		return a.onBoardKey(msg)
 	}
@@ -658,6 +734,7 @@ func (a *App) pickProject() tea.Cmd {
 		a.ctx.Project, a.ctx.Team, a.ctx.Iteration = p.Name, "", model.Iteration{}
 		a.sprint, a.backlog, a.dash = newList("sprint is empty"), newList("backlog is empty"), newList("nothing assigned to you")
 		a.dash.flat, a.dash.showIter = true, true
+		a.wireLists()
 		return a.loadContext()
 	})
 	return nil
@@ -695,7 +772,7 @@ func (a *App) pickBoard() tea.Cmd {
 	a.popup = newPicker("Board", items, func(pi pickItem) tea.Cmd {
 		b := pi.Value.(model.Board)
 		a.ctx.Board = b.Name
-		a.board.setItems(b, a.sprint.all)
+		a.board.setItems(b, a.sprint.all, a.ctx.Backlog)
 		return a.switchView(viewBoard)
 	})
 	return nil
@@ -774,8 +851,30 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 	a.sprint.apply(it)
 	a.backlog.apply(it)
 	a.dash.apply(it)
-	a.board.setItems(a.currentBoard(), a.sprint.all)
+	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog)
 	a.refreshDetail()
+}
+
+// childItems returns the direct children of id across the loaded lists,
+// sorted by kind then id.
+func (a *App) childItems(id int) []*model.WorkItem {
+	seen := map[int]bool{}
+	var out []*model.WorkItem
+	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+		for _, it := range l.all {
+			if it.ParentID == id && !seen[it.ID] {
+				seen[it.ID] = true
+				out = append(out, it)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
 }
 
 func (a *App) refreshDetail() {
@@ -784,14 +883,10 @@ func (a *App) refreshDetail() {
 	}
 	it := a.currentItem()
 	var parent *model.WorkItem
-	children := 0
+	var children []*model.WorkItem
 	if it != nil {
 		parent = a.lookup(it.ParentID)
-		if l := a.activeList(); l != nil && l.tree != nil {
-			if n, ok := l.tree.Get(it.ID); ok {
-				children = len(n.Children)
-			}
-		}
+		children = a.childItems(it.ID)
 	}
 	w := a.detailWidth()
 	if w == 0 {
@@ -799,7 +894,7 @@ func (a *App) refreshDetail() {
 	}
 	a.detail.Width = w
 	a.detail.Height = a.bodyHeight() - 2
-	a.detail.SetContent(renderDetail(it, parent, children, w))
+	a.detail.SetContent(renderDetail(it, parent, children, w, a.ctx.Backlog))
 	a.detail.GotoTop()
 }
 
@@ -853,7 +948,7 @@ func (a *App) showItem(id int) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, 0, 70), "\n")}}
+		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, 70, a.ctx.Backlog), "\n")}}
 	}
 }
 
@@ -861,8 +956,19 @@ func (a *App) showItem(id int) tea.Cmd {
 
 func (a *App) bodyHeight() int { return max(a.h-5, 1) }
 
+// detailWidth is the width of the side preview pane, 0 when hidden (toggled
+// off with z, or the terminal is too narrow).
 func (a *App) detailWidth() int {
-	if a.view == viewBoard || a.w < 110 {
+	if a.w < 110 {
+		return 0
+	}
+	if a.view == viewBoard {
+		if !a.previewBoard {
+			return 0
+		}
+		return min(a.w/3, 60)
+	}
+	if !a.previewList {
 		return 0
 	}
 	return a.w*2/5 - 2
@@ -962,14 +1068,16 @@ func (a *App) renderBody() string {
 		listStyle = sPanelFocus
 	}
 
-	if a.view == viewBoard {
-		if a.focusDetail {
-			return detailStyle.Width(a.w - 2).Height(h - 2).Render(a.detail.View())
-		}
-		return a.board.view(a.w, h, true)
-	}
 	if a.focusDetail && dw == 0 {
 		return detailStyle.Width(a.w - 2).Height(h - 2).Render(a.detail.View())
+	}
+	if a.view == viewBoard {
+		if dw == 0 {
+			return a.board.view(a.w, h, true)
+		}
+		left := a.board.view(a.w-dw-2, h, !a.focusDetail)
+		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	l := a.activeList()
 	lw := a.w - 2

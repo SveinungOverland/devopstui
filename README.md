@@ -37,10 +37,15 @@ in that file.
 
 ## Descriptions are Markdown
 
-Azure DevOps stores descriptions as HTML. The TUI converts them to Markdown on read, renders
-them with [Glamour](https://github.com/charmbracelet/glamour) in the detail pane, and converts
-back to HTML on save. Headings, lists, task lists, quotes, code blocks, tables and links all
-survive the round trip.
+Azure DevOps work items support native Markdown for large text fields. The TUI writes
+descriptions as Markdown and flags the field as Markdown, so what you type is what is stored.
+Fields that are still HTML (older items, or organisations without Markdown enabled) are
+converted to Markdown on read; saving such a field switches it to Markdown mode in Azure
+DevOps, which is a one-way change. Descriptions are rendered with
+[Glamour](https://github.com/charmbracelet/glamour) in the detail pane.
+
+If your organisation has not enabled Markdown on work items, set `description_format: html`
+in the config and the TUI converts Markdown to HTML on save instead.
 
 Press `d` on an item to edit its description:
 
@@ -79,6 +84,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `l` `h` | expand / collapse | `3` | board | `d` | description | `B` | move to backlog |
 | `L` `H` | expand / collapse all | `4` | backlog | `s` | state | `p` | set parent |
 | `tab` | focus detail pane | `[` `]` | prev / next sprint | `a` | assign | | |
+| `z` | toggle preview pane | | | `n` | new child item | | |
 | `/` | filter | `S` | current sprint | `E` | effort | | |
 | `space` | select | `:` | command bar | `P` | priority | | |
 | `v` | visual select | `r` | refresh | `o` | open in browser | | |
@@ -90,7 +96,24 @@ item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Ep
 to bring its children along.
 
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
-column.
+column. A preview of the highlighted card sits on the right; `z` hides or shows it, and `tab`
+focuses it for scrolling.
+
+## Tasks and other children
+
+- PBIs (and Features, Epics) with task-level children show a **`1/3` badge** in the tree and on
+  board cards: tasks done over tasks total. Hidden done tasks still count. Green when complete.
+- Task rows show **remaining work** in hours in the effort column instead of effort.
+- The detail pane lists an item's children with state, assignee and remaining hours, and sums
+  the remaining work.
+- The team's **bug behaviour** is read from the backlog configuration. When bugs are tracked as
+  tasks they nest under PBIs, count in the badge and stay off the board; when bugs are
+  requirements they are cards like PBIs.
+- **`n` creates a child** of the highlighted item after a title prompt: a Feature under an Epic,
+  a PBI (or User Story, whatever the process uses) under a Feature, a Task under a PBI. On a
+  Task it creates a sibling. The new item inherits parent, area and the sprint you are looking
+  at, and the cursor lands on it.
+- On the dashboard, task rows show their parent PBI after the title.
 
 Commands: `:sprint [name]`, `:team`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.

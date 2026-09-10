@@ -31,6 +31,10 @@ type SDK struct {
 	mu     sync.Mutex
 	me     string
 	states map[string][]string
+
+	// WriteHTML converts Markdown descriptions to HTML on write instead of
+	// using Azure DevOps' native Markdown mode.
+	WriteHTML bool
 }
 
 // NewSDK connects to an organisation with a personal access token.
@@ -55,7 +59,7 @@ func NewSDK(ctx context.Context, orgURL, pat string) (*SDK, error) {
 var fields = []string{
 	"System.Id", "System.Rev", model.FieldWorkItemType, model.FieldTitle, model.FieldState, model.FieldAssignedTo,
 	model.FieldIterationPath, model.FieldAreaPath, model.FieldBoardColumn, model.FieldTags, model.FieldPriority,
-	model.FieldEffort, model.FieldStoryPoints, model.FieldChangedDate, model.FieldChangedBy, "System.Parent",
+	model.FieldEffort, model.FieldStoryPoints, model.FieldRemainingWork, model.FieldChangedDate, model.FieldChangedBy, "System.Parent",
 	model.FieldDescription,
 }
 
@@ -185,6 +189,69 @@ func (s *SDK) Boards(ctx context.Context, project, team string) ([]model.Board, 
 		out = append(out, mb)
 	}
 	return out, nil
+}
+
+func (s *SDK) BacklogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error) {
+	cfg, err := s.work.GetBacklogConfigurations(ctx, work.GetBacklogConfigurationsArgs{Project: &project, Team: &team})
+	if err != nil {
+		return model.BacklogConfig{}, err
+	}
+	out := model.BacklogConfig{RequirementType: "Product Backlog Item", TaskType: "Task", FeatureType: "Feature", EpicType: "Epic", BugsBehavior: "asRequirements"}
+	if cfg.BugsBehavior != nil {
+		out.BugsBehavior = string(*cfg.BugsBehavior)
+	}
+	defType := func(l *work.BacklogLevelConfiguration) string {
+		if l != nil && l.DefaultWorkItemType != nil {
+			return deref(l.DefaultWorkItemType.Name)
+		}
+		return ""
+	}
+	if t := defType(cfg.RequirementBacklog); t != "" {
+		out.RequirementType = t
+	}
+	if t := defType(cfg.TaskBacklog); t != "" {
+		out.TaskType = t
+	}
+	if cfg.PortfolioBacklogs != nil {
+		// Portfolio backlogs are ordered by rank; the lowest is Features.
+		levels := *cfg.PortfolioBacklogs
+		sort.SliceStable(levels, func(i, j int) bool { return deref(levels[i].Rank) < deref(levels[j].Rank) })
+		if len(levels) > 0 {
+			if t := defType(&levels[0]); t != "" {
+				out.FeatureType = t
+			}
+		}
+		if len(levels) > 1 {
+			if t := defType(&levels[len(levels)-1]); t != "" {
+				out.EpicType = t
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *SDK) Create(ctx context.Context, project string, n model.NewItem) (*model.WorkItem, error) {
+	doc := []webapi.JsonPatchOperation{
+		{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + model.FieldTitle), Value: n.Title},
+	}
+	if n.IterationPath != "" {
+		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + model.FieldIterationPath), Value: n.IterationPath})
+	}
+	if n.AreaPath != "" {
+		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + model.FieldAreaPath), Value: n.AreaPath})
+	}
+	if n.ParentID != 0 {
+		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/relations/-"), Value: map[string]any{
+			"rel": "System.LinkTypes.Hierarchy-Reverse",
+			"url": fmt.Sprintf("%s/_apis/wit/workItems/%d", s.orgURL, n.ParentID),
+		}})
+	}
+	typ := n.Type
+	wi, err := s.wit.CreateWorkItem(ctx, workitemtracking.CreateWorkItemArgs{Project: &project, Type: &typ, Document: &doc})
+	if err != nil {
+		return nil, err
+	}
+	return s.convert(wi, project), nil
 }
 
 func (s *SDK) States(ctx context.Context, project, typ string) ([]string, error) {
@@ -340,19 +407,31 @@ func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 func (s *SDK) Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error) {
 	doc := []webapi.JsonPatchOperation{{Op: &webapi.OperationValues.Test, Path: ptr("/rev"), Value: rev}}
 	for _, p := range patches {
-		val := p.Value
-		if p.Field == model.FieldDescription {
-			if s, ok := val.(string); ok {
-				val = markdown.ToHTML(s)
-			}
-		}
-		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + p.Field), Value: val})
+		doc = append(doc, s.fieldOps(p.Field, p.Value)...)
 	}
 	wi, err := s.wit.UpdateWorkItem(ctx, workitemtracking.UpdateWorkItemArgs{Id: &id, Document: &doc})
 	if err != nil {
 		return nil, err
 	}
 	return s.convert(wi, ""), nil
+}
+
+// fieldOps builds the patch operations for one field. Large text fields
+// are written as Markdown in Azure DevOps' native Markdown mode by adding
+// the multilineFieldsFormat operation, unless WriteHTML is set.
+func (s *SDK) fieldOps(field string, value any) []webapi.JsonPatchOperation {
+	add := &webapi.OperationValues.Add
+	if field != model.FieldDescription {
+		return []webapi.JsonPatchOperation{{Op: add, Path: ptr("/fields/" + field), Value: value}}
+	}
+	text, _ := value.(string)
+	if s.WriteHTML {
+		return []webapi.JsonPatchOperation{{Op: add, Path: ptr("/fields/" + field), Value: markdown.ToHTML(text)}}
+	}
+	return []webapi.JsonPatchOperation{
+		{Op: add, Path: ptr("/fields/" + field), Value: text},
+		{Op: add, Path: ptr("/multilineFieldsFormat/" + field), Value: "Markdown"},
+	}
 }
 
 func (s *SDK) SetParent(ctx context.Context, id, parentID int) (*model.WorkItem, error) {
@@ -402,6 +481,7 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	if m.Effort == 0 {
 		m.Effort = num(f[model.FieldStoryPoints])
 	}
+	m.RemainingWork = num(f[model.FieldRemainingWork])
 	m.ParentID = int(num(f["System.Parent"]))
 	m.AssignedTo = identity(f[model.FieldAssignedTo])
 	m.ChangedBy = identity(f[model.FieldChangedBy])

@@ -8,7 +8,7 @@ type keymap struct {
 	// navigation
 	Up, Down, Top, Bottom, PageUp, PageDown key.Binding
 	Collapse, Expand, CollapseAll, ExpandAll key.Binding
-	Focus                                   key.Binding
+	Focus, Preview                          key.Binding
 	// views
 	Dashboard, Sprint, Board, Backlog key.Binding
 	PrevSprint, NextSprint, CurSprint key.Binding
@@ -17,7 +17,7 @@ type keymap struct {
 	// selection
 	Select, Visual, SelectAll, ClearSel key.Binding
 	// actions
-	Edit, Title, Desc, State, Assign, Iteration, Effort, Priority key.Binding
+	Edit, Title, Desc, State, Assign, Iteration, Effort, Priority, New key.Binding
 	Move, MoveNext, MoveBacklog, Parent                    key.Binding
 	Open, Yank, Flat, Closed                               key.Binding
 	// board
@@ -40,6 +40,7 @@ var keys = keymap{
 	CollapseAll: b("collapse all", "H"),
 	ExpandAll:   b("expand all", "L"),
 	Focus:       b("focus detail", "tab"),
+	Preview:     b("toggle preview", "z"),
 
 	Dashboard:  b("dashboard", "1"),
 	Sprint:     b("sprint", "2"),
@@ -68,6 +69,7 @@ var keys = keymap{
 	Iteration: b("iteration", "i"),
 	Effort:    b("effort", "E"),
 	Priority:  b("priority", "P"),
+	New:       b("new child", "n"),
 
 	Move:        b("move to sprint", "m"),
 	MoveNext:    b("move to next sprint", "M"),
@@ -87,13 +89,13 @@ var keys = keymap{
 
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
-	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus},
+	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview},
 	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.Command, keys.Filter, keys.Refresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
-	{keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
+	{keys.New, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
 	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Help, keys.Quit},
 }
 
-var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.Command, keys.Help}
-var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Edit, keys.State, keys.Move, keys.Command, keys.Help}
+var footerTree = []key.Binding{keys.Expand, keys.Select, keys.New, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.Command, keys.Help}
+var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Edit, keys.State, keys.Move, keys.Preview, keys.Command, keys.Help}

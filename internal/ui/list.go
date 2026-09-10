@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
@@ -29,6 +30,35 @@ type list struct {
 	showDone  bool
 	showIter  bool // show iteration column (dashboard)
 	empty     string
+
+	// taskLevel tells which items count as tasks for progress badges; set
+	// by the App from the team's backlog configuration.
+	taskLevel func(*model.WorkItem) bool
+	// parentTitle resolves a parent's title for flat lists (dashboard).
+	parentTitle func(id int) string
+	// progressItems supplies the items to count task progress over; nil
+	// means this list's own items. The dashboard uses every loaded item so
+	// badges match the sprint view.
+	progressItems func() []*model.WorkItem
+	progress      map[int]progress // parent id → task progress
+	parents       map[int]int      // item id → parent id, kept when flattening
+}
+
+// progress summarises the task-level children of an item.
+type progress struct {
+	done, total int
+	remaining   float64
+}
+
+func (p progress) badge() string {
+	if p.total == 0 {
+		return ""
+	}
+	s := fmt.Sprintf("%d/%d", p.done, p.total)
+	if p.done == p.total {
+		return sOK.Render(s)
+	}
+	return sMuted.Render(s)
 }
 
 func newList(empty string) *list {
@@ -49,6 +79,15 @@ func (l *list) setItems(items, external []*model.WorkItem) {
 func (l *list) rebuild() {
 	items := l.all
 	ext := l.external
+	src := l.all
+	if l.progressItems != nil {
+		src = l.progressItems()
+	}
+	l.progress = computeProgress(src, l.taskLevel)
+	l.parents = make(map[int]int, len(l.all))
+	for _, it := range l.all {
+		l.parents[it.ID] = it.ParentID
+	}
 	q := strings.ToLower(l.filter.Value())
 	if !l.showDone || q != "" {
 		items = filterItems(items, q, l.showDone)
@@ -76,6 +115,26 @@ func (l *list) rebuild() {
 			delete(l.selected, id)
 		}
 	}
+}
+
+// computeProgress counts task-level children per parent over all items,
+// so hidden (done) tasks still count.
+func computeProgress(items []*model.WorkItem, taskLevel func(*model.WorkItem) bool) map[int]progress {
+	out := map[int]progress{}
+	for _, it := range items {
+		if it.ParentID == 0 || taskLevel == nil || !taskLevel(it) {
+			continue
+		}
+		p := out[it.ParentID]
+		p.total++
+		if isDone(it.State) {
+			p.done++
+		} else {
+			p.remaining += it.RemainingWork
+		}
+		out[it.ParentID] = p
+	}
+	return out
 }
 
 func filterItems(items []*model.WorkItem, q string, showDone bool) []*model.WorkItem {
@@ -302,8 +361,8 @@ func (l *list) view(width, height int) string {
 	if l.cursor >= l.offset+height {
 		l.offset = l.cursor - height + 1
 	}
-	// Column widths: marker(2) indent tag(5) id(6) title(*) state(12) who(3) effort(3)
-	stateW, whoW, effW := 12, 3, 3
+	// Column widths: marker(2) indent tag(5) id(6) title(*) state(12) who(3) effort(4)
+	stateW, whoW, effW := 12, 3, 4
 	iterW := 0
 	if l.showIter {
 		iterW = 12
@@ -328,14 +387,31 @@ func (l *list) view(width, height int) string {
 		tag := kindStyle(it.Kind).Render(pad(it.Kind.Tag(), 4))
 		id := sMuted.Render(fmt.Sprintf("%5d", it.ID))
 		titleW := width - 2 - len(indent) - 2 - 5 - 6 - stateW - whoW - effW - iterW - 4
-		title := trunc(it.Title, titleW)
+		title := it.Title
+		if pid := l.parents[it.ID]; l.flat && l.parentTitle != nil && pid != 0 {
+			if pt := l.parentTitle(pid); pt != "" {
+				title = trunc(title, titleW*2/3) + sMuted.Render("  ↑ "+pt)
+			}
+		}
+		badge := ""
+		if p, ok := l.progress[it.ID]; ok {
+			badge = " " + p.badge()
+		}
+		title = trunc(title, titleW-lipgloss.Width(badge))
 		if n.External {
 			title = sExternal.Render(title)
 		}
-		title = pad(title, titleW)
+		title = pad(title+badge, titleW)
 		state := stateStyle(it.State).Render(pad(trunc(it.State, stateW), stateW))
 		who := sMuted.Render(initials(it.AssignedTo))
-		eff := sMuted.Render(padLeft(fmtEffort(it.Effort), effW))
+		effS := fmtEffort(it.Effort)
+		if l.taskLevel != nil && l.taskLevel(it) {
+			effS = ""
+			if it.RemainingWork > 0 {
+				effS = fmtEffort(it.RemainingWork) + "h"
+			}
+		}
+		eff := sMuted.Render(padLeft(effS, effW))
 		iter := ""
 		if l.showIter {
 			iter = " " + sMuted.Render(pad(trunc(lastSeg(it.IterationPath), iterW-1), iterW-1))

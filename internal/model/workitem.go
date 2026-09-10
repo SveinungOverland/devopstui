@@ -47,6 +47,7 @@ type WorkItem struct {
 	AreaPath      string
 	BoardColumn   string
 	Effort        float64 // Effort / Story Points, 0 when unset
+	RemainingWork float64 // hours, tasks only
 	Priority      int     // 0 when unset
 	Tags          []string
 	Description   string // plain text
@@ -107,6 +108,63 @@ type Context struct {
 	Team      string
 	Iteration Iteration
 	Board     string
+	Backlog   BacklogConfig
+}
+
+// BacklogConfig is the part of the team's process configuration the UI
+// needs: which type sits at the requirement level and how bugs behave.
+type BacklogConfig struct {
+	RequirementType string // "Product Backlog Item", "User Story", …
+	TaskType        string // usually "Task"
+	FeatureType     string // "Feature"
+	EpicType        string // "Epic"
+	// BugsBehavior is "asRequirements", "asTasks" or "off".
+	BugsBehavior string
+}
+
+// TaskLevel reports whether an item sits below the requirement level,
+// taking the team's bug setting into account.
+func (c BacklogConfig) TaskLevel(w *WorkItem) bool {
+	switch w.Kind {
+	case KindTask:
+		return true
+	case KindBug:
+		return c.BugsBehavior == "asTasks"
+	}
+	return false
+}
+
+// ChildType returns the type to create under parent, or "" when parent
+// cannot have children. A nil parent yields the requirement type.
+func (c BacklogConfig) ChildType(parent *WorkItem) string {
+	req := c.RequirementType
+	if req == "" {
+		req = "Product Backlog Item"
+	}
+	task := c.TaskType
+	if task == "" {
+		task = "Task"
+	}
+	if parent == nil {
+		return req
+	}
+	switch parent.Kind {
+	case KindEpic:
+		if c.FeatureType != "" {
+			return c.FeatureType
+		}
+		return "Feature"
+	case KindFeature:
+		return req
+	case KindRequirement:
+		return task
+	case KindBug:
+		if c.BugsBehavior == "asTasks" {
+			return ""
+		}
+		return task
+	}
+	return ""
 }
 
 // Patch describes one field change to apply to a work item.
@@ -131,4 +189,14 @@ const (
 	FieldPriority      = "Microsoft.VSTS.Common.Priority"
 	FieldEffort        = "Microsoft.VSTS.Scheduling.Effort"
 	FieldStoryPoints   = "Microsoft.VSTS.Scheduling.StoryPoints"
+	FieldRemainingWork = "Microsoft.VSTS.Scheduling.RemainingWork"
 )
+
+// NewItem describes a work item to create.
+type NewItem struct {
+	Type          string
+	Title         string
+	ParentID      int
+	IterationPath string
+	AreaPath      string
+}

@@ -17,6 +17,7 @@ type Client interface {
 	Teams(ctx context.Context, project string) ([]model.Team, error)
 	Iterations(ctx context.Context, project, team string) ([]model.Iteration, error)
 	Boards(ctx context.Context, project, team string) ([]model.Board, error)
+	BacklogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error)
 	States(ctx context.Context, project, workItemType string) ([]string, error)
 	Members(ctx context.Context, project, team string) ([]string, error)
 
@@ -35,4 +36,6 @@ type Client interface {
 	Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error)
 	// SetParent re-parents id under parentID (0 removes the parent).
 	SetParent(ctx context.Context, id, parentID int) (*model.WorkItem, error)
+	// Create adds a new work item, linked under NewItem.ParentID when set.
+	Create(ctx context.Context, project string, n model.NewItem) (*model.WorkItem, error)
 }

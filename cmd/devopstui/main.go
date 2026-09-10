@@ -63,6 +63,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "connect:", err)
 			os.Exit(1)
 		}
+		sdk.WriteHTML = cfg.WriteHTML()
 		client = sdk
 	}
 
