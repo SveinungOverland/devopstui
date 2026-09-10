@@ -21,7 +21,10 @@ type Client interface {
 	// TeamAreas returns the area paths a team owns, default first.
 	TeamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error)
 	States(ctx context.Context, project, workItemType string) ([]string, error)
-	Members(ctx context.Context, project, team string) ([]string, error)
+	// People searches for assignable users. An empty query returns the
+	// project's directory (everyone on any of its teams); a non-empty one
+	// also searches the organisation's identities.
+	People(ctx context.Context, project, query string) ([]model.Person, error)
 
 	// SprintItems returns the items under iterationPath plus any parents of
 	// those items that live outside it (returned in the second slice).

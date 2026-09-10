@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +92,8 @@ func (h *harness) keys(ks ...string) {
 		h.send(msg)
 	}
 }
+
+var errTest = errors.New("identity service unavailable")
 
 func (h *harness) dump(name string) {
 	if os.Getenv("DUMP_DIR") == "" {
@@ -188,6 +191,87 @@ func TestQuickStateChange(t *testing.T) {
 	}
 	if it := h.app.lookup(1004); it != nil && it.State != "Done" {
 		t.Fatalf("local state not applied: %s", it.State)
+	}
+}
+
+func TestAssigneeSearch(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1004)
+	h.keys("a")
+	p, ok := h.app.popup.(*picker)
+	if !ok {
+		t.Fatalf("expected a people picker, got %T", h.app.popup)
+	}
+	// Opens with Unassigned plus people already on screen, before any search.
+	labels := func() []string {
+		var out []string
+		for _, i := range p.shown {
+			out = append(out, p.items[i].Label)
+		}
+		return out
+	}
+	if got := labels(); len(got) < 2 || got[0] != "Unassigned" {
+		t.Fatalf("initial list = %v", got)
+	}
+	h.dump("30-assignee-picker")
+
+	// Someone who is on no loaded item and no team is still findable.
+	h.keys("g", "r", "a", "c", "e")
+	got := labels()
+	if len(got) != 1 || got[0] != "Grace Hopper" {
+		t.Fatalf("search for grace = %v", got)
+	}
+	if !strings.Contains(h.app.View(), "grace.hopper@contoso.com") {
+		t.Error("picker should show the sign-in address")
+	}
+	h.keys("enter")
+
+	// The write uses the sign-in address, and the item shows the name.
+	last := h.fake.Updates[len(h.fake.Updates)-1]
+	if last.Patches[0].Field != "System.AssignedTo" || last.Patches[0].Value != "grace.hopper@contoso.com" {
+		t.Fatalf("patch = %+v", last.Patches[0])
+	}
+	if it := h.app.lookup(1004); it == nil || it.AssignedTo != "Grace Hopper" {
+		t.Fatalf("assignee = %+v", it)
+	}
+}
+
+func TestAssigneeSearchIgnoresStaleResults(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1004)
+	h.keys("a")
+	p := h.app.popup.(*picker)
+	h.keys("o", "l", "a")
+	before := len(p.items)
+	// A response for an older query must not replace the current list.
+	p.applyResults(pickerItemsMsg{token: p.token, query: "gra", items: peopleItems([]model.Person{{DisplayName: "Grace Hopper"}})})
+	if len(p.items) != before {
+		t.Error("stale results should be ignored")
+	}
+	// So must a response addressed to a different picker.
+	p.applyResults(pickerItemsMsg{token: p.token + 99, query: "ola", items: nil})
+	if len(p.items) != before {
+		t.Error("results for another picker should be ignored")
+	}
+	// A matching response is applied, keeping the fixed Unassigned entry.
+	p.applyResults(pickerItemsMsg{token: p.token, query: "ola", items: peopleItems([]model.Person{{DisplayName: "Ola Nordmann"}})})
+	if len(p.items) != 2 || p.items[0].Label != "Unassigned" || p.items[1].Label != "Ola Nordmann" {
+		t.Fatalf("items = %+v", p.items)
+	}
+}
+
+func TestAssigneeSearchError(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1004)
+	h.keys("a")
+	p := h.app.popup.(*picker)
+	h.fake.FailNext = errTest
+	h.keys("x")
+	if p.searchErr == "" {
+		t.Fatal("search failure should be shown in the picker")
+	}
+	if h.app.popup == nil {
+		t.Error("a failed search must not close the picker")
 	}
 }
 

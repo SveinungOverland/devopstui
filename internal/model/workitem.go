@@ -91,6 +91,29 @@ type Team struct {
 	Name string
 }
 
+// Person is someone a work item can be assigned to.
+type Person struct {
+	DisplayName string
+	UniqueName  string // sign-in address, "" when unknown
+}
+
+// Assignment is the value to write to System.AssignedTo. The sign-in
+// address is unambiguous; the display name is the fallback.
+func (p Person) Assignment() string {
+	if p.UniqueName != "" {
+		return p.UniqueName
+	}
+	return p.DisplayName
+}
+
+// Key identifies a person for de-duplication.
+func (p Person) Key() string {
+	if p.UniqueName != "" {
+		return strings.ToLower(p.UniqueName)
+	}
+	return strings.ToLower(p.DisplayName)
+}
+
 // Board is a Kanban board with ordered columns.
 type Board struct {
 	ID      string

@@ -23,8 +23,20 @@ type pickItem struct {
 	Value any
 }
 
+// pickerItemsMsg carries results from a picker's server-side search. It
+// is applied only if the query still matches what is typed.
+type pickerItemsMsg struct {
+	token int
+	query string
+	items []pickItem
+	err   error
+}
+
+var pickerToken int
+
 // picker is a fuzzy-filterable list; typing filters, j/k or arrows move,
-// enter picks, esc cancels.
+// enter picks, esc cancels. With onSearch set it also queries the server
+// as you type and merges the results in.
 type picker struct {
 	title  string
 	items  []pickItem
@@ -32,6 +44,17 @@ type picker struct {
 	cursor int
 	input  textinput.Model
 	onPick func(pickItem) tea.Cmd
+
+	// onSearch, when set, is called with the typed query; its results
+	// replace the list. token guards against out-of-order responses.
+	onSearch  func(token int, query string) tea.Cmd
+	token     int
+	searching bool
+	sentQuery string
+	searchErr string
+	// keep is the head of the list that survives a search, so a fixed
+	// entry such as "Unassigned" stays reachable.
+	keep int
 }
 
 func newPicker(title string, items []pickItem, onPick func(pickItem) tea.Cmd) *picker {
@@ -42,6 +65,48 @@ func newPicker(title string, items []pickItem, onPick func(pickItem) tea.Cmd) *p
 	p := &picker{title: title, items: items, input: in, onPick: onPick}
 	p.refilter()
 	return p
+}
+
+// searchable turns on server-side search. keep is how many leading items
+// are fixed entries that every result set keeps.
+func (p *picker) searchable(keep int, onSearch func(token int, query string) tea.Cmd) *picker {
+	pickerToken++
+	p.token = pickerToken
+	p.keep = keep
+	p.onSearch = onSearch
+	p.input.Placeholder = "type to search"
+	return p
+}
+
+// search fires a query when the typed text has changed.
+func (p *picker) search() tea.Cmd {
+	q := strings.TrimSpace(p.input.Value())
+	if p.onSearch == nil || q == p.sentQuery {
+		return nil
+	}
+	p.sentQuery = q
+	p.searching = true
+	p.searchErr = ""
+	return p.onSearch(p.token, q)
+}
+
+// applyResults swaps in search results, keeping the fixed head entries.
+func (p *picker) applyResults(msg pickerItemsMsg) {
+	if msg.token != p.token || msg.query != strings.TrimSpace(p.input.Value()) {
+		return // stale: a newer query is already in flight
+	}
+	p.searching = false
+	if msg.err != nil {
+		p.searchErr = msg.err.Error()
+		return
+	}
+	head := p.items
+	if p.keep < len(head) {
+		head = head[:p.keep]
+	}
+	p.items = append(append([]pickItem(nil), head...), msg.items...)
+	p.cursor = 0
+	p.refilter()
 }
 
 func (p *picker) refilter() {
@@ -68,6 +133,10 @@ func fuzzy(s, q string) bool {
 }
 
 func (p *picker) Update(msg tea.Msg) (popup, tea.Cmd) {
+	if res, ok := msg.(pickerItemsMsg); ok {
+		p.applyResults(res)
+		return p, nil
+	}
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
 		var cmd tea.Cmd
@@ -97,7 +166,7 @@ func (p *picker) Update(msg tea.Msg) (popup, tea.Cmd) {
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(msg)
 	p.refilter()
-	return p, cmd
+	return p, tea.Batch(cmd, p.search())
 }
 
 func (p *picker) View(w, h int) string {
@@ -130,9 +199,22 @@ func (p *picker) View(w, h int) string {
 		b.WriteString(line + "\n")
 	}
 	if len(p.shown) == 0 {
-		b.WriteString(sMuted.Render("  no matches") + "\n")
+		msg := "  no matches"
+		if p.searching {
+			msg = "  searching…"
+		}
+		b.WriteString(sMuted.Render(msg) + "\n")
 	}
-	b.WriteString(sMuted.Render(fmt.Sprintf("%d/%d  enter select · esc cancel", len(p.shown), len(p.items))))
+	status := fmt.Sprintf("%d/%d  enter select · esc cancel", len(p.shown), len(p.items))
+	switch {
+	case p.searchErr != "":
+		status = trunc(p.searchErr, width-4)
+		b.WriteString(sErr.Render(status))
+	case p.searching:
+		b.WriteString(sMuted.Render("searching… · esc cancel"))
+	default:
+		b.WriteString(sMuted.Render(status))
+	}
 	return sPopup.Width(width).Render(b.String())
 }
 

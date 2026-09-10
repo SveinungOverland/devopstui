@@ -251,8 +251,37 @@ func (f *Fake) States(ctx context.Context, project, typ string) ([]string, error
 	}
 }
 
-func (f *Fake) Members(ctx context.Context, project, team string) ([]string, error) {
-	return []string{"Sveinung Øverland", "Alex Kim", "Priya Natarajan", "Jordan Lee"}, nil
+// people is the demo directory. Only the first four are on a team; the
+// rest stand in for people found by searching the organisation.
+var fakePeople = []model.Person{
+	{DisplayName: "Sveinung Øverland", UniqueName: "sveinung@contoso.com"},
+	{DisplayName: "Alex Kim", UniqueName: "alex.kim@contoso.com"},
+	{DisplayName: "Priya Natarajan", UniqueName: "priya@contoso.com"},
+	{DisplayName: "Jordan Lee", UniqueName: "jordan.lee@contoso.com"},
+	{DisplayName: "Ada Lovelace", UniqueName: "ada@contoso.com"},
+	{DisplayName: "Grace Hopper", UniqueName: "grace.hopper@contoso.com"},
+	{DisplayName: "Kari Nordmann", UniqueName: "kari.nordmann@contoso.com"},
+	{DisplayName: "Ola Nordmann", UniqueName: "ola.nordmann@contoso.com"},
+	{DisplayName: "Sam Rivera", UniqueName: "sam.rivera@contoso.com"},
+}
+
+func resolvePerson(v string) string {
+	for _, p := range fakePeople {
+		if strings.EqualFold(p.UniqueName, v) {
+			return p.DisplayName
+		}
+	}
+	return v
+}
+
+func (f *Fake) People(ctx context.Context, project, query string) ([]model.Person, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return matchPeople(fakePeople[:4], ""), nil // the project's teams
+	}
+	return matchPeople(fakePeople, query), nil // plus organisation search
 }
 
 func (f *Fake) snapshot(filter func(*model.WorkItem) bool) []*model.WorkItem {
@@ -358,7 +387,8 @@ func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (
 			it.State = p.Value.(string)
 			it.BoardColumn = it.State
 		case model.FieldAssignedTo:
-			it.AssignedTo = p.Value.(string)
+			// Azure DevOps resolves a sign-in address to the display name.
+			it.AssignedTo = resolvePerson(p.Value.(string))
 		case model.FieldIterationPath:
 			it.IterationPath = p.Value.(string)
 		case model.FieldDescription:

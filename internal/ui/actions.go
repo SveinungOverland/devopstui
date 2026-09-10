@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -258,21 +259,68 @@ func (a *App) pickState(targets []*model.WorkItem) tea.Cmd {
 	}
 }
 
+// pickAssignee opens a people picker. It shows people already seen on
+// loaded items straight away, then searches the project and organisation
+// as you type.
 func (a *App) pickAssignee(targets []*model.WorkItem) tea.Cmd {
-	project, team := a.ctx.Project, a.ctx.Team
-	return func() tea.Msg {
-		members, err := a.client.Members(context.Background(), project, team)
-		if err != nil {
-			return errMsg{err}
+	pick := func(pi pickItem) tea.Cmd {
+		p := pi.Value.(model.Person)
+		label := "Unassign"
+		if p.DisplayName != "" {
+			label = "Assign " + p.DisplayName
 		}
-		items := []pickItem{{Label: "Unassigned", Value: ""}}
-		for _, m := range members {
-			items = append(items, pickItem{Label: m, Value: m})
-		}
-		return popupMsg{newPicker("Assign to", items, func(pi pickItem) tea.Cmd {
-			return a.applyPatch(targets, "Assign "+pi.Label, model.Patch{Field: model.FieldAssignedTo, Value: pi.Value})
-		})}
+		return a.applyPatch(targets, label, model.Patch{Field: model.FieldAssignedTo, Value: p.Assignment()})
 	}
+	a.popup = a.peoplePicker("Assign to", pick)
+	return a.searchPeople(a.popup.(*picker).token, "")
+}
+
+// peoplePicker builds a searchable picker seeded with the assignees
+// already on screen, so it is useful before the first search returns.
+func (a *App) peoplePicker(title string, pick func(pickItem) tea.Cmd) *picker {
+	items := append([]pickItem{{Label: "Unassigned", Value: model.Person{}}}, peopleItems(a.knownPeople())...)
+	p := newPicker(title, items, pick)
+	return p.searchable(1, func(token int, q string) tea.Cmd { return a.searchPeople(token, q) })
+}
+
+func (a *App) searchPeople(token int, query string) tea.Cmd {
+	project := a.ctx.Project
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		people, err := a.client.People(ctx, project, query)
+		return pickerItemsMsg{token: token, query: query, items: peopleItems(people), err: err}
+	}
+}
+
+func peopleItems(people []model.Person) []pickItem {
+	items := make([]pickItem, 0, len(people))
+	for _, p := range people {
+		items = append(items, pickItem{Label: p.DisplayName, Desc: p.UniqueName, Value: p})
+	}
+	return items
+}
+
+// knownPeople are the assignees on the items currently loaded, plus the
+// signed-in user, so the picker is never empty while a search runs.
+func (a *App) knownPeople() []model.Person {
+	seen := map[string]bool{}
+	var out []model.Person
+	add := func(name string) {
+		if name == "" || seen[strings.ToLower(name)] {
+			return
+		}
+		seen[strings.ToLower(name)] = true
+		out = append(out, model.Person{DisplayName: name})
+	}
+	add(a.me)
+	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+		for _, it := range l.all {
+			add(it.AssignedTo)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DisplayName < out[j].DisplayName })
+	return out
 }
 
 func (a *App) pickMoveTarget(targets []*model.WorkItem) tea.Cmd {

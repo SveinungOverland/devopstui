@@ -22,6 +22,9 @@ l expand  space select  e edit  s state  a assign  m move to sprint  p parent  /
 go run ./cmd/devopstui --demo
 ```
 
+Assigning searches your whole organisation, which needs the optional *Identity (read)* scope;
+without it the picker still covers everyone on the project's teams.
+
 Against a real organisation you need a personal access token with *Work Items (read & write)*
 and *Project & Team (read)* scopes:
 
@@ -129,6 +132,17 @@ to bring its children along.
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, and `tab`
 focuses it for scrolling.
+
+## Assigning people
+
+`a` opens a people picker that searches as you type. It lists the assignees already on screen
+straight away, then replaces them with results from the server: everyone on any of the
+project's teams, plus anyone in the organisation matching what you typed. Matches are ranked
+with name prefixes first, and each row shows the sign-in address so two people with the same
+name are distinguishable. Assignments are written by sign-in address, not display name.
+
+This matters when sprints live on a parent team: the picker is not limited to that team's
+members, so you can assign to anyone regardless of which team owns the sprint.
 
 ## Item details view
 

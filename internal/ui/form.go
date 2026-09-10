@@ -21,10 +21,9 @@ type form struct {
 	cursor  int
 	values  map[string]any // pending changes by field ref
 	child   popup
-	onSave  func(patches []model.Patch) tea.Cmd
-	states  []string
-	members []string
-	iters   []model.Iteration
+	onSave func(patches []model.Patch) tea.Cmd
+	states []string
+	iters  []model.Iteration
 }
 
 type formField struct {
@@ -44,7 +43,7 @@ var formFields = []formField{
 
 // openForm loads picker data then shows the form.
 func (a *App) openForm(it *model.WorkItem) tea.Cmd {
-	project, team := a.ctx.Project, a.ctx.Team
+	project := a.ctx.Project
 	iters := a.iterations
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -52,11 +51,7 @@ func (a *App) openForm(it *model.WorkItem) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		members, err := a.client.Members(ctx, project, team)
-		if err != nil {
-			return errMsg{err}
-		}
-		f := &form{app: a, item: it, fields: formFields, values: map[string]any{}, states: states, members: members, iters: iters}
+		f := &form{app: a, item: it, fields: formFields, values: map[string]any{}, states: states, iters: iters}
 		f.onSave = func(patches []model.Patch) tea.Cmd {
 			if len(patches) == 0 {
 				return a.setFlash("no changes", false)
@@ -151,11 +146,11 @@ func (f *form) openEditor() (cmd tea.Cmd) {
 		}
 		f.child = newPicker("State", items, func(pi pickItem) tea.Cmd { return set(fld.ref, pi.Value) })
 	case model.FieldAssignedTo:
-		items := []pickItem{{Label: "Unassigned", Value: ""}}
-		for _, m := range f.members {
-			items = append(items, pickItem{Label: m, Value: m})
-		}
-		f.child = newPicker("Assign to", items, func(pi pickItem) tea.Cmd { return set(fld.ref, pi.Value) })
+		pk := f.app.peoplePicker("Assign to", func(pi pickItem) tea.Cmd {
+			return set(fld.ref, pi.Value.(model.Person).Assignment())
+		})
+		f.child = pk
+		cmd = f.app.searchPeople(pk.token, "")
 	case model.FieldIterationPath:
 		var items []pickItem
 		for _, it := range f.iters {

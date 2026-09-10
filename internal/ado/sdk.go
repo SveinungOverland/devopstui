@@ -12,6 +12,7 @@ import (
 
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/core"
+	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/identity"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/webapi"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/work"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/workitemtracking"
@@ -28,9 +29,12 @@ type SDK struct {
 	work   work.Client
 	wit    workitemtracking.Client
 
-	mu     sync.Mutex
-	me     string
-	states map[string][]string
+	mu         sync.Mutex
+	me         string
+	states     map[string][]string
+	people     map[string][]model.Person // project → directory cache
+	ident      identity.Client
+	identTried bool
 
 	// WriteHTML converts Markdown descriptions to HTML on write instead of
 	// using Azure DevOps' native Markdown mode.
@@ -53,7 +57,8 @@ func NewSDK(ctx context.Context, orgURL, pat string) (*SDK, error) {
 	if err != nil {
 		return nil, fmt.Errorf("work item client: %w", err)
 	}
-	return &SDK{orgURL: orgURL, conn: conn, core: c, work: w, wit: wit, states: map[string][]string{}}, nil
+	return &SDK{orgURL: orgURL, conn: conn, core: c, work: w, wit: wit,
+		states: map[string][]string{}, people: map[string][]model.Person{}}, nil
 }
 
 var fields = []string{
@@ -299,21 +304,6 @@ func (s *SDK) States(ctx context.Context, project, typ string) ([]string, error)
 	return out, nil
 }
 
-func (s *SDK) Members(ctx context.Context, project, team string) ([]string, error) {
-	res, err := s.core.GetTeamMembersWithExtendedProperties(ctx, core.GetTeamMembersWithExtendedPropertiesArgs{ProjectId: &project, TeamId: &team})
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, m := range *res {
-		if m.Identity != nil {
-			out = append(out, deref(m.Identity.DisplayName))
-		}
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
 // query runs a flat WIQL query and fetches the items.
 func (s *SDK) query(ctx context.Context, project, wiql string) ([]*model.WorkItem, error) {
 	top := 2000
@@ -512,8 +502,8 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	}
 	m.RemainingWork = num(f[model.FieldRemainingWork])
 	m.ParentID = int(num(f["System.Parent"]))
-	m.AssignedTo = identity(f[model.FieldAssignedTo])
-	m.ChangedBy = identity(f[model.FieldChangedBy])
+	m.AssignedTo = identityName(f[model.FieldAssignedTo])
+	m.ChangedBy = identityName(f[model.FieldChangedBy])
 	if t, ok := f[model.FieldChangedDate].(azuredevops.Time); ok {
 		m.ChangedDate = t.Time
 	} else if ts := str(f[model.FieldChangedDate]); ts != "" {
@@ -536,7 +526,7 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	return m
 }
 
-func identity(v any) string {
+func identityName(v any) string {
 	switch x := v.(type) {
 	case map[string]any:
 		return str(x["displayName"])

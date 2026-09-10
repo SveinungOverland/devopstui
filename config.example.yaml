@@ -18,6 +18,9 @@ org: https://dev.azure.com/contoso
 # Personal access token with scopes:
 #   Work Items  – Read & write
 #   Project and Team – Read
+#   Identity – Read   (optional: searches the whole organisation when
+#                      assigning; without it the people picker covers
+#                      everyone on the project's teams)
 # Prefer the AZURE_DEVOPS_EXT_PAT environment variable over storing it here.
 # If you do store it, the file is written with mode 0600 and the token is
 # never copied anywhere else.
