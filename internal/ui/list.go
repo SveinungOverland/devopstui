@@ -53,16 +53,21 @@ type progress struct {
 	remaining   float64
 }
 
-func (p progress) badge() string {
+func (p progress) text() string {
 	if p.total == 0 {
 		return ""
 	}
-	s := fmt.Sprintf("%d/%d", p.done, p.total)
-	if p.done == p.total {
-		return sOK.Render(s)
-	}
-	return sMuted.Render(s)
+	return fmt.Sprintf("%d/%d", p.done, p.total)
 }
+
+func (p progress) style() lipgloss.Style {
+	if p.total > 0 && p.done == p.total {
+		return sOK
+	}
+	return sMuted
+}
+
+func (p progress) badge() string { return p.style().Render(p.text()) }
 
 func newList(empty string) *list {
 	in := textinput.New()
@@ -412,8 +417,18 @@ func (l *list) view(width, height int) string {
 	for i := l.offset; i < len(l.rows) && i < l.offset+height; i++ {
 		n := l.rows[i]
 		it := n.Item
+		cur := i == l.cursor
+		st := rowStyler(cur)
+		plain := st(lipgloss.NewStyle())
+		muted := st(sMuted)
+
 		marker := "  "
-		if l.selected[it.ID] {
+		switch {
+		case cur && l.selected[it.ID]:
+			marker = st(sKey).Render(cursorMark) + st(sSelected).Render("●")
+		case cur:
+			marker = st(sKey).Render(cursorMark) + plain.Render(" ")
+		case l.selected[it.ID]:
 			marker = sSelected.Render("● ")
 		}
 		indent := strings.Repeat("  ", n.Depth)
@@ -425,26 +440,28 @@ func (l *list) view(width, height int) string {
 				arrow = "▾ "
 			}
 		}
-		tag := kindStyle(it.Kind).Render(pad(it.Kind.Tag(), 4))
-		id := sMuted.Render(fmt.Sprintf("%5d", it.ID))
+		tag := st(kindStyle(it.Kind)).Render(pad(it.Kind.Tag(), 4))
+		id := muted.Render(fmt.Sprintf("%5d", it.ID))
 		titleW := width - 2 - len(indent) - 2 - 5 - 6 - stateW - whoW - effW - iterW - 4
-		title := it.Title
-		if pid := l.parents[it.ID]; l.flat && l.parentTitle != nil && pid != 0 {
-			if pt := l.parentTitle(pid); pt != "" {
-				title = trunc(title, titleW*2/3) + sMuted.Render("  ↑ "+pt)
-			}
-		}
 		badge := ""
 		if p, ok := l.progress[it.ID]; ok {
-			badge = " " + p.badge()
+			badge = " " + st(p.style()).Render(p.text())
 		}
-		title = trunc(title, titleW-lipgloss.Width(badge))
+		titleStyle := plain
 		if n.External {
-			title = sExternal.Render(title)
+			titleStyle = st(sExternal)
 		}
-		title = pad(title+badge, titleW)
-		state := stateStyle(it.State).Render(pad(trunc(it.State, stateW), stateW))
-		who := sMuted.Render(initials(it.AssignedTo))
+		var title string
+		if pid := l.parents[it.ID]; l.flat && l.parentTitle != nil && pid != 0 && l.parentTitle(pid) != "" {
+			main := trunc(it.Title, titleW*2/3)
+			title = titleStyle.Render(main) + muted.Render(trunc("  ↑ "+l.parentTitle(pid), titleW-lipgloss.Width(main)-lipgloss.Width(badge)))
+		} else {
+			title = titleStyle.Render(trunc(it.Title, titleW-lipgloss.Width(badge)))
+		}
+		title += badge
+		title += fill(plain, titleW-lipgloss.Width(title))
+		state := st(stateStyle(it.State)).Render(pad(trunc(it.State, stateW), stateW))
+		who := muted.Render(initials(it.AssignedTo))
 		effS := fmtEffort(it.Effort)
 		if l.taskLevel != nil && l.taskLevel(it) {
 			effS = ""
@@ -452,16 +469,14 @@ func (l *list) view(width, height int) string {
 				effS = fmtEffort(it.RemainingWork) + "h"
 			}
 		}
-		eff := sMuted.Render(padLeft(effS, effW))
+		eff := muted.Render(padLeft(effS, effW))
 		iter := ""
 		if l.showIter {
-			iter = " " + sMuted.Render(pad(trunc(lastSeg(it.IterationPath), iterW-1), iterW-1))
+			iter = plain.Render(" ") + muted.Render(pad(trunc(lastSeg(it.IterationPath), iterW-1), iterW-1))
 		}
-		line := marker + indent + arrow + tag + " " + id + " " + title + " " + state + " " + who + " " + eff + iter
-		line = pad(line, width)
-		if i == l.cursor {
-			line = sCursor.Render(line)
-		}
+		sp := plain.Render(" ")
+		line := marker + plain.Render(indent+arrow) + tag + sp + id + sp + title + sp + state + sp + who + sp + eff + iter
+		line += fill(plain, width-lipgloss.Width(line))
 		b.WriteString(line)
 		if i < l.offset+height-1 && i < len(l.rows)-1 {
 			b.WriteString("\n")

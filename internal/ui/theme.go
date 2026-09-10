@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sveinungoverland/devopstui/internal/model"
@@ -12,7 +14,7 @@ var (
 	cText    = lipgloss.AdaptiveColor{Light: "#303030", Dark: "#d0d0d0"}
 	cBorder  = lipgloss.AdaptiveColor{Light: "#c6c6c6", Dark: "#444444"}
 	cFocus   = cAccent
-	cCursor  = lipgloss.AdaptiveColor{Light: "#e4e4e4", Dark: "#303030"}
+	cCursor  = lipgloss.AdaptiveColor{Light: "#cfe3ff", Dark: "#264f78"}
 	cSelect  = lipgloss.AdaptiveColor{Light: "#af5f00", Dark: "#ffaf00"}
 	cErr     = lipgloss.AdaptiveColor{Light: "#af0000", Dark: "#ff5f5f"}
 	cOK      = lipgloss.AdaptiveColor{Light: "#008700", Dark: "#5fd75f"}
@@ -42,6 +44,28 @@ var (
 	sExternal   = lipgloss.NewStyle().Foreground(cMuted).Italic(true)
 	sBadge      = lipgloss.NewStyle().Bold(true)
 )
+
+// rowStyler returns a function that adds the cursor background to any style
+// when hl is set. Styled segments each carry their own ANSI reset, so a
+// background must be applied per segment rather than around the whole
+// line, or it vanishes after the first coloured piece.
+func rowStyler(hl bool) func(lipgloss.Style) lipgloss.Style {
+	if !hl {
+		return func(s lipgloss.Style) lipgloss.Style { return s }
+	}
+	return func(s lipgloss.Style) lipgloss.Style { return s.Background(cCursor) }
+}
+
+// fill renders n spaces in the given style (for padding a highlighted row).
+func fill(st lipgloss.Style, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return st.Render(strings.Repeat(" ", n))
+}
+
+// cursorMark is the left-edge marker of the highlighted row.
+const cursorMark = "▌"
 
 func kindStyle(k model.Kind) lipgloss.Style {
 	switch k {

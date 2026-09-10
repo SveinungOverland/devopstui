@@ -112,13 +112,18 @@ func (p *picker) View(w, h int) string {
 	}
 	for i := start; i < len(p.shown) && i < start+maxRows; i++ {
 		it := p.items[p.shown[i]]
-		line := it.Label
+		cur := i == p.cursor
+		st := rowStyler(cur)
+		plain := st(lipgloss.NewStyle())
+		lineW := width - 4
+		label := trunc(it.Label, lineW)
+		line := plain.Render(label)
 		if it.Desc != "" {
-			line += "  " + sMuted.Render(it.Desc)
+			line += st(sMuted).Render(trunc("  "+it.Desc, lineW-lipgloss.Width(label)))
 		}
-		line = pad(trunc(line, width-2), width-2)
-		if i == p.cursor {
-			line = sCursor.Render(sKey.Render("▸ ") + line)
+		line += fill(plain, lineW-lipgloss.Width(line))
+		if cur {
+			line = st(sKey).Render(cursorMark+" ") + line
 		} else {
 			line = "  " + line
 		}

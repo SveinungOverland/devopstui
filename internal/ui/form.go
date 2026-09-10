@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
@@ -204,13 +205,19 @@ func (f *form) View(w, h int) string {
 				val = fmt.Sprintf("%s  %s", trunc(val, width-28), sMuted.Render(fmt.Sprintf("(%d lines)", lines)))
 			}
 		}
+		cur := i == f.cursor
+		st := rowStyler(cur)
+		plain := st(lipgloss.NewStyle())
 		val = trunc(val, width-16)
+		valStyle := plain
 		if _, changed := f.values[fld.ref]; changed {
-			val = sSelected.Render(val + " *")
+			val += " *"
+			valStyle = st(sSelected)
 		}
-		line := sLabel.Render(fld.label) + val
-		if i == f.cursor {
-			line = sCursor.Render(sKey.Render("▸ ") + pad(line, width-4))
+		line := st(sLabel).Render(fld.label) + valStyle.Render(val)
+		line += fill(plain, width-4-lipgloss.Width(line))
+		if cur {
+			line = st(sKey).Render(cursorMark+" ") + line
 		} else {
 			line = "  " + line
 		}

@@ -218,23 +218,28 @@ func (b *board) renderColumn(ci, colW, height int, focused bool) string {
 }
 
 func (b *board) renderCard(it *model.WorkItem, w int, cur bool) []string {
-	mark := " "
-	if b.selected[it.ID] {
+	st := rowStyler(cur)
+	plain := st(lipgloss.NewStyle())
+	muted := st(sMuted)
+	mark := plain.Render(" ")
+	switch {
+	case cur && b.selected[it.ID]:
+		mark = st(sSelected).Render("●")
+	case cur:
+		mark = st(sKey).Render(cursorMark)
+	case b.selected[it.ID]:
 		mark = sSelected.Render("●")
 	}
-	l1 := mark + kindStyle(it.Kind).Render(it.Kind.Tag()) + " " + sMuted.Render(fmt.Sprintf("%d", it.ID))
+	l1 := mark + st(kindStyle(it.Kind)).Render(it.Kind.Tag()) + plain.Render(" ") + muted.Render(fmt.Sprintf("%d", it.ID))
 	if p, ok := b.progress[it.ID]; ok {
-		l1 += " " + p.badge()
+		l1 += plain.Render(" ") + st(p.style()).Render(p.text())
 	}
-	right := sMuted.Render(initials(it.AssignedTo))
+	right := muted.Render(initials(it.AssignedTo))
 	if it.Effort > 0 {
-		right = sMuted.Render(fmtEffort(it.Effort)+" ") + right
+		right = muted.Render(fmtEffort(it.Effort)+" ") + right
 	}
-	l1 = pad(l1, w-lipgloss.Width(right)) + right
-	l2 := " " + pad(trunc(it.Title, w-1), w-1)
-	l3 := ""
-	if cur {
-		l1, l2 = sCursor.Render(pad(l1, w)), sCursor.Render(pad(l2, w))
-	}
-	return []string{l1, l2, l3}
+	l1 += fill(plain, w-lipgloss.Width(l1)-lipgloss.Width(right)) + right
+	l2 := plain.Render(" " + trunc(it.Title, w-1))
+	l2 += fill(plain, w-lipgloss.Width(l2))
+	return []string{l1, l2, ""}
 }
