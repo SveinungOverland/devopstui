@@ -419,6 +419,12 @@ func (s *SDK) Parents(ctx context.Context, project string) ([]*model.WorkItem, e
 		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] IN ('Epic','Feature') AND [System.State] NOT IN ('Removed','Closed','Done') ORDER BY [System.WorkItemType], [System.Title]")
 }
 
+func (s *SDK) Children(ctx context.Context, project string, parentID int) ([]*model.WorkItem, error) {
+	return s.query(ctx, project, fmt.Sprintf(
+		"SELECT [System.Id] FROM WorkItems WHERE [System.Parent] = %d AND [System.State] <> 'Removed' ORDER BY [Microsoft.VSTS.Common.BacklogPriority] ASC, [System.Id] ASC",
+		parentID))
+}
+
 func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	wi, err := s.wit.GetWorkItem(ctx, workitemtracking.GetWorkItemArgs{Id: &id, Fields: &fields})
 	if err != nil {

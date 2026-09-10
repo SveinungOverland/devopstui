@@ -319,6 +319,13 @@ func (f *Fake) Parents(ctx context.Context, project string) ([]*model.WorkItem, 
 	return f.snapshot(func(w *model.WorkItem) bool { return w.Kind == model.KindEpic || w.Kind == model.KindFeature }), nil
 }
 
+func (f *Fake) Children(ctx context.Context, project string, parentID int) ([]*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	return f.snapshot(func(w *model.WorkItem) bool { return w.ParentID == parentID && w.State != "Removed" }), nil
+}
+
 func (f *Fake) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -29,11 +29,17 @@ const (
 	viewSprint
 	viewBoard
 	viewBacklog
+	// viewItem is the full-screen view of one work item. It is not a tab:
+	// you drill into it with D and leave it with esc.
+	viewItem
 )
 
 func (v viewID) String() string {
-	return [...]string{"Dashboard", "Sprint", "Board", "Backlog"}[v]
+	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Item"}[v]
 }
+
+// tabViews are the numbered views shown in the header.
+var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog}
 
 // App is the root model. It is used by pointer so closures in popups can
 // reach it safely.
@@ -55,6 +61,11 @@ type App struct {
 
 	sprint, backlog, dash *list
 	board                 *board
+	// item is the drill-down view; itemStack keeps the trail so esc walks
+	// back out, and itemReturn is the tab to land on at the bottom.
+	item       *itemView
+	itemStack  []*model.WorkItem
+	itemReturn viewID
 	detail                viewport.Model
 	focusDetail           bool
 	previewList           bool // detail pane beside list views
@@ -367,6 +378,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewDash:
 			a.dash.setItems(msg.items, nil)
 		}
+		a.syncItemView()
 		if a.pendingJump != 0 {
 			if l := a.activeList(); l != nil {
 				if _, ok := l.tree.Get(a.pendingJump); ok {
@@ -395,8 +407,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return a, a.setFlash(msg.err.Error(), true)
 		}
+		flash := a.setFlash(fmt.Sprintf("created %s #%d", msg.item.Type, msg.item.ID), false)
+		if a.view == viewItem && a.item != nil {
+			// Show it in the kanban straight away, then reconcile.
+			a.item.setChildren(append(a.item.children, msg.item), nil)
+			a.item.focusKan = true
+			a.item.jumpTo(msg.item.ID)
+			return a, tea.Batch(a.reloadAll(), a.loadItemChildren(a.item.item), flash)
+		}
 		a.pendingJump = msg.item.ID
-		return a, tea.Batch(a.reloadAll(), a.setFlash(fmt.Sprintf("created %s #%d", msg.item.Type, msg.item.ID), false))
+		return a, tea.Batch(a.reloadAll(), flash)
 
 	case bulkDoneMsg:
 		a.busy = ""
@@ -404,6 +424,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case popupMsg:
 		a.popup = msg.p
+		return a, nil
+
+	case itemLoadedMsg:
+		if a.item == nil || a.item.item.ID != msg.id {
+			return a, nil // drilled elsewhere while the fetch was in flight
+		}
+		a.item.loading = false
+		if msg.err != nil {
+			return a, a.setFlash("children: "+msg.err.Error(), true)
+		}
+		a.item.setChildren(msg.children, msg.states)
+		if len(msg.children) == 0 {
+			a.item.focusKan = false
+		}
 		return a, nil
 
 	case teamFilterMsg:
@@ -601,12 +635,21 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 
+	if a.view == viewItem && a.item != nil {
+		if cmd, handled := a.itemOverride(msg); handled {
+			return cmd
+		}
+	}
+
 	// Global keys.
 	switch {
 	case key.Matches(msg, keys.Quit):
 		if l := a.activeList(); l != nil && len(l.selected) > 0 {
 			l.clearSelection()
 			return nil
+		}
+		if a.view == viewItem {
+			return a.closeItem() // q walks out of the drill-down first
 		}
 		return tea.Quit
 	case key.Matches(msg, keys.Help):
@@ -655,7 +698,16 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	if key.Matches(msg, keys.New) {
 		return a.createChild()
 	}
+	if a.view == viewItem {
+		return a.onItemKey(msg)
+	}
+	if key.Matches(msg, keys.Details) {
+		return a.openItem(a.currentItem())
+	}
 	if a.view == viewBoard {
+		if msg.String() == "enter" { // enter drills in from a card
+			return a.openItem(a.currentItem())
+		}
 		return a.onBoardKey(msg)
 	}
 	return a.onListKey(msg, a.activeList())
@@ -810,6 +862,9 @@ func (a *App) runCommand(c string) tea.Cmd {
 }
 
 func (a *App) switchView(v viewID) tea.Cmd {
+	if v != viewItem {
+		a.item, a.itemStack = nil, nil
+	}
 	a.view = v
 	a.focusDetail = false
 	a.refreshDetail()
@@ -936,7 +991,10 @@ func (a *App) activeList() *list {
 
 // currentItem is the highlighted item in whichever view is active.
 func (a *App) currentItem() *model.WorkItem {
-	if a.view == viewBoard {
+	switch {
+	case a.view == viewItem && a.item != nil:
+		return a.item.current()
+	case a.view == viewBoard:
 		return a.board.current()
 	}
 	if l := a.activeList(); l != nil {
@@ -947,7 +1005,13 @@ func (a *App) currentItem() *model.WorkItem {
 
 // targetItems is the selection or the highlighted item.
 func (a *App) targetItems() []*model.WorkItem {
-	if a.view == viewBoard {
+	switch {
+	case a.view == viewItem:
+		if it := a.currentItem(); it != nil {
+			return []*model.WorkItem{it}
+		}
+		return nil
+	case a.view == viewBoard:
 		return a.board.targetItems()
 	}
 	if l := a.activeList(); l != nil {
@@ -983,6 +1047,7 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 	a.backlog.apply(it)
 	a.dash.apply(it)
 	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	a.syncItemView()
 	a.refreshDetail()
 }
 
@@ -1085,13 +1150,233 @@ func (a *App) showItem(id int) tea.Cmd {
 
 // ------------------------------------------------------------ view
 
+// ------------------------------------------------------------ item drill-down
+
+type itemLoadedMsg struct {
+	id       int
+	children []*model.WorkItem
+	states   []string
+	err      error
+}
+
+// openItem drills into a work item. The locally known children show at
+// once; a fetch then fills in anything the current view has not loaded.
+func (a *App) openItem(it *model.WorkItem) tea.Cmd {
+	if it == nil {
+		return nil
+	}
+	if a.view != viewItem {
+		a.itemReturn = a.view
+		a.itemStack = nil
+	}
+	a.itemStack = append(a.itemStack, it)
+	a.view = viewItem
+	a.focusDetail = false
+	return a.showItemView(it)
+}
+
+func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
+	v := newItemView(it, a.ctx.Backlog)
+	v.parent = a.lookup(it.ParentID)
+	v.focusKan = len(a.childItems(it.ID)) > 0
+	v.setChildren(a.childItems(it.ID), nil)
+	a.item = v
+	return a.loadItemChildren(it)
+}
+
+func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
+	project, id, cfg := a.ctx.Project, it.ID, a.ctx.Backlog
+	known := a.childItems(id)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		children, err := a.client.Children(ctx, project, id)
+		if err != nil {
+			return itemLoadedMsg{id: id, err: err}
+		}
+		// Column order comes from the type most of the children are, so a
+		// task kanban reads To Do → In Progress → Done.
+		typ := dominantType(children)
+		if typ == "" {
+			typ = dominantType(known)
+		}
+		if typ == "" {
+			typ = cfg.ChildType(&model.WorkItem{Kind: it.Kind, Type: it.Type})
+		}
+		var states []string
+		if typ != "" {
+			states, _ = a.client.States(ctx, project, typ)
+		}
+		return itemLoadedMsg{id: id, children: children, states: states}
+	}
+}
+
+// dominantType is the work item type most of the items share.
+func dominantType(items []*model.WorkItem) string {
+	counts := map[string]int{}
+	best, bestN := "", 0
+	for _, it := range items {
+		counts[it.Type]++
+		if n := counts[it.Type]; n > bestN {
+			best, bestN = it.Type, n
+		}
+	}
+	return best
+}
+
+// closeItem walks one step back out of the drill-down.
+func (a *App) closeItem() tea.Cmd {
+	if len(a.itemStack) > 1 {
+		a.itemStack = a.itemStack[:len(a.itemStack)-1]
+		return a.showItemView(a.itemStack[len(a.itemStack)-1])
+	}
+	a.itemStack = nil
+	a.item = nil
+	return a.switchView(a.itemReturn)
+}
+
+// syncItemView refreshes the drill-down from the loaded lists after a write.
+func (a *App) syncItemView() {
+	if a.view != viewItem || a.item == nil {
+		return
+	}
+	if fresh := a.lookup(a.item.item.ID); fresh != nil {
+		a.item.item = fresh
+		a.itemStack[len(a.itemStack)-1] = fresh
+	}
+	byID := map[int]*model.WorkItem{}
+	for _, c := range a.childItems(a.item.item.ID) {
+		byID[c.ID] = c
+	}
+	merged := make([]*model.WorkItem, 0, len(a.item.children))
+	seen := map[int]bool{}
+	for _, c := range a.item.children {
+		seen[c.ID] = true
+		if fresh, ok := byID[c.ID]; ok {
+			merged = append(merged, fresh)
+		} else {
+			merged = append(merged, c)
+		}
+	}
+	for _, c := range byID {
+		if !seen[c.ID] {
+			merged = append(merged, c)
+		}
+	}
+	sortItems(merged)
+	a.item.setChildren(merged, nil)
+	a.item.parent = a.lookup(a.item.item.ParentID)
+}
+
+func sortItems(items []*model.WorkItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Kind != items[j].Kind {
+			return items[i].Kind < items[j].Kind
+		}
+		return items[i].ID < items[j].ID
+	})
+}
+
+// itemOverride handles the keys the drill-down redefines. It runs before
+// the global bindings; everything it does not claim (tabs, :, ?, o, y…)
+// keeps its usual meaning.
+func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
+	v := a.item
+	switch {
+	case key.Matches(msg, keys.Back):
+		return a.closeItem(), true
+	case key.Matches(msg, keys.Focus):
+		if !v.descOnly {
+			v.focusKan = !v.focusKan
+		}
+		return nil, true
+	case key.Matches(msg, keys.Preview):
+		v.descOnly = !v.descOnly
+		if v.descOnly {
+			v.focusKan = false // the kanban is gone; focus follows
+		}
+		return nil, true
+	case key.Matches(msg, keys.Refresh):
+		v.loading = true
+		return a.loadItemChildren(v.item), true
+	case key.Matches(msg, keys.Details), msg.String() == "enter":
+		if c := v.currentChild(); v.focusKan && c != nil {
+			return a.openItem(c), true
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
+func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
+	v := a.item
+	if !v.focusKan {
+		switch {
+		case key.Matches(msg, keys.Down):
+			v.desc.LineDown(1)
+			return nil
+		case key.Matches(msg, keys.Up):
+			v.desc.LineUp(1)
+			return nil
+		case key.Matches(msg, keys.PageDown):
+			v.desc.HalfViewDown()
+			return nil
+		case key.Matches(msg, keys.PageUp):
+			v.desc.HalfViewUp()
+			return nil
+		case key.Matches(msg, keys.Top):
+			v.desc.GotoTop()
+			return nil
+		case key.Matches(msg, keys.Bottom):
+			v.desc.GotoBottom()
+			return nil
+		}
+		return a.onActionKey(msg)
+	}
+	switch {
+	case key.Matches(msg, keys.Down):
+		v.move(0, 1)
+	case key.Matches(msg, keys.Up):
+		v.move(0, -1)
+	case key.Matches(msg, keys.Left):
+		v.move(-1, 0)
+	case key.Matches(msg, keys.Right):
+		v.move(1, 0)
+	case key.Matches(msg, keys.Top):
+		v.row = 0
+		v.clamp()
+	case key.Matches(msg, keys.Bottom):
+		v.move(0, 1<<20)
+	case key.Matches(msg, keys.ColLeft):
+		return a.moveChildState(-1)
+	case key.Matches(msg, keys.ColRight):
+		return a.moveChildState(1)
+	default:
+		return a.onActionKey(msg)
+	}
+	return nil
+}
+
+// moveChildState moves the highlighted child to the neighbouring column.
+func (a *App) moveChildState(dc int) tea.Cmd {
+	c := a.item.currentChild()
+	if c == nil {
+		return nil
+	}
+	state, ok := a.item.adjacentState(dc)
+	if !ok {
+		return nil
+	}
+	return a.applyPatch([]*model.WorkItem{c}, "Move to "+state, model.Patch{Field: model.FieldState, Value: state})
+}
+
 func (a *App) bodyHeight() int { return max(a.h-5, 1) }
 
 // detailWidth is the width of the side preview pane, 0 when hidden (toggled
 // off with z, or the terminal is too narrow).
 func (a *App) detailWidth() int {
-	if a.w < 110 {
-		return 0
+	if a.w < 110 || a.view == viewItem {
+		return 0 // the drill-down lays out its own panes
 	}
 	if a.view == viewBoard {
 		if !a.previewBoard {
@@ -1154,7 +1439,7 @@ func (a *App) renderHeader() string {
 	line1 := pad(left, a.w-lipgloss.Width(right)) + right
 
 	var tabs []string
-	for _, v := range []viewID{viewDash, viewSprint, viewBoard, viewBacklog} {
+	for _, v := range tabViews {
 		label := fmt.Sprintf("%d %s", int(v)+1, v)
 		if v == a.view {
 			tabs = append(tabs, sTabActive.Render(label))
@@ -1163,10 +1448,24 @@ func (a *App) renderHeader() string {
 		}
 	}
 	summary := ""
-	if a.view == viewBoard {
+	switch {
+	case a.view == viewItem && a.item != nil:
+		var trail []string
+		for _, it := range a.itemStack {
+			trail = append(trail, sMuted.Render(fmt.Sprintf("#%d", it.ID)))
+		}
+		tabs = append(tabs, sCrumbSep.Render("▸ ")+strings.Join(trail, sCrumbSep.Render(" ▸ ")))
+		focus := "description"
+		if a.item.focusKan {
+			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
+		}
+		summary = sMuted.Render(focus)
+	case a.view == viewBoard:
 		summary = sMuted.Render(a.currentBoard().Name)
-	} else if l := a.activeList(); l != nil {
-		summary = l.summary()
+	default:
+		if l := a.activeList(); l != nil {
+			summary = l.summary()
+		}
 	}
 	line2 := pad(" "+strings.Join(tabs, "   "), a.w-lipgloss.Width(summary)-1) + summary
 	return line1 + "\n" + line2
@@ -1203,6 +1502,9 @@ func (a *App) renderBody() string {
 		listStyle = sPanelFocus
 	}
 
+	if a.view == viewItem && a.item != nil {
+		return a.item.view(a.w, h, a.spin.View())
+	}
 	if a.focusDetail && dw == 0 {
 		return detailStyle.Width(a.w - 2).Height(h - 2).Render(a.detail.View())
 	}
@@ -1255,7 +1557,13 @@ func (a *App) renderFooter() string {
 		return l.filter.View() + sMuted.Render("   enter keep · esc clear")
 	}
 	bindings := footerTree
-	if a.view == viewBoard {
+	switch {
+	case a.view == viewItem && a.item != nil:
+		bindings = footerItemDesc
+		if a.item.focusKan {
+			bindings = footerItemKanban
+		}
+	case a.view == viewBoard:
 		bindings = footerBoard
 	}
 	if a.focusDetail {

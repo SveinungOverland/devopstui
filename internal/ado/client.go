@@ -32,6 +32,8 @@ type Client interface {
 	MyItems(ctx context.Context, project string) ([]*model.WorkItem, error)
 	// Parents returns candidate parents (Epics and Features) in the project.
 	Parents(ctx context.Context, project string) ([]*model.WorkItem, error)
+	// Children returns the direct children of a work item.
+	Children(ctx context.Context, project string, parentID int) ([]*model.WorkItem, error)
 
 	Get(ctx context.Context, id int) (*model.WorkItem, error)
 	// Update applies field patches with an optimistic concurrency check on rev.

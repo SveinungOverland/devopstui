@@ -216,6 +216,9 @@ Suggested order is M0→M1→M2→M3→M4→M5→M6→M7; M5 and M6 are independ
 
 ### Status (2026-09-10)
 
+An item details view (`D`) drills into one work item: metadata, rendered Markdown description,
+and a kanban of its children by state, with child creation and state moves from inside it.
+
 M0–M6 have a first implementation: demo mode, real SDK client, sprint tree with
 selection, quick edits and the edit form, bulk moves with the children choice, re-parenting,
 dashboard and board views. Remaining from the list above: auto-refresh is wired but off by

@@ -115,6 +115,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `L` `H` | expand / collapse all | `4` | backlog | `s` | state | `p` | set parent |
 | `tab` | focus detail pane | `[` `]` | prev / next sprint | `a` | assign | | |
 | `z` | toggle preview pane | `T` | team filter | `n` | new child item | | |
+| `D` | item details view | | | | | | |
 | `/` | filter | `S` | current sprint | `E` | effort | | |
 | `space` | select | `:` | command bar | `P` | priority | | |
 | `v` | visual select | `r` | refresh | `o` | open in browser | | |
@@ -128,6 +129,41 @@ to bring its children along.
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, and `tab`
 focuses it for scrolling.
+
+## Item details view
+
+Press `D` on any item (or `enter` on a board card) to open it full screen: its metadata across
+the top, the rendered Markdown description on the left, and a kanban of its children on the
+right, one column per state.
+
+```
+ Product Backlog Item #1013  Propagate trace id through queue workers
+ In Progress · Sveinung Øverland · Sprint 42 · 8 pts · P1 · 1/3 tasks · 6h left
+ ↑ FEAT 1012 Request tracing                                    2h ago by Alex Kim
+╭─────────────────────────────────────╮╭──────────────────────────────────────────╮
+│Description                          ││Children (3)                              │
+│  Propagate trace id through queue…  ││To Do 2         In Progress 0     Done 1  │
+│                                     ││──────────────  ──────────────  ────────  │
+│  Acceptance criteria                ││▌TASK 1015 2h SØ                TASK 1016 │
+│  ▪ trace id survives the queue      ││ Add trace hea…                  Read tr… │
+╰─────────────────────────────────────╯╰──────────────────────────────────────────╯
+```
+
+| Key | |
+|-----|--|
+| `tab` | switch focus between the description and the kanban |
+| `j` `k` `h` `l` | scroll the description, or move between cards and columns |
+| `H` `L` | move the highlighted child to the neighbouring column (sets its state) |
+| `n` | add a child; on a highlighted child it adds a sibling |
+| `D` `enter` | drill into the highlighted child |
+| `esc` `q` | walk back out, one level at a time |
+| `z` | give the description the full width |
+| `r` | re-fetch the children |
+
+Every action key works here too and applies to whatever has focus: the item itself while the
+description is focused, otherwise the highlighted child. So `s` sets a child's state, `d` edits
+the item's description, `a` assigns, and so on. Children are fetched for the item you open, so
+the kanban is complete even in views that do not load tasks, such as the backlog.
 
 ## Team filter
 
