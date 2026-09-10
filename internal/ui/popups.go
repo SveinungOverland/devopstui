@@ -351,7 +351,7 @@ type cmdbar struct {
 func newCmdbar() cmdbar {
 	in := textinput.New()
 	in.Prompt = ":"
-	in.SetSuggestions([]string{"sprint", "team", "filter", "project", "board", "backlog", "dash", "refresh", "quit"})
+	in.SetSuggestions([]string{"sprint", "team", "filter", "project", "board", "backlog", "dash", "refresh", "auto", "quit"})
 	in.ShowSuggestions = true
 	return cmdbar{input: in}
 }

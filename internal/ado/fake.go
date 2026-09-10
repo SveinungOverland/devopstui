@@ -65,7 +65,7 @@ func NewFake() *Fake {
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
 			Description: demoDescription(id, title),
-			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+			URL:         fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
 		}
 	}
 	add(1001, 0, "Epic", "Self-service onboarding", "In Progress", "Alex Kim", backlog, 0, 1)

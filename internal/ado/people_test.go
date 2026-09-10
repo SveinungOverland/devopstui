@@ -27,10 +27,10 @@ func TestMatchPeople(t *testing.T) {
 		want  []string
 	}{
 		{"", []string{"Alex Kim", "Kari Nordmann", "Ola Nordmann", "Sveinung Øverland"}},
-		{"nord", []string{"Kari Nordmann", "Ola Nordmann"}},   // substring of both
-		{"kari", []string{"Kari Nordmann"}},                   // name prefix
-		{"ola.nord", []string{"Ola Nordmann"}},                // address prefix
-		{"kari nord", []string{"Kari Nordmann"}},              // all words must match
+		{"nord", []string{"Kari Nordmann", "Ola Nordmann"}}, // substring of both
+		{"kari", []string{"Kari Nordmann"}},                 // name prefix
+		{"ola.nord", []string{"Ola Nordmann"}},              // address prefix
+		{"kari nord", []string{"Kari Nordmann"}},            // all words must match
 		{"contoso", []string{"Alex Kim", "Kari Nordmann", "Ola Nordmann", "Sveinung Øverland"}},
 		{"nobody", nil},
 	}

@@ -317,7 +317,7 @@ func TestViewsAndPopups(t *testing.T) {
 	if !strings.Contains(h.app.View(), "Accept invite and create account.") {
 		t.Error("preview should follow the cursor after toggling back on")
 	}
-	h.keys("h") // back to the first column
+	h.keys("h")      // back to the first column
 	h.keys("l", "L") // move column right: single write, no confirm
 	if len(h.fake.Updates) != 1 || h.fake.Updates[0].Patches[0].Value != "Committed" {
 		t.Fatalf("column move updates = %+v", h.fake.Updates)

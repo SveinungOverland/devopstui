@@ -15,12 +15,12 @@ import (
 // form is the full edit view for one item. It lists fields; enter opens the
 // matching editor for the highlighted field, ctrl+s saves all changes.
 type form struct {
-	app     *App
-	item    *model.WorkItem
-	fields  []formField
-	cursor  int
-	values  map[string]any // pending changes by field ref
-	child   popup
+	app    *App
+	item   *model.WorkItem
+	fields []formField
+	cursor int
+	values map[string]any // pending changes by field ref
+	child  popup
 	onSave func(patches []model.Patch) tea.Cmd
 	states []string
 	iters  []model.Iteration

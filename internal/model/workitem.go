@@ -39,26 +39,26 @@ func (k Kind) Tag() string {
 
 // WorkItem is the subset of an Azure DevOps work item the TUI cares about.
 type WorkItem struct {
-	ID            int
-	Rev           int
-	Type          string // raw System.WorkItemType
-	Kind          Kind
+	ID               int
+	Rev              int
+	Type             string // raw System.WorkItemType
+	Kind             Kind
 	Title            string
 	State            string
 	AssignedTo       string // display name, "" when unassigned
 	AssignedToUnique string // sign-in address of the assignee, when known
-	IterationPath string
-	AreaPath      string
-	BoardColumn   string
-	Effort        float64 // Effort / Story Points, 0 when unset
-	RemainingWork float64 // hours, tasks only
-	Priority      int     // 0 when unset
-	Tags          []string
-	Description   string // plain text
-	ParentID      int    // 0 when no parent
-	ChangedDate   time.Time
-	ChangedBy     string
-	URL           string // browser URL
+	IterationPath    string
+	AreaPath         string
+	BoardColumn      string
+	Effort           float64 // Effort / Story Points, 0 when unset
+	RemainingWork    float64 // hours, tasks only
+	Priority         int     // 0 when unset
+	Tags             []string
+	Description      string // plain text
+	ParentID         int    // 0 when no parent
+	ChangedDate      time.Time
+	ChangedBy        string
+	URL              string // browser URL
 }
 
 // Assignee returns a display value for the assignee column.

@@ -6,21 +6,22 @@ import "github.com/charmbracelet/bubbles/key"
 // vim-style mnemonics: the key is the first letter of the action word.
 type keymap struct {
 	// navigation
-	Up, Down, Top, Bottom, PageUp, PageDown key.Binding
+	Up, Down, Top, Bottom, PageUp, PageDown  key.Binding
 	Collapse, Expand, CollapseAll, ExpandAll key.Binding
-	Focus, Preview, Details                 key.Binding
+	Focus, Preview, Details                  key.Binding
 	// views
 	Dashboard, Sprint, Board, Backlog key.Binding
 	PrevSprint, NextSprint, CurSprint key.Binding
 	TeamFilter                        key.Binding
 	Command, Filter, Help, Refresh    key.Binding
+	AutoRefresh                       key.Binding
 	Back, Quit                        key.Binding
 	// selection
 	Select, Visual, SelectAll, ClearSel key.Binding
 	// actions
 	Edit, Title, Desc, State, Assign, Iteration, Effort, Priority, New key.Binding
-	Move, MoveNext, MoveBacklog, Parent                    key.Binding
-	Open, Yank, Flat, Closed                               key.Binding
+	Move, MoveNext, MoveBacklog, Parent                                key.Binding
+	Open, Yank, Flat, Closed                                           key.Binding
 	// board
 	Left, Right, ColLeft, ColRight key.Binding
 }
@@ -44,20 +45,21 @@ var keys = keymap{
 	Preview:     b("toggle preview", "z"),
 	Details:     b("details", "D"),
 
-	Dashboard:  b("dashboard", "1"),
-	Sprint:     b("sprint", "2"),
-	Board:      b("board", "3"),
-	Backlog:    b("backlog", "4"),
-	PrevSprint: b("prev sprint", "["),
-	NextSprint: b("next sprint", "]"),
-	CurSprint:  b("current sprint", "S"),
-	TeamFilter: b("team filter", "T"),
-	Command:    b("command", ":"),
-	Filter:     b("filter", "/"),
-	Help:       b("help", "?"),
-	Refresh:    b("refresh", "r"),
-	Back:       b("back", "esc"),
-	Quit:       b("quit", "q", "ctrl+c"),
+	Dashboard:   b("dashboard", "1"),
+	Sprint:      b("sprint", "2"),
+	Board:       b("board", "3"),
+	Backlog:     b("backlog", "4"),
+	PrevSprint:  b("prev sprint", "["),
+	NextSprint:  b("next sprint", "]"),
+	CurSprint:   b("current sprint", "S"),
+	TeamFilter:  b("team filter", "T"),
+	Command:     b("command", ":"),
+	Filter:      b("filter", "/"),
+	Help:        b("help", "?"),
+	Refresh:     b("refresh", "r"),
+	AutoRefresh: b("auto refresh", "R"),
+	Back:        b("back", "esc"),
+	Quit:        b("quit", "q", "ctrl+c"),
 
 	Select:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select")),
 	Visual:    b("visual select", "v"),
@@ -93,7 +95,7 @@ var keys = keymap{
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.Details},
-	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh},
+	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},

@@ -62,7 +62,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `project`, `team` | | Starting context, rewritten on change. `team` owns the sprints. |
 | `filter_team` | | Show only this team's area paths in every view (`T` at runtime) |
 | `confirm_writes` | `false` | Ask before single-item edits too (bulk and re-parent always ask) |
-| `refresh_seconds` | `0` | Auto-reload interval, 0 = off |
+| `refresh_seconds` | `0` | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets) |
 | `editor` | | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save) |
 
@@ -122,7 +122,8 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `/` | filter | `S` | current sprint | `E` | effort | | |
 | `space` | select | `:` | command bar | `P` | priority | | |
 | `v` | visual select | `r` | refresh | `o` | open in browser | | |
-| `ctrl+a` | select all | `f` | flat / tree | `y` | yank id | | |
+| `ctrl+a` | select all | `R` | auto refresh on/off | `y` | yank id | | |
+| | | `f` | flat / tree | | | | |
 | `esc` | clear selection | `c` | show closed | `?` `q` | help / quit | | |
 
 Any change key acts on the **selection** when there is one, otherwise on the highlighted
@@ -207,7 +208,12 @@ choice is saved as `filter_team` in the config.
   inherited above the task level: a Feature does not pick up its Epic's assignee.
 - On the dashboard, task rows show their parent PBI after the title.
 
-Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
+`R` toggles auto refresh and saves the choice to your config, so it survives a restart. The
+header shows `↻60s` while it is on, and the interval is whatever `refresh_seconds` holds, 60
+seconds by default. `:auto 30` sets a different interval. Reloads are skipped while a dialog
+is open or a write is in flight, so nothing shifts under you mid-edit.
+
+Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
 
 ## Develop

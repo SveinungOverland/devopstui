@@ -24,15 +24,15 @@ func TestFromHTML(t *testing.T) {
 
 func TestLooksLikeHTML(t *testing.T) {
 	cases := map[string]bool{
-		"<div>hi</div>":                 true,
-		"<p>x</p><br/>":                 true,
-		"line<br>break":                 true,
-		"# Title\n\ntext":               false,
-		"a < b and c > d":               false,
-		"generic List<string> in code":  false,
-		"":                              false,
-		"<a href=\"x\">link</a>":        true,
-		"**bold** with <sup>1</sup>":    false, // unknown tag → treated as markdown
+		"<div>hi</div>":                true,
+		"<p>x</p><br/>":                true,
+		"line<br>break":                true,
+		"# Title\n\ntext":              false,
+		"a < b and c > d":              false,
+		"generic List<string> in code": false,
+		"":                             false,
+		"<a href=\"x\">link</a>":       true,
+		"**bold** with <sup>1</sup>":   false, // unknown tag → treated as markdown
 	}
 	for in, want := range cases {
 		if got := LooksLikeHTML(in); got != want {

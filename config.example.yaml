@@ -42,6 +42,8 @@ team: Team Blue
 confirm_writes: false
 
 # Reload the active view every N seconds. 0 disables auto refresh.
+# Toggle at runtime with R, or set an interval with :auto 30 — either way
+# the value is written back here.
 refresh_seconds: 0
 
 # Editor for descriptions. Leave empty to use $VISUAL, then $EDITOR,

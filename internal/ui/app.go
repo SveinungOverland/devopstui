@@ -63,13 +63,13 @@ type App struct {
 	board                 *board
 	// item is the drill-down view; itemStack keeps the trail so esc walks
 	// back out, and itemReturn is the tab to land on at the bottom.
-	item       *itemView
-	itemStack  []*model.WorkItem
-	itemReturn viewID
-	detail                viewport.Model
-	focusDetail           bool
-	previewList           bool // detail pane beside list views
-	previewBoard          bool // detail pane beside the board
+	item         *itemView
+	itemStack    []*model.WorkItem
+	itemReturn   viewID
+	detail       viewport.Model
+	focusDetail  bool
+	previewList  bool // detail pane beside list views
+	previewBoard bool // detail pane beside the board
 
 	popup     popup
 	cmd       cmdbar
@@ -80,6 +80,10 @@ type App struct {
 	busy     string // label for an in-flight write
 	lastLoad time.Time
 	gen      int
+	// refreshGen identifies the live auto-refresh timer chain;
+	// refreshEvery remembers the interval across an off/on toggle.
+	refreshGen   int
+	refreshEvery int
 
 	flash    string
 	flashErr bool
@@ -113,6 +117,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	a.ctx.Project = cfg.Project
 	a.ctx.Team = cfg.Team
 	a.ctx.FilterTeam = cfg.FilterTeam
+	a.refreshEvery = cfg.RefreshSeconds
 	return a
 }
 
@@ -239,20 +244,63 @@ type popupMsg struct{ p popup }
 type errMsg struct{ err error }
 type flashMsg struct{ text string }
 type clearFlashMsg struct{}
-type tickMsg struct{}
+
+// tickMsg drives auto refresh. gen identifies the timer chain that
+// produced it, so a toggle never leaves two chains running.
+type tickMsg struct{ gen int }
+
+// defaultRefreshSeconds is the interval used when auto refresh is turned
+// on without one configured.
+const defaultRefreshSeconds = 60
 
 // ------------------------------------------------------------ init
 
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{a.spin.Tick, a.loadContext()}
 	if a.cfg.RefreshSeconds > 0 {
-		cmds = append(cmds, tick(a.cfg.RefreshSeconds))
+		cmds = append(cmds, a.startTicking())
 	}
 	return tea.Batch(cmds...)
 }
 
-func tick(sec int) tea.Cmd {
-	return tea.Tick(time.Duration(sec)*time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+// startTicking begins a new timer chain and abandons any previous one.
+func (a *App) startTicking() tea.Cmd {
+	a.refreshGen++
+	return tick(a.refreshGen, a.cfg.RefreshSeconds)
+}
+
+func tick(gen, sec int) tea.Cmd {
+	if sec <= 0 {
+		return nil
+	}
+	return tea.Tick(time.Duration(sec)*time.Second, func(time.Time) tea.Msg { return tickMsg{gen: gen} })
+}
+
+// toggleAutoRefresh turns auto refresh on or off and remembers the choice
+// in the config file. The interval is whatever was last configured.
+func (a *App) toggleAutoRefresh() tea.Cmd {
+	if a.cfg.RefreshSeconds > 0 {
+		return a.setAutoRefresh(0)
+	}
+	every := a.refreshEvery
+	if every <= 0 {
+		every = defaultRefreshSeconds
+	}
+	return a.setAutoRefresh(every)
+}
+
+// setAutoRefresh sets the interval in seconds; 0 turns it off.
+func (a *App) setAutoRefresh(sec int) tea.Cmd {
+	if sec > 0 {
+		a.refreshEvery = sec
+	}
+	a.cfg.RefreshSeconds = sec
+	a.persist()
+	if sec == 0 {
+		a.refreshGen++ // orphan the running chain
+		return a.setFlash("auto refresh off", false)
+	}
+	return tea.Batch(a.startTicking(), a.setFlash(fmt.Sprintf("auto refresh every %ds", sec), false))
 }
 
 func (a *App) loadContext() tea.Cmd {
@@ -355,7 +403,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case tickMsg:
-		return a, tea.Batch(a.loadView(a.view), tick(a.cfg.RefreshSeconds))
+		if msg.gen != a.refreshGen || a.cfg.RefreshSeconds <= 0 {
+			return a, nil // a stale chain, or auto refresh was turned off
+		}
+		next := tick(msg.gen, a.cfg.RefreshSeconds)
+		if a.busy != "" || a.popup != nil || a.cmdActive {
+			return a, next // never reload under an open dialog or a write
+		}
+		return a, tea.Batch(a.loadView(a.view), next)
 
 	case contextLoadedMsg:
 		return a, a.onContextLoaded(msg)
@@ -661,6 +716,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.cmd.input.Focus()
 	case key.Matches(msg, keys.Refresh):
 		return a.loadView(a.view)
+	case key.Matches(msg, keys.AutoRefresh):
+		return a.toggleAutoRefresh()
 	case key.Matches(msg, keys.Dashboard):
 		return a.switchView(viewDash)
 	case key.Matches(msg, keys.Sprint):
@@ -854,6 +911,24 @@ func (a *App) runCommand(c string) tea.Cmd {
 		return a.switchView(viewDash)
 	case "refresh", "r":
 		return a.reloadAll()
+	case "auto":
+		switch arg {
+		case "":
+			return a.toggleAutoRefresh()
+		case "off", "0":
+			return a.setAutoRefresh(0)
+		case "on":
+			every := a.refreshEvery
+			if every <= 0 {
+				every = defaultRefreshSeconds
+			}
+			return a.setAutoRefresh(every)
+		}
+		sec, err := strconv.Atoi(arg)
+		if err != nil || sec < 5 {
+			return a.setFlash("auto: give a number of seconds (5 or more), on, or off", true)
+		}
+		return a.setAutoRefresh(sec)
 	case "help", "h":
 		a.popup = helpPopup{}
 		return nil
@@ -1432,6 +1507,9 @@ func (a *App) renderHeader() string {
 		right = a.spin.View() + " loading"
 	} else if !a.lastLoad.IsZero() {
 		right = sMuted.Render("⟳ " + ago(a.lastLoad))
+	}
+	if a.cfg.RefreshSeconds > 0 {
+		right += sOK.Render(fmt.Sprintf(" ↻%ds", a.cfg.RefreshSeconds))
 	}
 	if a.me != "" {
 		right = sMuted.Render(a.me+"  ") + right
