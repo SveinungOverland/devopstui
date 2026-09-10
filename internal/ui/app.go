@@ -262,6 +262,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.popup = msg.p
 		return a, nil
 
+	case editorDoneMsg:
+		if msg.err != nil {
+			return a, a.setFlash("editor: "+msg.err.Error(), true)
+		}
+		if !msg.changed {
+			return a, a.setFlash("description unchanged", false)
+		}
+		return a, msg.apply(msg.text)
+
 	case errMsg:
 		a.busy = ""
 		return a, a.setFlash(msg.err.Error(), true)

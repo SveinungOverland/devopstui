@@ -37,6 +37,13 @@ func (a *App) onActionKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return a.update(cur, model.Patch{Field: model.FieldTitle, Value: v})
 		})
+	case key.Matches(msg, keys.Desc):
+		if len(targets) > 1 {
+			return a.setFlash("description works on one item", true)
+		}
+		return a.editDescription(cur, func(v string) tea.Cmd {
+			return a.update(cur, model.Patch{Field: model.FieldDescription, Value: v})
+		})
 	case key.Matches(msg, keys.State):
 		return a.pickState(targets)
 	case key.Matches(msg, keys.Assign):

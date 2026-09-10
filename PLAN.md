@@ -250,5 +250,5 @@ a real organisation (M7 and the integration test).
 |----------|---------|
 | Should moving a Feature also move its child PBIs by default? | Ask via "include children" toggle in the confirm popup, default **on**. |
 | Should closed items show in the sprint tree? | Hidden by default, `c` toggles. |
-| Description editing: plain text or Markdown→HTML? | Plain text in v1, written as `<div>` with line breaks. |
+| Description editing: plain text or Markdown→HTML? | **Decided:** Markdown throughout. HTML→Markdown on read (`html-to-markdown`), Glamour rendering in the detail pane, Markdown→HTML on write (`goldmark`). Editing via `$EDITOR` on a temp file, with a built-in split editor + preview as fallback. |
 | Should the dashboard span all projects or the current one? | Current project; `:dash all` later. |

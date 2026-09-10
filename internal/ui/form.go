@@ -14,6 +14,7 @@ import (
 // form is the full edit view for one item. It lists fields; enter opens the
 // matching editor for the highlighted field, ctrl+s saves all changes.
 type form struct {
+	app     *App
 	item    *model.WorkItem
 	fields  []formField
 	cursor  int
@@ -54,7 +55,7 @@ func (a *App) openForm(it *model.WorkItem) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		f := &form{item: it, fields: formFields, values: map[string]any{}, states: states, members: members, iters: iters}
+		f := &form{app: a, item: it, fields: formFields, values: map[string]any{}, states: states, members: members, iters: iters}
 		f.onSave = func(patches []model.Patch) tea.Cmd {
 			if len(patches) == 0 {
 				return a.setFlash("no changes", false)
@@ -122,12 +123,12 @@ func (f *form) Update(msg tea.Msg) (popup, tea.Cmd) {
 			f.cursor--
 		}
 	case "enter", "l", "e":
-		f.openEditor()
+		return f, f.openEditor()
 	}
 	return f, nil
 }
 
-func (f *form) openEditor() {
+func (f *form) openEditor() (cmd tea.Cmd) {
 	fld := f.fields[f.cursor]
 	cur := f.currentValue(fld.ref)
 	set := func(ref string, v any) tea.Cmd {
@@ -175,8 +176,19 @@ func (f *form) openEditor() {
 			return set(fld.ref, n)
 		})
 	case model.FieldDescription:
-		f.child = newEditor("Description", cur, func(v string) tea.Cmd { return set(fld.ref, v) })
+		// Uses the same path as the `d` key: external editor when configured,
+		// built-in editor otherwise. The result lands in the pending values.
+		item := *f.item
+		item.Description = cur
+		cmd = f.app.editDescription(&item, func(v string) tea.Cmd { return set(fld.ref, v) })
+		if p := f.app.popup; p != f {
+			// editDescription opened the built-in editor as the top-level
+			// popup; re-home it as our child so the form stays visible.
+			f.app.popup = f
+			f.child = p
+		}
 	}
+	return cmd
 }
 
 func (f *form) View(w, h int) string {
@@ -186,7 +198,11 @@ func (f *form) View(w, h int) string {
 	for i, fld := range f.fields {
 		val := f.currentValue(fld.ref)
 		if fld.ref == model.FieldDescription {
+			lines := strings.Count(val, "\n") + 1
 			val = strings.ReplaceAll(val, "\n", " ")
+			if val != "" {
+				val = fmt.Sprintf("%s  %s", trunc(val, width-28), sMuted.Render(fmt.Sprintf("(%d lines)", lines)))
+			}
 		}
 		val = trunc(val, width-16)
 		if _, changed := f.values[fld.ref]; changed {
@@ -200,7 +216,7 @@ func (f *form) View(w, h int) string {
 		}
 		b.WriteString(line + "\n")
 	}
-	b.WriteString("\n" + sMuted.Render("enter edit field · ctrl+s save · esc cancel"))
+	b.WriteString("\n" + sKey.Render("enter") + sMuted.Render(" edit field  ") + sKey.Render("ctrl+s") + sMuted.Render(" save  ") + sKey.Render("esc") + sMuted.Render(" cancel"))
 	out := sPopup.Width(width).Render(b.String())
 	if f.child != nil {
 		out = overlay(out, f.child.View(w, h), width+2, strings.Count(out, "\n")+1)

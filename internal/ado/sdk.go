@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/work"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/workitemtracking"
 
+	"github.com/sveinungoverland/devopstui/internal/markdown"
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
@@ -340,7 +340,13 @@ func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 func (s *SDK) Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error) {
 	doc := []webapi.JsonPatchOperation{{Op: &webapi.OperationValues.Test, Path: ptr("/rev"), Value: rev}}
 	for _, p := range patches {
-		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + p.Field), Value: p.Value})
+		val := p.Value
+		if p.Field == model.FieldDescription {
+			if s, ok := val.(string); ok {
+				val = markdown.ToHTML(s)
+			}
+		}
+		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + p.Field), Value: val})
 	}
 	wi, err := s.wit.UpdateWorkItem(ctx, workitemtracking.UpdateWorkItemArgs{Id: &id, Document: &doc})
 	if err != nil {
@@ -378,8 +384,6 @@ func (s *SDK) SetParent(ctx context.Context, id, parentID int) (*model.WorkItem,
 	return s.convert(upd, ""), nil
 }
 
-var htmlTag = regexp.MustCompile(`<[^>]*>`)
-
 func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.WorkItem {
 	f := map[string]any{}
 	if wi.Fields != nil {
@@ -411,7 +415,7 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 			m.Tags = append(m.Tags, strings.TrimSpace(t))
 		}
 	}
-	m.Description = htmlToText(str(f[model.FieldDescription]))
+	m.Description = markdown.FromHTML(str(f[model.FieldDescription]))
 	proj := project
 	if proj == "" {
 		proj = str(f["System.TeamProject"])
@@ -421,16 +425,6 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	}
 	m.URL = fmt.Sprintf("%s/%s/_workitems/edit/%d", s.orgURL, proj, m.ID)
 	return m
-}
-
-func htmlToText(h string) string {
-	if h == "" {
-		return ""
-	}
-	r := strings.NewReplacer("<br>", "\n", "<br/>", "\n", "<br />", "\n", "</p>", "\n", "</div>", "\n", "</li>", "\n", "<li>", "- ",
-		"&nbsp;", " ", "&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", "\"")
-	t := htmlTag.ReplaceAllString(r.Replace(h), "")
-	return strings.TrimSpace(t)
 }
 
 func identity(v any) string {

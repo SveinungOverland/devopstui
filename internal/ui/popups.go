@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -202,44 +201,6 @@ func (p *prompt) View(w, h int) string {
 	width := min(max(w-10, 30), 80)
 	p.input.Width = width - 6
 	return sPopup.Width(width).Render(sTitle.Render(p.title) + "\n" + p.input.View() + "\n" + sMuted.Render("enter save · esc cancel"))
-}
-
-// ---------------------------------------------------------------- editor
-
-// editor is a multi-line text area (descriptions).
-type editor struct {
-	title    string
-	area     textarea.Model
-	onSubmit func(string) tea.Cmd
-}
-
-func newEditor(title, initial string, onSubmit func(string) tea.Cmd) *editor {
-	ta := textarea.New()
-	ta.SetValue(initial)
-	ta.Focus()
-	ta.ShowLineNumbers = false
-	return &editor{title: title, area: ta, onSubmit: onSubmit}
-}
-
-func (e *editor) Update(msg tea.Msg) (popup, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok {
-		switch km.String() {
-		case "esc":
-			return nil, nil
-		case "ctrl+s":
-			return nil, e.onSubmit(e.area.Value())
-		}
-	}
-	var cmd tea.Cmd
-	e.area, cmd = e.area.Update(msg)
-	return e, cmd
-}
-
-func (e *editor) View(w, h int) string {
-	width := min(max(w-10, 40), 100)
-	e.area.SetWidth(width - 4)
-	e.area.SetHeight(min(max(h-10, 5), 25))
-	return sPopup.Width(width).Render(sTitle.Render(e.title) + "\n" + e.area.View() + "\n" + sMuted.Render("ctrl+s save · esc cancel"))
 }
 
 // ---------------------------------------------------------------- help

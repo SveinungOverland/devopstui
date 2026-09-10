@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sveinungoverland/devopstui/internal/markdown"
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
@@ -47,7 +48,7 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children int, widt
 	row("Updated", ago(it.ChangedDate)+sMuted.Render("  by "+it.ChangedBy))
 	if it.Description != "" {
 		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", min(width, 40))) + "\n")
-		b.WriteString(wrap(it.Description, width))
+		b.WriteString(markdown.Render(it.Description, width))
 	}
 	return b.String()
 }

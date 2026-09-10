@@ -17,7 +17,7 @@ type keymap struct {
 	// selection
 	Select, Visual, SelectAll, ClearSel key.Binding
 	// actions
-	Edit, Title, State, Assign, Iteration, Effort, Priority key.Binding
+	Edit, Title, Desc, State, Assign, Iteration, Effort, Priority key.Binding
 	Move, MoveNext, MoveBacklog, Parent                    key.Binding
 	Open, Yank, Flat, Closed                               key.Binding
 	// board
@@ -62,6 +62,7 @@ var keys = keymap{
 
 	Edit:      b("edit", "e"),
 	Title:     b("title", "t"),
+	Desc:      b("description", "d"),
 	State:     b("state", "s"),
 	Assign:    b("assign", "a"),
 	Iteration: b("iteration", "i"),
@@ -89,10 +90,10 @@ var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus},
 	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.Command, keys.Filter, keys.Refresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
-	{keys.Edit, keys.Title, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
+	{keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
 	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Help, keys.Quit},
 }
 
-var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Edit, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.Command, keys.Help}
+var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.Command, keys.Help}
 var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Edit, keys.State, keys.Move, keys.Command, keys.Help}

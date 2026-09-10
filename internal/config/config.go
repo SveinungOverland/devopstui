@@ -20,6 +20,23 @@ type Config struct {
 	ConfirmWrites *bool `yaml:"confirm_writes,omitempty"`
 	// RefreshSeconds enables auto refresh when > 0.
 	RefreshSeconds int `yaml:"refresh_seconds,omitempty"`
+	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
+	// then the built-in editor. "inline" forces the built-in one.
+	Editor string `yaml:"editor,omitempty"`
+}
+
+// EditorCommand returns the external editor to use, or "" for the built-in.
+func (c Config) EditorCommand() string {
+	switch {
+	case c.Editor == "inline":
+		return ""
+	case c.Editor != "":
+		return c.Editor
+	case os.Getenv("VISUAL") != "":
+		return os.Getenv("VISUAL")
+	default:
+		return os.Getenv("EDITOR")
+	}
 }
 
 // Confirm returns whether single-item writes need confirmation.

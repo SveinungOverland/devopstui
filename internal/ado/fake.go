@@ -58,7 +58,7 @@ func NewFake() *Fake {
 			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
-			Description: "Demo description for " + title + ".\n\nAcceptance criteria:\n- it works\n- it is tested",
+			Description: demoDescription(id, title),
 			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
 		}
 	}
@@ -81,6 +81,45 @@ func NewFake() *Fake {
 	add(1022, 0, "Bug", "Login page flickers on Safari", "New", "Priya Natarajan", cur, 1, 2)
 	f.nextID = 2000
 	return f
+}
+
+// demoDescription returns Markdown so the renderer has something to show.
+func demoDescription(id int, title string) string {
+	switch id % 3 {
+	case 0:
+		return fmt.Sprintf(`## Goal
+
+%s so that users get value **quickly** and *safely*.
+
+### Acceptance criteria
+
+- [ ] Happy path works end to end
+- [ ] Errors are surfaced in the UI
+- [x] Telemetry event emitted
+
+See [the design doc](https://example.com/design) for details.`, title)
+	case 1:
+		return fmt.Sprintf(`%s.
+
+> Context: raised during sprint review; customers hit this weekly.
+
+Steps to reproduce:
+
+1. Open the invite page
+2. Click **Send**
+3. Observe the log line:
+
+`+"```"+`
+level=error msg="token expired" id=%d
+`+"```"+`
+
+| Env | Reproduces |
+|-----|------------|
+| dev | yes |
+| prod | sometimes |`, title, id)
+	default:
+		return fmt.Sprintf("%s.\n\nSmall change, no acceptance criteria beyond `go test ./...` passing.", title)
+	}
 }
 
 // KindOf maps a work item type name to a Kind.

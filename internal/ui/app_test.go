@@ -13,6 +13,7 @@ import (
 
 	"github.com/sveinungoverland/devopstui/internal/ado"
 	"github.com/sveinungoverland/devopstui/internal/config"
+	"github.com/sveinungoverland/devopstui/internal/markdown"
 )
 
 // harness runs commands synchronously so flows can be asserted without a
@@ -27,6 +28,9 @@ type harness struct {
 func newHarness(t *testing.T, w, h int) *harness {
 	t.Helper()
 	lipgloss.SetColorProfile(termenv.Ascii) // no escape codes in dumps
+	markdown.Style = "ascii"
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
 	f := ado.NewFake()
 	f.Latency = 0
 	cfg := config.Config{Org: "https://dev.azure.com/demo", Project: "Platform", Team: "Team Blue"}
@@ -242,6 +246,169 @@ func TestViewsAndPopups(t *testing.T) {
 	h.dump("14-filter")
 	if n := len(h.app.sprint.rows); n == 0 || n > 6 {
 		t.Errorf("filter rows = %d", n)
+	}
+}
+
+func TestDescriptionInlineEditor(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1003)
+	h.app.refreshDetail()
+	h.dump("20-detail-markdown")
+	if v := h.app.View(); !strings.Contains(v, "Steps to reproduce") || !strings.Contains(v, "token expired") {
+		t.Fatal("rendered markdown missing from detail pane")
+	}
+	h.keys("d")
+	ed, ok := h.app.popup.(*mdEditor)
+	if !ok {
+		t.Fatalf("expected built-in editor, got %T", h.app.popup)
+	}
+	h.dump("17-desc-editor")
+	if !ed.showPrev || !strings.Contains(h.app.View(), "ctrl+p") {
+		t.Error("preview should be on by default")
+	}
+	h.keys("ctrl+p")
+	h.dump("18-desc-editor-noprev")
+	h.keys("q")
+	if h.app.popup != nil || len(h.fake.Updates) != 0 {
+		t.Fatal("q must close without saving")
+	}
+	// Typing in normal mode must not change the text.
+	h.keys("d", "x", "y", "z")
+	if ed := h.app.popup.(*mdEditor); ed.changed() {
+		t.Fatal("normal mode must not insert text")
+	}
+	// Enter insert mode, prepend a line, back to normal, save.
+	h.keys("i", "N", "e", "w", " ", "l", "i", "n", "e", "enter", "esc")
+	if ed := h.app.popup.(*mdEditor); ed.insert {
+		t.Fatal("esc should leave insert mode")
+	}
+	h.dump("21-desc-editor-modified")
+	h.keys("ctrl+s")
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].Patches[0].Field != "System.Description" {
+		t.Fatalf("updates = %+v", h.fake.Updates)
+	}
+	if v := h.fake.Updates[0].Patches[0].Value.(string); !strings.HasPrefix(v, "New line\n") {
+		t.Fatalf("description = %q", v)
+	}
+	if it := h.app.lookup(1003); !strings.HasPrefix(it.Description, "New line") {
+		t.Fatal("local item not updated")
+	}
+}
+
+func TestEditorCheckboxToggle(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1002) // template with "- [ ] Happy path" on line 7
+	h.keys("d")
+	ed := h.app.popup.(*mdEditor)
+	h.keys("j", "j", "j", "j", "j", "j")
+	if ed.area.Line() != 6 {
+		t.Fatalf("line = %d, want 6 (j must move by logical line)", ed.area.Line())
+	}
+	h.keys("space", "j", "j", "space") // tick first, untick third ([x] -> [ ])
+	v := ed.area.Value()
+	if !strings.Contains(v, "- [x] Happy path") || !strings.Contains(v, "- [ ] Telemetry") {
+		t.Fatalf("checkboxes not toggled:\n%s", v)
+	}
+	h.keys("k", "k", "k", "k", "k", "k", "k", "k") // back to the heading line
+	h.keys("space")
+	if ed.area.Line() != 0 || strings.Contains(ed.area.Value(), "[ ] ## Goal") {
+		t.Fatal("space on a non-list line must do nothing")
+	}
+	// Unsaved changes: first q warns, second q discards.
+	h.keys("q")
+	if h.app.popup == nil || !ed.quitArm {
+		t.Fatal("first q should warn about unsaved changes")
+	}
+	h.dump("22-desc-editor-quit-warn")
+	h.keys("q")
+	if h.app.popup != nil || len(h.fake.Updates) != 0 {
+		t.Fatal("second q should discard")
+	}
+	// Do it again and save this time.
+	h.keys("d", "j", "j", "j", "j", "j", "j", "space", "ctrl+s")
+	if len(h.fake.Updates) != 1 || !strings.Contains(h.fake.Updates[0].Patches[0].Value.(string), "- [x] Happy path") {
+		t.Fatalf("updates = %+v", h.fake.Updates)
+	}
+}
+
+func TestEditorLineOps(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1002) // "## Goal", "", "<text>", "", "### Acceptance criteria", "", "- [ ] Happy…", …
+	h.keys("d")
+	ed := h.app.popup.(*mdEditor)
+	before := strings.Split(ed.area.Value(), "\n")
+
+	// yy on line 1, p pastes it below and moves the cursor onto the copy.
+	h.keys("y", "y", "p")
+	got := strings.Split(ed.area.Value(), "\n")
+	if len(got) != len(before)+1 || got[1] != "## Goal" || ed.area.Line() != 1 {
+		t.Fatalf("yy/p: line=%d got=%q", ed.area.Line(), got[:3])
+	}
+	// dd removes the copy again; buffer is back to the original.
+	h.keys("d", "d")
+	if ed.area.Value() != strings.Join(before, "\n") || ed.register != "## Goal" {
+		t.Fatalf("dd: value differs or register=%q", ed.register)
+	}
+	// P pastes above the current line (cursor is on line 1 after dd, so j j → 3).
+	h.keys("j", "j", "P")
+	got = strings.Split(ed.area.Value(), "\n")
+	if got[3] != "## Goal" || ed.area.Line() != 3 {
+		t.Fatalf("P: line=%d got=%q", ed.area.Line(), got[:4])
+	}
+	// A pending d followed by something else cancels, and is not typed.
+	h.keys("d", "j")
+	if strings.Contains(ed.area.Value(), "j") && strings.Count(ed.area.Value(), "\n") != len(got)-1 {
+		t.Fatal("cancelled command changed the buffer")
+	}
+	if ed.pending != "" {
+		t.Fatal("pending should clear")
+	}
+	// dd on every line leaves a single empty line, never panics.
+	for i := 0; i < len(got)+2; i++ {
+		h.keys("d", "d")
+	}
+	if ed.area.Value() != "" {
+		t.Fatalf("expected empty buffer, got %q", ed.area.Value())
+	}
+	h.keys("p")
+	if ed.area.Value() != "\n"+ed.register {
+		t.Fatalf("paste into empty buffer = %q", ed.area.Value())
+	}
+}
+
+func TestFormDescriptionUsesEditor(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1004)
+	h.keys("e", "G") // G is not bound in the form; move to last field with j
+	h.keys("j", "j", "j", "j", "j", "j", "enter")
+	f, ok := h.app.popup.(*form)
+	if !ok {
+		t.Fatalf("expected form, got %T", h.app.popup)
+	}
+	if _, ok := f.child.(*mdEditor); !ok {
+		t.Fatalf("expected editor child, got %T", f.child)
+	}
+	h.dump("19-form-desc-editor")
+	h.keys("i", "X", "esc", "ctrl+s")
+	if v, ok := f.values["System.Description"].(string); !ok || !strings.HasPrefix(v, "X") {
+		t.Fatalf("form value = %v", f.values["System.Description"])
+	}
+	h.keys("ctrl+s")
+	if len(h.fake.Updates) != 1 {
+		t.Fatalf("updates = %+v", h.fake.Updates)
+	}
+}
+
+func TestExternalEditorSelection(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	t.Setenv("EDITOR", "true")
+	h.app.sprint.jumpTo(1003)
+	cmd := h.app.onKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if h.app.popup != nil {
+		t.Fatalf("external editor should not open a popup, got %T", h.app.popup)
+	}
+	if cmd == nil {
+		t.Fatal("expected an exec command")
 	}
 }
 
