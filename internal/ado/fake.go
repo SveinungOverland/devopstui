@@ -1,0 +1,293 @@
+package ado
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/sveinungoverland/devopstui/internal/model"
+)
+
+// Fake is an in-memory Client used for --demo mode and tests.
+type Fake struct {
+	mu       sync.Mutex
+	me       string
+	items    map[int]*model.WorkItem
+	iters    []model.Iteration
+	nextID   int
+	Updates  []FakeUpdate // recorded writes, for tests
+	Latency  time.Duration
+	FailNext error
+}
+
+// FakeUpdate is a recorded write.
+type FakeUpdate struct {
+	ID      int
+	Patches []model.Patch
+	Parent  int
+}
+
+// NewFake returns a Fake pre-populated with a small realistic backlog.
+func NewFake() *Fake {
+	f := &Fake{me: "Sveinung Øverland", items: map[int]*model.WorkItem{}, Latency: 150 * time.Millisecond}
+	now := time.Now()
+	monday := now.AddDate(0, 0, -int(now.Weekday())+1)
+	sprint := func(n int, offset int) model.Iteration {
+		start := monday.AddDate(0, 0, 14*offset)
+		tf := "future"
+		if offset < 0 {
+			tf = "past"
+		} else if offset == 0 {
+			tf = "current"
+		}
+		return model.Iteration{
+			ID: fmt.Sprintf("it-%d", n), Name: fmt.Sprintf("Sprint %d", n),
+			Path: fmt.Sprintf("Platform\\Sprint %d", n), Start: start, Finish: start.AddDate(0, 0, 13), Timeframe: tf,
+		}
+	}
+	f.iters = []model.Iteration{sprint(40, -2), sprint(41, -1), sprint(42, 0), sprint(43, 1), sprint(44, 2)}
+	cur := f.iters[2].Path
+	next := f.iters[3].Path
+	backlog := "Platform"
+
+	add := func(id, parent int, typ, title, state, who, iter string, effort float64, prio int) {
+		f.items[id] = &model.WorkItem{
+			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
+			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
+			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
+			Description: "Demo description for " + title + ".\n\nAcceptance criteria:\n- it works\n- it is tested",
+			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+		}
+	}
+	add(1001, 0, "Epic", "Self-service onboarding", "In Progress", "Alex Kim", backlog, 0, 1)
+	add(1002, 1001, "Feature", "Invite flow", "In Progress", "Sveinung Øverland", cur, 0, 1)
+	add(1003, 1002, "Product Backlog Item", "Send invite email with magic link", "Committed", "Sveinung Øverland", cur, 5, 1)
+	add(1004, 1002, "Product Backlog Item", "Accept invite and create account", "Approved", "Priya Natarajan", cur, 8, 2)
+	add(1005, 1002, "Product Backlog Item", "Expire invites after 7 days", "New", "", next, 3, 3)
+	add(1006, 1001, "Feature", "Team workspace setup wizard", "New", "", backlog, 0, 2)
+	add(1007, 1006, "Product Backlog Item", "Choose workspace template", "New", "", next, 5, 2)
+	add(1010, 0, "Epic", "Observability", "In Progress", "Priya Natarajan", backlog, 0, 2)
+	add(1011, 1010, "Feature", "Structured logging", "Done", "Alex Kim", f.iters[1].Path, 0, 1)
+	add(1012, 1010, "Feature", "Request tracing", "In Progress", "Sveinung Øverland", cur, 0, 2)
+	add(1013, 1012, "Product Backlog Item", "Propagate trace id through queue workers", "In Progress", "Sveinung Øverland", cur, 8, 1)
+	add(1014, 1012, "Product Backlog Item", "Trace dashboard in Grafana", "Committed", "Alex Kim", cur, 3, 2)
+	add(1015, 1013, "Task", "Add trace header to publisher", "To Do", "Sveinung Øverland", cur, 0, 0)
+	add(1016, 1013, "Task", "Read trace header in consumer", "Done", "Sveinung Øverland", cur, 0, 0)
+	add(1020, 1012, "Bug", "Spans lost when retry budget exhausted", "Approved", "Sveinung Øverland", cur, 2, 1)
+	add(1021, 0, "Product Backlog Item", "Rotate signing keys quarterly", "New", "", cur, 3, 4)
+	add(1022, 0, "Bug", "Login page flickers on Safari", "New", "Priya Natarajan", cur, 1, 2)
+	f.nextID = 2000
+	return f
+}
+
+// KindOf maps a work item type name to a Kind.
+func KindOf(typ string) model.Kind {
+	switch strings.ToLower(typ) {
+	case "epic":
+		return model.KindEpic
+	case "feature":
+		return model.KindFeature
+	case "product backlog item", "user story", "requirement", "issue":
+		return model.KindRequirement
+	case "task":
+		return model.KindTask
+	case "bug":
+		return model.KindBug
+	default:
+		return model.KindOther
+	}
+}
+
+func (f *Fake) wait(ctx context.Context) error {
+	if f.Latency > 0 {
+		select {
+		case <-time.After(f.Latency):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.FailNext != nil {
+		err := f.FailNext
+		f.FailNext = nil
+		return err
+	}
+	return nil
+}
+
+func (f *Fake) Me(ctx context.Context) (string, error) { return f.me, f.wait(ctx) }
+
+func (f *Fake) Projects(ctx context.Context) ([]model.Project, error) {
+	return []model.Project{{ID: "p1", Name: "Platform"}, {ID: "p2", Name: "Mobile"}}, f.wait(ctx)
+}
+
+func (f *Fake) Teams(ctx context.Context, project string) ([]model.Team, error) {
+	return []model.Team{{ID: "t1", Name: "Team Blue"}, {ID: "t2", Name: "Team Green"}}, f.wait(ctx)
+}
+
+func (f *Fake) Iterations(ctx context.Context, project, team string) ([]model.Iteration, error) {
+	return append([]model.Iteration(nil), f.iters...), f.wait(ctx)
+}
+
+func (f *Fake) Boards(ctx context.Context, project, team string) ([]model.Board, error) {
+	return []model.Board{{ID: "b1", Name: "Backlog items", Columns: []model.BoardColumn{
+		{Name: "New", States: []string{"New"}},
+		{Name: "Approved", States: []string{"Approved"}},
+		{Name: "Committed", States: []string{"Committed"}},
+		{Name: "In Progress", States: []string{"In Progress"}},
+		{Name: "Done", States: []string{"Done"}},
+	}}}, f.wait(ctx)
+}
+
+func (f *Fake) States(ctx context.Context, project, typ string) ([]string, error) {
+	switch KindOf(typ) {
+	case model.KindTask:
+		return []string{"To Do", "In Progress", "Done"}, nil
+	case model.KindEpic, model.KindFeature:
+		return []string{"New", "In Progress", "Done", "Removed"}, nil
+	default:
+		return []string{"New", "Approved", "Committed", "In Progress", "Done", "Removed"}, nil
+	}
+}
+
+func (f *Fake) Members(ctx context.Context, project, team string) ([]string, error) {
+	return []string{"Sveinung Øverland", "Alex Kim", "Priya Natarajan", "Jordan Lee"}, nil
+}
+
+func (f *Fake) snapshot(filter func(*model.WorkItem) bool) []*model.WorkItem {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*model.WorkItem
+	for _, it := range f.items {
+		if filter(it) {
+			c := *it
+			out = append(out, &c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (f *Fake) SprintItems(ctx context.Context, project, team, iter string) ([]*model.WorkItem, []*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, nil, err
+	}
+	items := f.snapshot(func(w *model.WorkItem) bool { return w.IterationPath == iter })
+	in := map[int]bool{}
+	for _, it := range items {
+		in[it.ID] = true
+	}
+	// Walk up to collect external ancestors.
+	var external []*model.WorkItem
+	seen := map[int]bool{}
+	f.mu.Lock()
+	for _, it := range items {
+		p := it.ParentID
+		for p != 0 && !in[p] && !seen[p] {
+			seen[p] = true
+			if par, ok := f.items[p]; ok {
+				c := *par
+				external = append(external, &c)
+				p = par.ParentID
+			} else {
+				break
+			}
+		}
+	}
+	f.mu.Unlock()
+	return items, external, nil
+}
+
+func (f *Fake) Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	return f.snapshot(func(w *model.WorkItem) bool { return w.Kind != model.KindTask }), nil
+}
+
+func (f *Fake) MyItems(ctx context.Context, project string) ([]*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	return f.snapshot(func(w *model.WorkItem) bool {
+		return w.AssignedTo == f.me && w.State != "Done" && w.State != "Removed"
+	}), nil
+}
+
+func (f *Fake) Parents(ctx context.Context, project string) ([]*model.WorkItem, error) {
+	return f.snapshot(func(w *model.WorkItem) bool { return w.Kind == model.KindEpic || w.Kind == model.KindFeature }), nil
+}
+
+func (f *Fake) Get(ctx context.Context, id int) (*model.WorkItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	it, ok := f.items[id]
+	if !ok {
+		return nil, fmt.Errorf("work item %d not found", id)
+	}
+	c := *it
+	return &c, nil
+}
+
+func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	it, ok := f.items[id]
+	if !ok {
+		return nil, fmt.Errorf("work item %d not found", id)
+	}
+	if it.Rev != rev {
+		return nil, fmt.Errorf("work item %d changed on server (rev %d, you had %d)", id, it.Rev, rev)
+	}
+	for _, p := range patches {
+		switch p.Field {
+		case model.FieldTitle:
+			it.Title = p.Value.(string)
+		case model.FieldState:
+			it.State = p.Value.(string)
+			it.BoardColumn = it.State
+		case model.FieldAssignedTo:
+			it.AssignedTo = p.Value.(string)
+		case model.FieldIterationPath:
+			it.IterationPath = p.Value.(string)
+		case model.FieldDescription:
+			it.Description = p.Value.(string)
+		case model.FieldEffort, model.FieldStoryPoints:
+			it.Effort = p.Value.(float64)
+		case model.FieldPriority:
+			it.Priority = p.Value.(int)
+		}
+	}
+	it.Rev++
+	it.ChangedDate = time.Now()
+	it.ChangedBy = f.me
+	f.Updates = append(f.Updates, FakeUpdate{ID: id, Patches: patches})
+	c := *it
+	return &c, nil
+}
+
+func (f *Fake) SetParent(ctx context.Context, id, parentID int) (*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	it, ok := f.items[id]
+	if !ok {
+		return nil, fmt.Errorf("work item %d not found", id)
+	}
+	it.ParentID = parentID
+	it.Rev++
+	f.Updates = append(f.Updates, FakeUpdate{ID: id, Parent: parentID})
+	c := *it
+	return &c, nil
+}
+
+var _ Client = (*Fake)(nil)

@@ -1,0 +1,38 @@
+// Package ado abstracts Azure DevOps behind a small interface so the UI can be
+// driven by either the real SDK or an in-memory fake.
+package ado
+
+import (
+	"context"
+
+	"github.com/sveinungoverland/devopstui/internal/model"
+)
+
+// Client is everything the UI needs from Azure DevOps.
+type Client interface {
+	// Me returns the display name of the authenticated user.
+	Me(ctx context.Context) (string, error)
+
+	Projects(ctx context.Context) ([]model.Project, error)
+	Teams(ctx context.Context, project string) ([]model.Team, error)
+	Iterations(ctx context.Context, project, team string) ([]model.Iteration, error)
+	Boards(ctx context.Context, project, team string) ([]model.Board, error)
+	States(ctx context.Context, project, workItemType string) ([]string, error)
+	Members(ctx context.Context, project, team string) ([]string, error)
+
+	// SprintItems returns the items under iterationPath plus any parents of
+	// those items that live outside it (returned in the second slice).
+	SprintItems(ctx context.Context, project, team, iterationPath string) (items, external []*model.WorkItem, err error)
+	// Backlog returns the whole requirement-and-above backlog for the team.
+	Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error)
+	// MyItems returns open items assigned to the current user in the project.
+	MyItems(ctx context.Context, project string) ([]*model.WorkItem, error)
+	// Parents returns candidate parents (Epics and Features) in the project.
+	Parents(ctx context.Context, project string) ([]*model.WorkItem, error)
+
+	Get(ctx context.Context, id int) (*model.WorkItem, error)
+	// Update applies field patches with an optimistic concurrency check on rev.
+	Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error)
+	// SetParent re-parents id under parentID (0 removes the parent).
+	SetParent(ctx context.Context, id, parentID int) (*model.WorkItem, error)
+}
