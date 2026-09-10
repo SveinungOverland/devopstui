@@ -604,6 +604,75 @@ func TestCreateChild(t *testing.T) {
 	h.keys("esc")
 }
 
+func TestNewTaskInheritsParentAssignee(t *testing.T) {
+	h := newHarness(t, 160, 45)
+
+	// PBI 1013 is assigned to Sveinung Øverland; a new task under it goes
+	// to the same person, written by sign-in address.
+	h.app.sprint.jumpTo(1013)
+	h.keys("n")
+	if p := h.app.popup.(*prompt); !strings.Contains(p.title, "Sveinung Øverland") {
+		t.Errorf("prompt should name the inherited assignee, got %q", p.title)
+	}
+	h.dump("31-new-task-inherits")
+	h.keys("W", "r", "i", "t", "e", "enter")
+	last := h.fake.Updates[len(h.fake.Updates)-1]
+	created := h.app.lookup(last.ID)
+	if created == nil || created.AssignedTo != "Sveinung Øverland" {
+		t.Fatalf("created task = %+v", created)
+	}
+	var assigned any
+	for _, p := range last.Patches {
+		if p.Field == "System.AssignedTo" {
+			assigned = p.Value
+		}
+	}
+	if assigned != "sveinung@contoso.com" {
+		t.Errorf("assignment should use the sign-in address, got %v", assigned)
+	}
+
+	// A sibling created from a task inherits from the PBI, not the task.
+	h.app.sprint.jumpTo(1014) // PBI assigned to Alex Kim, task 1018 below it
+	h.keys("n")
+	if p := h.app.popup.(*prompt); !strings.Contains(p.title, "Alex Kim") {
+		t.Errorf("sibling prompt = %q", p.title)
+	}
+	h.keys("esc")
+}
+
+func TestNewChildAssigneeInheritanceLimits(t *testing.T) {
+	h := newHarness(t, 160, 45)
+
+	// An unassigned PBI leaves the new task unassigned.
+	h.app.sprint.jumpTo(1021) // PBI with no assignee
+	h.keys("n")
+	if p := h.app.popup.(*prompt); strings.Contains(p.title, "→") {
+		t.Errorf("nothing to inherit, got %q", p.title)
+	}
+	h.keys("x", "enter")
+	created := h.app.lookup(h.fake.Updates[len(h.fake.Updates)-1].ID)
+	if created == nil || created.AssignedTo != "" {
+		t.Fatalf("task should be unassigned, got %+v", created)
+	}
+
+	// Above the task level nothing is inherited: a PBI created under a
+	// Feature does not pick up the Feature's assignee.
+	h.app.sprint.jumpTo(1012) // Feature assigned to Sveinung Øverland
+	h.keys("n")
+	p := h.app.popup.(*prompt)
+	if !strings.HasPrefix(p.title, "New Product Backlog Item") {
+		t.Fatalf("prompt = %q", p.title)
+	}
+	if strings.Contains(p.title, "→") {
+		t.Errorf("a requirement should not inherit its Feature's assignee, got %q", p.title)
+	}
+	h.keys("y", "enter")
+	created = h.app.lookup(h.fake.Updates[len(h.fake.Updates)-1].ID)
+	if created == nil || created.AssignedTo != "" {
+		t.Fatalf("new PBI should be unassigned, got %+v", created)
+	}
+}
+
 func TestDashboardShowsParent(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.keys("1")

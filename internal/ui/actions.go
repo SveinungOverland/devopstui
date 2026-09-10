@@ -111,6 +111,13 @@ func (a *App) createChild() tea.Cmd {
 	if a.view == viewSprint || a.view == viewBoard {
 		n.IterationPath = a.ctx.Iteration.Path // keep new work in the sprint you are looking at
 	}
+	// A task belongs to whoever owns the requirement above it, so it
+	// starts assigned to the same person. Higher levels are left alone:
+	// a Feature is rarely done by whoever owns the Epic.
+	if parent != nil && parent.AssignedTo != "" && cfg.IsTaskType(typ) {
+		n.AssignedTo = parent.AssigneeRef()
+		title += sMuted.Render("  → " + parent.AssignedTo)
+	}
 	a.popup = newPrompt(title, "", func(v string) tea.Cmd {
 		if v == "" {
 			return nil

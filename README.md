@@ -202,6 +202,9 @@ choice is saved as `filter_team` in the config.
   a PBI (or User Story, whatever the process uses) under a Feature, a Task under a PBI. On a
   Task it creates a sibling. The new item inherits parent, area and the sprint you are looking
   at, and the cursor lands on it.
+- **A new task inherits the assignee of the PBI above it**, since that is nearly always who
+  will do it. The prompt shows who it will go to, and `a` changes it afterwards. Nothing is
+  inherited above the task level: a Feature does not pick up its Epic's assignee.
 - On the dashboard, task rows show their parent PBI after the title.
 
 Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,

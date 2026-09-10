@@ -58,8 +58,9 @@ func NewFake() *Fake {
 		if KindOf(typ) == model.KindTask && state != "Done" {
 			remaining = float64(2 + id%5)
 		}
+		_, unique := resolvePerson(who)
 		f.items[id] = &model.WorkItem{
-			RemainingWork: remaining,
+			RemainingWork: remaining, AssignedToUnique: unique,
 			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
@@ -234,8 +235,13 @@ func (f *Fake) Create(ctx context.Context, project string, n model.NewItem) (*mo
 		ChangedDate: time.Now(), ChangedBy: f.me,
 		URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
 	}
+	patches := []model.Patch{{Field: model.FieldTitle, Value: n.Title}, {Field: model.FieldWorkItemType, Value: n.Type}}
+	if n.AssignedTo != "" {
+		it.AssignedTo, it.AssignedToUnique = resolvePerson(n.AssignedTo)
+		patches = append(patches, model.Patch{Field: model.FieldAssignedTo, Value: n.AssignedTo})
+	}
 	f.items[id] = it
-	f.Updates = append(f.Updates, FakeUpdate{ID: id, Parent: n.ParentID, Patches: []model.Patch{{Field: model.FieldTitle, Value: n.Title}, {Field: model.FieldWorkItemType, Value: n.Type}}})
+	f.Updates = append(f.Updates, FakeUpdate{ID: id, Parent: n.ParentID, Patches: patches})
 	c := *it
 	return &c, nil
 }
@@ -265,13 +271,15 @@ var fakePeople = []model.Person{
 	{DisplayName: "Sam Rivera", UniqueName: "sam.rivera@contoso.com"},
 }
 
-func resolvePerson(v string) string {
+// resolvePerson maps a display name or sign-in address to both forms, the
+// way the server echoes back a resolved identity.
+func resolvePerson(v string) (name, unique string) {
 	for _, p := range fakePeople {
-		if strings.EqualFold(p.UniqueName, v) {
-			return p.DisplayName
+		if strings.EqualFold(p.UniqueName, v) || strings.EqualFold(p.DisplayName, v) {
+			return p.DisplayName, p.UniqueName
 		}
 	}
-	return v
+	return v, ""
 }
 
 func (f *Fake) People(ctx context.Context, project, query string) ([]model.Person, error) {
@@ -388,7 +396,7 @@ func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (
 			it.BoardColumn = it.State
 		case model.FieldAssignedTo:
 			// Azure DevOps resolves a sign-in address to the display name.
-			it.AssignedTo = resolvePerson(p.Value.(string))
+			it.AssignedTo, it.AssignedToUnique = resolvePerson(p.Value.(string))
 		case model.FieldIterationPath:
 			it.IterationPath = p.Value.(string)
 		case model.FieldDescription:

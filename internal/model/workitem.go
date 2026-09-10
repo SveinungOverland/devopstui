@@ -43,9 +43,10 @@ type WorkItem struct {
 	Rev           int
 	Type          string // raw System.WorkItemType
 	Kind          Kind
-	Title         string
-	State         string
-	AssignedTo    string // display name, "" when unassigned
+	Title            string
+	State            string
+	AssignedTo       string // display name, "" when unassigned
+	AssignedToUnique string // sign-in address of the assignee, when known
 	IterationPath string
 	AreaPath      string
 	BoardColumn   string
@@ -64,6 +65,15 @@ type WorkItem struct {
 func (w WorkItem) Assignee() string {
 	if w.AssignedTo == "" {
 		return "—"
+	}
+	return w.AssignedTo
+}
+
+// AssigneeRef is the value to write when copying this item's assignee to
+// another item: the sign-in address when known, else the display name.
+func (w WorkItem) AssigneeRef() string {
+	if w.AssignedToUnique != "" {
+		return w.AssignedToUnique
 	}
 	return w.AssignedTo
 }
@@ -193,6 +203,19 @@ func (c BacklogConfig) TaskLevel(w *WorkItem) bool {
 	return false
 }
 
+// IsTaskType reports whether a work item type name sits at the task
+// level, taking the team's bug setting into account.
+func (c BacklogConfig) IsTaskType(typ string) bool {
+	task := c.TaskType
+	if task == "" {
+		task = "Task"
+	}
+	if strings.EqualFold(typ, task) {
+		return true
+	}
+	return c.BugsBehavior == "asTasks" && strings.EqualFold(typ, "Bug")
+}
+
 // ChildType returns the type to create under parent, or "" when parent
 // cannot have children. A nil parent yields the requirement type.
 func (c BacklogConfig) ChildType(parent *WorkItem) string {
@@ -258,4 +281,7 @@ type NewItem struct {
 	ParentID      int
 	IterationPath string
 	AreaPath      string
+	// AssignedTo is a display name or sign-in address; empty leaves the
+	// new item unassigned.
+	AssignedTo string
 }

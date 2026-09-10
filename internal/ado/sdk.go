@@ -268,6 +268,9 @@ func (s *SDK) Create(ctx context.Context, project string, n model.NewItem) (*mod
 	if n.AreaPath != "" {
 		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + model.FieldAreaPath), Value: n.AreaPath})
 	}
+	if n.AssignedTo != "" {
+		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + model.FieldAssignedTo), Value: n.AssignedTo})
+	}
 	if n.ParentID != 0 {
 		doc = append(doc, webapi.JsonPatchOperation{Op: &webapi.OperationValues.Add, Path: ptr("/relations/-"), Value: map[string]any{
 			"rel": "System.LinkTypes.Hierarchy-Reverse",
@@ -503,6 +506,7 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	m.RemainingWork = num(f[model.FieldRemainingWork])
 	m.ParentID = int(num(f["System.Parent"]))
 	m.AssignedTo = identityName(f[model.FieldAssignedTo])
+	m.AssignedToUnique = identityUnique(f[model.FieldAssignedTo])
 	m.ChangedBy = identityName(f[model.FieldChangedBy])
 	if t, ok := f[model.FieldChangedDate].(azuredevops.Time); ok {
 		m.ChangedDate = t.Time
@@ -532,6 +536,15 @@ func identityName(v any) string {
 		return str(x["displayName"])
 	case string:
 		return x
+	}
+	return ""
+}
+
+// identityUnique is the sign-in address of an identity field, when the
+// server sent one.
+func identityUnique(v any) string {
+	if m, ok := v.(map[string]any); ok {
+		return str(m["uniqueName"])
 	}
 	return ""
 }
