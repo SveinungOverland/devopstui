@@ -230,6 +230,29 @@ func (s *SDK) BacklogConfig(ctx context.Context, project, team string) (model.Ba
 	return out, nil
 }
 
+func (s *SDK) TeamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error) {
+	tf, err := s.work.GetTeamFieldValues(ctx, work.GetTeamFieldValuesArgs{Project: &project, Team: &team})
+	if err != nil {
+		return nil, err
+	}
+	var out []model.TeamArea
+	def := deref(tf.DefaultValue)
+	if tf.Values != nil {
+		for _, v := range *tf.Values {
+			a := model.TeamArea{Path: deref(v.Value), IncludeChildren: deref(v.IncludeChildren)}
+			if a.Path == def {
+				out = append([]model.TeamArea{a}, out...) // default first
+			} else {
+				out = append(out, a)
+			}
+		}
+	}
+	if len(out) == 0 && def != "" {
+		out = []model.TeamArea{{Path: def, IncludeChildren: true}}
+	}
+	return out, nil
+}
+
 func (s *SDK) Create(ctx context.Context, project string, n model.NewItem) (*model.WorkItem, error) {
 	doc := []webapi.JsonPatchOperation{
 		{Op: &webapi.OperationValues.Add, Path: ptr("/fields/" + model.FieldTitle), Value: n.Title},

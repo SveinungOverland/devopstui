@@ -93,12 +93,16 @@ func (a *App) createChild() tea.Cmd {
 	if typ == "" {
 		return a.setFlash(fmt.Sprintf("%s cannot have children", parent.Type), true)
 	}
-	n := model.NewItem{Type: typ, IterationPath: a.ctx.Iteration.Path, AreaPath: a.ctx.Project}
+	area := a.ctx.Project
+	if fa := model.DefaultArea(a.ctx.FilterAreas); fa != "" {
+		area = fa // new work belongs to the filtered team
+	}
+	n := model.NewItem{Type: typ, IterationPath: a.ctx.Iteration.Path, AreaPath: area}
 	title := "New " + typ + " in " + a.ctx.Iteration.Name
 	if parent != nil {
 		n.ParentID = parent.ID
 		n.IterationPath = parent.IterationPath
-		if parent.AreaPath != "" {
+		if parent.AreaPath != "" && a.ctx.FilterTeam == "" {
 			n.AreaPath = parent.AreaPath
 		}
 		title = fmt.Sprintf("New %s under #%d %s", typ, parent.ID, trunc(parent.Title, 30))

@@ -22,11 +22,20 @@ type board struct {
 func newBoard() *board { return &board{selected: map[int]bool{}} }
 
 // setItems buckets the requirement-level items into columns. cfg decides
-// whether bugs are cards or tasks.
-func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.BacklogConfig) {
+// whether bugs are cards or tasks; include (nil = all) is the team filter.
+func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.BacklogConfig, include func(*model.WorkItem) bool) {
 	cur := b.current()
 	b.def = def
 	b.progress = computeProgress(items, cfg.TaskLevel)
+	if include != nil {
+		var kept []*model.WorkItem
+		for _, it := range items {
+			if include(it) {
+				kept = append(kept, it)
+			}
+		}
+		items = kept
+	}
 	b.cols = make([][]*model.WorkItem, len(def.Columns))
 	stateToCol := map[string]int{}
 	for i, c := range def.Columns {

@@ -14,6 +14,7 @@ import (
 	"github.com/sveinungoverland/devopstui/internal/ado"
 	"github.com/sveinungoverland/devopstui/internal/config"
 	"github.com/sveinungoverland/devopstui/internal/markdown"
+	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
 // harness runs commands synchronously so flows can be asserted without a
@@ -460,7 +461,7 @@ func TestChildProgress(t *testing.T) {
 func TestBugsAsTasksLeaveTheBoard(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.ctx.Backlog.BugsBehavior = "asTasks"
-	h.app.board.setItems(h.app.currentBoard(), h.app.sprint.all, h.app.ctx.Backlog)
+	h.app.board.setItems(h.app.currentBoard(), h.app.sprint.all, h.app.ctx.Backlog, nil)
 	h.keys("3")
 	for _, col := range h.app.board.cols {
 		for _, it := range col {
@@ -529,6 +530,124 @@ func TestDashboardShowsParent(t *testing.T) {
 	}
 	if !strings.Contains(v, "1/3") {
 		t.Error("dashboard badge should count all loaded tasks, not only mine")
+	}
+}
+
+func TestIterationFallbacks(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	now := time.Now()
+	mk := func(name, tf string, startOff int) model.Iteration {
+		return model.Iteration{Name: name, Path: "P\\" + name, Timeframe: tf, Start: now.AddDate(0, 0, startOff), Finish: now.AddDate(0, 0, startOff+13)}
+	}
+	// No "current" flag: pick by dates.
+	a.iterations = []model.Iteration{mk("S1", "past", -30), mk("S2", "", -3), mk("S3", "future", 11)}
+	if got := a.currentIteration().Name; got != "S2" {
+		t.Errorf("by dates = %s, want S2", got)
+	}
+	// Nothing covers today: first future.
+	a.iterations = []model.Iteration{mk("S1", "past", -30), mk("S3", "future", 11)}
+	if got := a.currentIteration().Name; got != "S3" {
+		t.Errorf("first future = %s, want S3", got)
+	}
+	// Entries without a path are skipped.
+	a.iterations = []model.Iteration{{Name: "broken", Timeframe: "current"}, mk("S1", "past", -30)}
+	if got := a.currentIteration().Name; got != "S1" {
+		t.Errorf("skip empty path = %s, want S1", got)
+	}
+	// No iterations at all: no query is issued, the user gets a message.
+	a.iterations = nil
+	a.ctx.Iteration = model.Iteration{}
+	h.run(a.loadView(viewSprint))
+	if a.loading[viewSprint] {
+		t.Error("must not start a sprint load with an empty path")
+	}
+	if !strings.Contains(a.flash, "no sprints") {
+		t.Errorf("flash = %q", a.flash)
+	}
+}
+
+func TestTeamFilter(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	total := len(a.sprint.rows)
+	h.keys("T")
+	if _, ok := a.popup.(*picker); !ok {
+		t.Fatalf("expected team picker, got %T", a.popup)
+	}
+	h.keys("g", "r", "e", "e", "n", "enter")
+	if a.ctx.FilterTeam != "Team Green" || len(a.ctx.FilterAreas) == 0 {
+		t.Fatalf("filter not applied: %+v", a.ctx.FilterTeam)
+	}
+	h.dump("26-team-filter")
+	v := h.app.View()
+	if !strings.Contains(v, "⌕ Team Green") {
+		t.Error("header should show the filter")
+	}
+	// Green owns 1014 (+tasks 1018/1019), 1021, 1022. Parents 1012/1010 show dimmed.
+	ids := map[int]bool{}
+	for _, r := range a.sprint.rows {
+		ids[r.Item.ID] = true
+		if r.Item.ID == 1013 || r.Item.ID == 1003 {
+			t.Errorf("item %d belongs to another team and must be hidden", r.Item.ID)
+		}
+	}
+	for _, want := range []int{1014, 1018, 1021, 1022, 1012, 1010} {
+		if !ids[want] {
+			t.Errorf("item %d missing from filtered sprint", want)
+		}
+	}
+	if n, ok := a.sprint.tree.Get(1012); !ok || !n.External {
+		t.Error("parent from another team should be shown dimmed")
+	}
+	if len(a.sprint.rows) >= total {
+		t.Error("filter should reduce the row count")
+	}
+	// Board and dashboard are filtered too.
+	h.keys("3")
+	for _, col := range a.board.cols {
+		for _, it := range col {
+			if it.AreaPath != "Platform\\Green" {
+				t.Errorf("board card %d outside the filter", it.ID)
+			}
+		}
+	}
+	h.keys("1")
+	for _, r := range a.dash.rows {
+		if r.Item.AreaPath != "Platform\\Green" {
+			t.Errorf("dashboard row %d outside the filter", r.Item.ID)
+		}
+	}
+	// New items land in the filtered team's area.
+	h.keys("2")
+	a.sprint.jumpTo(1014)
+	h.keys("n", "x", "enter")
+	if it := a.lookup(h.fake.Updates[len(h.fake.Updates)-1].ID); it == nil || it.AreaPath != "Platform\\Green" {
+		t.Errorf("created item area = %+v", it)
+	}
+	// :filter off clears it and the config remembers the state.
+	h.keys(":")
+	h.keys("f", "i", "l", "t", "e", "r", " ", "o", "f", "f", "enter")
+	if a.ctx.FilterTeam != "" || len(a.sprint.rows) < total {
+		t.Errorf("filter not cleared: %q rows=%d", a.ctx.FilterTeam, len(a.sprint.rows))
+	}
+}
+
+func TestTeamFilterFromConfig(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	f := ado.NewFake()
+	f.Latency = 0
+	a := New(f, config.Config{Org: "x", Project: "Platform", Team: "Team Blue", FilterTeam: "Team Green"}, os.DevNull, false)
+	h := &harness{t: t, app: a, fake: f}
+	h.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	h.run(a.loadContext())
+	if a.ctx.FilterTeam != "Team Green" || a.include() == nil {
+		t.Fatal("filter from config not active after context load")
+	}
+	for _, r := range a.sprint.rows {
+		if !r.External && r.Item.AreaPath != "Platform\\Green" {
+			t.Errorf("row %d outside filter", r.Item.ID)
+		}
 	}
 }
 

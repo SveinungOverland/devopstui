@@ -87,6 +87,10 @@ func NewFake() *Fake {
 	add(1020, 1012, "Bug", "Spans lost when retry budget exhausted", "Approved", "Sveinung Øverland", cur, 2, 1)
 	add(1021, 0, "Product Backlog Item", "Rotate signing keys quarterly", "New", "", cur, 3, 4)
 	add(1022, 0, "Bug", "Login page flickers on Safari", "New", "Priya Natarajan", cur, 1, 2)
+	// A sub-team owns part of the area tree.
+	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
+		f.items[id].AreaPath = "Platform\\Green"
+	}
 	f.nextID = 2000
 	return f
 }
@@ -195,6 +199,18 @@ func (f *Fake) BacklogConfig(ctx context.Context, project, team string) (model.B
 		RequirementType: "Product Backlog Item", TaskType: "Task", FeatureType: "Feature", EpicType: "Epic",
 		BugsBehavior: "asRequirements",
 	}, f.wait(ctx)
+}
+
+func (f *Fake) TeamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	switch team {
+	case "Team Green":
+		return []model.TeamArea{{Path: "Platform\\Green", IncludeChildren: true}}, nil
+	default:
+		return []model.TeamArea{{Path: "Platform", IncludeChildren: true}}, nil
+	}
 }
 
 func (f *Fake) Create(ctx context.Context, project string, n model.NewItem) (*model.WorkItem, error) {

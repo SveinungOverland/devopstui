@@ -1,0 +1,54 @@
+# devopstui configuration
+#
+# Copy this file to ~/.config/devopstui/config.yaml (macOS/Linux) or
+# %AppData%\devopstui\config.yaml (Windows), or point at it with
+# --config <path> or DEVOPSTUI_CONFIG=<path>.
+#
+# Environment variables override the file:
+#   AZURE_DEVOPS_ORG_URL  → org
+#   AZURE_DEVOPS_EXT_PAT  → pat   (the same variable the az CLI uses)
+#   DEVOPSTUI_PAT         → pat
+#
+# devopstui rewrites this file to remember the last project and team, so
+# keep comments minimal if you care about them surviving.
+
+# Organisation URL. Required.
+org: https://dev.azure.com/contoso
+
+# Personal access token with scopes:
+#   Work Items  – Read & write
+#   Project and Team – Read
+# Prefer the AZURE_DEVOPS_EXT_PAT environment variable over storing it here.
+# If you do store it, the file is written with mode 0600 and the token is
+# never copied anywhere else.
+# pat: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Starting context. Both are optional: without them devopstui shows a
+# picker on launch and then remembers your choice here.
+project: Platform
+team: Team Blue
+
+# Optional team filter. `team` above is the team whose sprints and board
+# are shown; `filter_team` narrows every view to items in this team's area
+# paths. Use it when your sub-team shares a parent team's sprints. Toggle
+# at runtime with T or :filter.
+# filter_team: Team Green
+
+# Ask before every write. Bulk changes (more than one item) and
+# re-parenting always ask; this makes single-item edits ask too.
+confirm_writes: false
+
+# Reload the active view every N seconds. 0 disables auto refresh.
+refresh_seconds: 0
+
+# Editor for descriptions. Leave empty to use $VISUAL, then $EDITOR,
+# then the built-in vim-style editor. Set "inline" to always use the
+# built-in editor. A command with arguments is fine: "code --wait".
+editor: ""
+
+# How descriptions are written back.
+#   markdown – native Azure DevOps Markdown (default). Saving switches
+#              an HTML field to Markdown mode, which is permanent.
+#   html     – convert Markdown to HTML on save, for organisations that
+#              have not enabled Markdown on work items.
+description_format: markdown

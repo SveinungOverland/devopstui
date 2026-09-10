@@ -34,6 +34,9 @@ type list struct {
 	// taskLevel tells which items count as tasks for progress badges; set
 	// by the App from the team's backlog configuration.
 	taskLevel func(*model.WorkItem) bool
+	// include is the team filter: nil shows everything. Parents of shown
+	// items stay visible (dimmed) so the hierarchy remains readable.
+	include func(*model.WorkItem) bool
 	// parentTitle resolves a parent's title for flat lists (dashboard).
 	parentTitle func(id int) string
 	// progressItems supplies the items to count task progress over; nil
@@ -88,6 +91,9 @@ func (l *list) rebuild() {
 	for _, it := range l.all {
 		l.parents[it.ID] = it.ParentID
 	}
+	if l.include != nil {
+		items, ext = applyTeamFilter(items, ext, l.include)
+	}
 	q := strings.ToLower(l.filter.Value())
 	if !l.showDone || q != "" {
 		items = filterItems(items, q, l.showDone)
@@ -115,6 +121,41 @@ func (l *list) rebuild() {
 			delete(l.selected, id)
 		}
 	}
+}
+
+// applyTeamFilter keeps items the filter accepts. Ancestors of kept items
+// that the filter rejects move to the external (dimmed) set so children
+// still hang under their parents.
+func applyTeamFilter(items, ext []*model.WorkItem, include func(*model.WorkItem) bool) ([]*model.WorkItem, []*model.WorkItem) {
+	byID := make(map[int]*model.WorkItem, len(items)+len(ext))
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	for _, it := range ext {
+		byID[it.ID] = it
+	}
+	var kept []*model.WorkItem
+	keptIDs := map[int]bool{}
+	for _, it := range items {
+		if include(it) {
+			kept = append(kept, it)
+			keptIDs[it.ID] = true
+		}
+	}
+	var external []*model.WorkItem
+	extIDs := map[int]bool{}
+	for _, it := range kept {
+		for p := it.ParentID; p != 0 && !keptIDs[p] && !extIDs[p]; {
+			par, ok := byID[p]
+			if !ok {
+				break
+			}
+			extIDs[p] = true
+			external = append(external, par)
+			p = par.ParentID
+		}
+	}
+	return kept, external
 }
 
 // computeProgress counts task-level children per parent over all items,

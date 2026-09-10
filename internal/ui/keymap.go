@@ -12,6 +12,7 @@ type keymap struct {
 	// views
 	Dashboard, Sprint, Board, Backlog key.Binding
 	PrevSprint, NextSprint, CurSprint key.Binding
+	TeamFilter                        key.Binding
 	Command, Filter, Help, Refresh    key.Binding
 	Back, Quit                        key.Binding
 	// selection
@@ -49,6 +50,7 @@ var keys = keymap{
 	PrevSprint: b("prev sprint", "["),
 	NextSprint: b("next sprint", "]"),
 	CurSprint:  b("current sprint", "S"),
+	TeamFilter: b("team filter", "T"),
 	Command:    b("command", ":"),
 	Filter:     b("filter", "/"),
 	Help:       b("help", "?"),
@@ -90,7 +92,7 @@ var keys = keymap{
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview},
-	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.Command, keys.Filter, keys.Refresh},
+	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},

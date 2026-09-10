@@ -18,6 +18,8 @@ type Client interface {
 	Iterations(ctx context.Context, project, team string) ([]model.Iteration, error)
 	Boards(ctx context.Context, project, team string) ([]model.Board, error)
 	BacklogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error)
+	// TeamAreas returns the area paths a team owns, default first.
+	TeamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error)
 	States(ctx context.Context, project, workItemType string) ([]string, error)
 	Members(ctx context.Context, project, team string) ([]string, error)
 

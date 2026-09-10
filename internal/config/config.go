@@ -15,6 +15,9 @@ type Config struct {
 	PAT     string `yaml:"pat,omitempty"`
 	Project string `yaml:"project,omitempty"`
 	Team    string `yaml:"team,omitempty"`
+	// FilterTeam narrows all views to that team's area paths. Use it when
+	// a sub-team shares the sprints of a parent team (team).
+	FilterTeam string `yaml:"filter_team,omitempty"`
 	// ConfirmWrites asks before single-item edits too. Bulk changes and
 	// re-parenting always ask. Default false.
 	ConfirmWrites *bool `yaml:"confirm_writes,omitempty"`

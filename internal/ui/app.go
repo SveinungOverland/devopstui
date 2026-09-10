@@ -101,7 +101,70 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	a.ctx.Org = cfg.Org
 	a.ctx.Project = cfg.Project
 	a.ctx.Team = cfg.Team
+	a.ctx.FilterTeam = cfg.FilterTeam
 	return a
+}
+
+// include is the active team filter, nil when off.
+func (a *App) include() func(*model.WorkItem) bool {
+	if a.ctx.FilterTeam == "" || len(a.ctx.FilterAreas) == 0 {
+		return nil
+	}
+	areas := a.ctx.FilterAreas
+	return func(w *model.WorkItem) bool { return model.InAreas(w.AreaPath, areas) }
+}
+
+// applyTeamFilter pushes the current filter into every view.
+func (a *App) applyTeamFilter() {
+	inc := a.include()
+	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+		l.include = inc
+		if l.all != nil {
+			l.rebuild()
+		}
+	}
+	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, inc)
+	a.refreshDetail()
+}
+
+type teamFilterMsg struct {
+	team  string
+	areas []model.TeamArea
+	err   error
+}
+
+// setTeamFilter resolves the team's areas and applies the filter; an empty
+// team clears it.
+func (a *App) setTeamFilter(team string) tea.Cmd {
+	if team == "" {
+		a.ctx.FilterTeam, a.ctx.FilterAreas = "", nil
+		a.applyTeamFilter()
+		a.persist()
+		return a.setFlash("team filter off", false)
+	}
+	project := a.ctx.Project
+	return func() tea.Msg {
+		areas, err := a.client.TeamAreas(context.Background(), project, team)
+		return teamFilterMsg{team: team, areas: areas, err: err}
+	}
+}
+
+func (a *App) pickTeamFilter() tea.Cmd {
+	items := []pickItem{{Label: "All teams", Desc: "no filter", Value: ""}}
+	for _, t := range a.teams {
+		desc := ""
+		if t.Name == a.ctx.Team {
+			desc = "owns the sprint"
+		}
+		if t.Name == a.ctx.FilterTeam {
+			desc = "← active"
+		}
+		items = append(items, pickItem{Label: t.Name, Desc: desc, Value: t.Name})
+	}
+	a.popup = newPicker("Team filter", items, func(pi pickItem) tea.Cmd {
+		return a.setTeamFilter(pi.Value.(string))
+	})
+	return nil
 }
 
 // wireLists gives the lists their callbacks into the app.
@@ -139,6 +202,7 @@ type contextLoadedMsg struct {
 	iterations []model.Iteration
 	boards     []model.Board
 	backlog    model.BacklogConfig
+	filter     []model.TeamArea // areas of the configured filter team, if any
 	err        error
 }
 
@@ -181,11 +245,15 @@ func tick(sec int) tea.Cmd {
 }
 
 func (a *App) loadContext() tea.Cmd {
-	project, team := a.ctx.Project, a.ctx.Team
+	project, team, filterTeam := a.ctx.Project, a.ctx.Team, a.ctx.FilterTeam
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		var m contextLoadedMsg
+		if project != "" && filterTeam != "" {
+			// Best effort: a bad filter team must not block startup.
+			m.filter, _ = a.client.TeamAreas(ctx, project, filterTeam)
+		}
 		var err error
 		if m.me, err = a.client.Me(ctx); err != nil {
 			m.err = err
@@ -224,6 +292,14 @@ func (a *App) loadView(v viewID) tea.Cmd {
 	if a.ctx.Project == "" || a.ctx.Team == "" {
 		return nil
 	}
+	if (v == viewSprint || v == viewBoard) && a.ctx.Iteration.Path == "" {
+		// Never query with an empty path; the server rejects it and the
+		// message is cryptic. Tell the user what is missing instead.
+		if len(a.iterations) == 0 {
+			return a.setFlash(fmt.Sprintf("team %q has no sprints; add iterations to the team in Azure DevOps", a.ctx.Team), true)
+		}
+		return a.setFlash("no sprint selected: pick one with :sprint", true)
+	}
 	a.gen++
 	gen := a.gen
 	a.loading[v] = true
@@ -236,6 +312,9 @@ func (a *App) loadView(v viewID) tea.Cmd {
 		case viewSprint, viewBoard:
 			m.view = viewSprint
 			m.items, m.external, m.err = a.client.SprintItems(ctx, c.Project, c.Team, c.Iteration.Path)
+			if m.err != nil {
+				m.err = fmt.Errorf("sprint %q: %w", c.Iteration.Path, m.err)
+			}
 		case viewBacklog:
 			m.items, m.err = a.client.Backlog(ctx, c.Project, c.Team)
 		case viewDash:
@@ -282,7 +361,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.view {
 		case viewSprint:
 			a.sprint.setItems(msg.items, msg.external)
-			a.board.setItems(a.currentBoard(), msg.items, a.ctx.Backlog)
+			a.board.setItems(a.currentBoard(), msg.items, a.ctx.Backlog, a.include())
 		case viewBacklog:
 			a.backlog.setItems(msg.items, nil)
 		case viewDash:
@@ -326,6 +405,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case popupMsg:
 		a.popup = msg.p
 		return a, nil
+
+	case teamFilterMsg:
+		if msg.err != nil {
+			return a, a.setFlash("team filter: "+msg.err.Error(), true)
+		}
+		if len(msg.areas) == 0 {
+			return a, a.setFlash(fmt.Sprintf("team %q has no area paths", msg.team), true)
+		}
+		a.ctx.FilterTeam, a.ctx.FilterAreas = msg.team, msg.areas
+		a.applyTeamFilter()
+		a.persist()
+		return a, a.setFlash("filtering on "+msg.team, false)
 
 	case editorDoneMsg:
 		if msg.err != nil {
@@ -395,21 +486,46 @@ func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
 	a.iterations = msg.iterations
 	a.boards = msg.boards
 	a.ctx.Backlog = msg.backlog
+	a.ctx.FilterAreas = msg.filter
+	if a.ctx.FilterTeam != "" && len(msg.filter) == 0 {
+		a.ctx.FilterTeam = "" // team unknown or without areas: filter off
+	}
+	a.applyTeamFilter()
 	if a.ctx.Iteration.Path == "" {
 		a.ctx.Iteration = a.currentIteration()
+	}
+	if a.ctx.Iteration.Path == "" {
+		a.persist()
+		return tea.Batch(a.loadView(viewDash), a.loadView(viewBacklog), a.loadView(viewSprint)) // sprint load only flashes the reason
 	}
 	a.persist()
 	return a.reloadAll()
 }
 
+// currentIteration picks the sprint to show: the one Azure DevOps marks
+// current, else the one whose dates cover today, else the first future
+// one, else the last known.
 func (a *App) currentIteration() model.Iteration {
 	for _, it := range a.iterations {
-		if it.Timeframe == "current" {
+		if it.Timeframe == "current" && it.Path != "" {
 			return it
 		}
 	}
-	if len(a.iterations) > 0 {
-		return a.iterations[len(a.iterations)-1]
+	now := time.Now()
+	for _, it := range a.iterations {
+		if it.Path != "" && !it.Start.IsZero() && !it.Start.After(now) && !it.Finish.Before(now.AddDate(0, 0, -1)) {
+			return it
+		}
+	}
+	for _, it := range a.iterations {
+		if it.Path != "" && it.Start.After(now) {
+			return it
+		}
+	}
+	for i := len(a.iterations) - 1; i >= 0; i-- {
+		if a.iterations[i].Path != "" {
+			return a.iterations[i]
+		}
 	}
 	return model.Iteration{}
 }
@@ -429,7 +545,7 @@ func (a *App) currentBoard() model.Board {
 
 func (a *App) persist() {
 	c := a.cfg
-	c.Project, c.Team = a.ctx.Project, a.ctx.Team
+	c.Project, c.Team, c.FilterTeam = a.ctx.Project, a.ctx.Team, a.ctx.FilterTeam
 	if !a.savePAT {
 		c.PAT = ""
 	}
@@ -516,6 +632,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.shiftSprint(1)
 	case key.Matches(msg, keys.CurSprint):
 		return a.setIteration(a.currentIteration())
+	case key.Matches(msg, keys.TeamFilter):
+		return a.pickTeamFilter()
 	case key.Matches(msg, keys.Focus):
 		a.focusDetail = true
 		a.refreshDetail()
@@ -661,6 +779,19 @@ func (a *App) runCommand(c string) tea.Cmd {
 		return a.pickIteration()
 	case "team", "t":
 		return a.pickTeam()
+	case "filter", "tf":
+		if arg == "" {
+			return a.pickTeamFilter()
+		}
+		if arg == "off" || arg == "all" {
+			return a.setTeamFilter("")
+		}
+		for _, t := range a.teams {
+			if strings.EqualFold(t.Name, arg) {
+				return a.setTeamFilter(t.Name)
+			}
+		}
+		return a.setFlash("unknown team: "+arg, true)
 	case "project", "proj", "p":
 		return a.pickProject()
 	case "board", "b":
@@ -772,7 +903,7 @@ func (a *App) pickBoard() tea.Cmd {
 	a.popup = newPicker("Board", items, func(pi pickItem) tea.Cmd {
 		b := pi.Value.(model.Board)
 		a.ctx.Board = b.Name
-		a.board.setItems(b, a.sprint.all, a.ctx.Backlog)
+		a.board.setItems(b, a.sprint.all, a.ctx.Backlog, a.include())
 		return a.switchView(viewBoard)
 	})
 	return nil
@@ -851,7 +982,7 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 	a.sprint.apply(it)
 	a.backlog.apply(it)
 	a.dash.apply(it)
-	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog)
+	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
 	a.refreshDetail()
 }
 
@@ -995,7 +1126,11 @@ func (a *App) renderHeader() string {
 		crumbs = append(crumbs, sCrumb.Render(a.ctx.Project))
 	}
 	if a.ctx.Team != "" {
-		crumbs = append(crumbs, sCrumb.Render(a.ctx.Team))
+		crumb := sCrumb.Render(a.ctx.Team)
+		if a.ctx.FilterTeam != "" {
+			crumb += sSelected.Render(" ⌕ " + a.ctx.FilterTeam)
+		}
+		crumbs = append(crumbs, crumb)
 	}
 	if a.ctx.Iteration.Path != "" {
 		s := sHeader.Render(a.ctx.Iteration.Name)

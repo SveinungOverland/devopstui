@@ -31,9 +31,39 @@ export AZURE_DEVOPS_EXT_PAT=<pat>
 go run ./cmd/devopstui --project MyProject --team "My Team"
 ```
 
-Project and team are remembered in `~/.config/devopstui/config.yaml` (or `$DEVOPSTUI_CONFIG`).
-You can also put `org`, `pat`, `confirm_writes: true`, `refresh_seconds: 60` and `editor: nvim`
-in that file.
+## Configuration
+
+Settings live in `~/.config/devopstui/config.yaml` (`%AppData%\devopstui\config.yaml` on
+Windows). Start from the annotated template:
+
+```bash
+mkdir -p ~/.config/devopstui && cp config.example.yaml ~/.config/devopstui/config.yaml
+```
+
+Then edit `org`, and either add `pat` or export `AZURE_DEVOPS_EXT_PAT`. Project and team are
+optional: leave them out to get a picker on first launch, and devopstui writes your choice back
+to the file so the next start lands in the same place.
+
+Precedence, highest first: command-line flags (`--org`, `--project`, `--team`), environment
+variables (`AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_EXT_PAT`, `DEVOPSTUI_PAT`), then the file.
+Use `--config <path>` or `DEVOPSTUI_CONFIG` to keep several configs, one per organisation:
+
+```bash
+devopstui --config ~/.config/devopstui/work.yaml
+```
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `org` | | Organisation URL, e.g. `https://dev.azure.com/contoso` |
+| `pat` | | Personal access token. Prefer the environment variable. |
+| `project`, `team` | | Starting context, rewritten on change. `team` owns the sprints. |
+| `filter_team` | | Show only this team's area paths in every view (`T` at runtime) |
+| `confirm_writes` | `false` | Ask before single-item edits too (bulk and re-parent always ask) |
+| `refresh_seconds` | `0` | Auto-reload interval, 0 = off |
+| `editor` | | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
+| `description_format` | `markdown` | `markdown` (native) or `html` (convert on save) |
+
+See [config.example.yaml](config.example.yaml) for the commented version.
 
 ## Descriptions are Markdown
 
@@ -84,7 +114,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `l` `h` | expand / collapse | `3` | board | `d` | description | `B` | move to backlog |
 | `L` `H` | expand / collapse all | `4` | backlog | `s` | state | `p` | set parent |
 | `tab` | focus detail pane | `[` `]` | prev / next sprint | `a` | assign | | |
-| `z` | toggle preview pane | | | `n` | new child item | | |
+| `z` | toggle preview pane | `T` | team filter | `n` | new child item | | |
 | `/` | filter | `S` | current sprint | `E` | effort | | |
 | `space` | select | `:` | command bar | `P` | priority | | |
 | `v` | visual select | `r` | refresh | `o` | open in browser | | |
@@ -98,6 +128,15 @@ to bring its children along.
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, and `tab`
 focuses it for scrolling.
+
+## Team filter
+
+Some organisations keep sprints on a parent team and assign work to sub-teams through area
+paths. Point `team` at the parent (it owns the sprints and board) and use the **team filter**
+for your own team: press `T` or run `:filter <team>`. Every view then shows only items in that
+team's area paths, with parents from other teams dimmed so the hierarchy stays readable. New
+items created with `n` land in the filtered team's default area. `:filter off` clears it. The
+choice is saved as `filter_team` in the config.
 
 ## Tasks and other children
 
@@ -115,7 +154,7 @@ focuses it for scrolling.
   at, and the cursor lands on it.
 - On the dashboard, task rows show their parent PBI after the title.
 
-Commands: `:sprint [name]`, `:team`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
+Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
 
 ## Develop

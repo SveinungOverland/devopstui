@@ -2,7 +2,10 @@
 // imports the Azure DevOps SDK, so the UI can be exercised entirely with fakes.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Kind is the coarse level of a work item in the backlog hierarchy.
 type Kind int
@@ -109,6 +112,39 @@ type Context struct {
 	Iteration Iteration
 	Board     string
 	Backlog   BacklogConfig
+	// FilterTeam narrows every view to items in that team's area paths.
+	// It is independent of Team, which owns the sprints: in organisations
+	// where sub-teams share a parent's sprints, Team is the parent and
+	// FilterTeam the sub-team.
+	FilterTeam  string
+	FilterAreas []TeamArea
+}
+
+// TeamArea is one area path a team owns.
+type TeamArea struct {
+	Path            string
+	IncludeChildren bool
+}
+
+// InAreas reports whether an area path belongs to any of the team areas.
+func InAreas(area string, areas []TeamArea) bool {
+	for _, a := range areas {
+		if area == a.Path {
+			return true
+		}
+		if a.IncludeChildren && strings.HasPrefix(area, a.Path+"\\") {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultArea returns the first area path (the team's default), or "".
+func DefaultArea(areas []TeamArea) string {
+	if len(areas) == 0 {
+		return ""
+	}
+	return areas[0].Path
 }
 
 // BacklogConfig is the part of the team's process configuration the UI
