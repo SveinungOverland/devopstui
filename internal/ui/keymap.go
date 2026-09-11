@@ -7,6 +7,7 @@ import "github.com/charmbracelet/bubbles/key"
 type keymap struct {
 	// navigation
 	Up, Down, Top, Bottom, PageUp, PageDown  key.Binding
+	PreviewUp, PreviewDown                   key.Binding
 	Collapse, Expand, CollapseAll, ExpandAll key.Binding
 	Focus, Preview, Details                  key.Binding
 	// views
@@ -35,8 +36,10 @@ var keys = keymap{
 	Down:        b("down", "j", "down"),
 	Top:         b("top", "g", "home"),
 	Bottom:      b("bottom", "G", "end"),
-	PageUp:      b("page up", "ctrl+u", "pgup"),
-	PageDown:    b("page down", "ctrl+d", "pgdown"),
+	PageUp:      b("page up", "pgup"),
+	PageDown:    b("page down", "pgdown"),
+	PreviewUp:   b("scroll preview up", "ctrl+u"),
+	PreviewDown: b("scroll preview down", "ctrl+d"),
 	Collapse:    b("collapse", "h", "left"),
 	Expand:      b("expand", "l", "right", "enter"),
 	CollapseAll: b("collapse all", "H"),
@@ -94,7 +97,7 @@ var keys = keymap{
 
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
-	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.Details},
+	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Details},
 	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
@@ -102,15 +105,15 @@ var helpGroups = [][]key.Binding{
 	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Help, keys.Quit},
 }
 
-var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.Help}
-var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.Help}
+var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.PreviewUp, keys.PreviewDown, keys.Help}
+var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 // footerDashKanban and footerDashLanes are the two focus modes of the
 // Dashboard's two-row layout.
-var footerDashKanban = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Focus, keys.Select, keys.Details, keys.Edit, keys.State, keys.Assign, keys.Help}
-var footerDashLanes = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.Focus, keys.Select, keys.Details, keys.State, keys.Assign, keys.Help}
+var footerDashKanban = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Focus, keys.Select, keys.Details, keys.Edit, keys.State, keys.Assign, keys.PreviewUp, keys.PreviewDown, keys.Help}
+var footerDashLanes = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.Focus, keys.Select, keys.Details, keys.State, keys.Assign, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 // footerItemDesc and footerItemKanban are the two focus modes of the
 // drill-down view.
-var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.New, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.Back, keys.Help}
+var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.New, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Back, keys.Help}
 var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.New, keys.Details, keys.Edit, keys.State, keys.Focus, keys.Back}

@@ -88,6 +88,10 @@ func (h *harness) keys(ks ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlA}
 		case "ctrl+w":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlW}
+		case "ctrl+u":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlU}
+		case "ctrl+d":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlD}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -1238,5 +1242,61 @@ func TestNarrowLayout(t *testing.T) {
 	h.dump("16-narrow-detail")
 	if !strings.Contains(h.app.View(), "Assigned") {
 		t.Error("narrow detail not shown")
+	}
+}
+
+// ctrl+u/ctrl+d must scroll the side preview pane in place, without moving
+// the underlying board/list selection or resetting the scroll position via
+// refreshDetail's GotoTop.
+func TestPreviewScroll(t *testing.T) {
+	h := newHarness(t, 160, 18) // short enough that #1003's long description overflows the pane
+	h.keys("3")                 // board view
+	h.app.board.jumpTo(1003)
+	h.app.refreshDetail()
+	if h.app.detail.YOffset != 0 {
+		t.Fatalf("initial YOffset = %d, want 0", h.app.detail.YOffset)
+	}
+	if !h.app.detail.AtTop() || h.app.detail.AtBottom() {
+		t.Fatal("test setup: description should overflow the preview pane")
+	}
+
+	h.keys("ctrl+d")
+	if h.app.detail.YOffset == 0 {
+		t.Fatal("ctrl+d should scroll the preview pane down")
+	}
+	if got := h.app.board.currentID(); got != 1003 {
+		t.Fatalf("board cursor moved to %d, want it to stay on 1003", got)
+	}
+
+	h.keys("ctrl+u")
+	if h.app.detail.YOffset != 0 {
+		t.Fatalf("ctrl+u should scroll back to the top, YOffset = %d", h.app.detail.YOffset)
+	}
+
+	// Same behavior with the preview beside the Dashboard's kanban.
+	h.keys("1")
+	h.app.dashBoard.jumpTo(1003)
+	h.app.refreshDetail()
+	h.keys("ctrl+d")
+	if h.app.detail.YOffset == 0 {
+		t.Fatal("ctrl+d should scroll the dashboard's preview pane down")
+	}
+	if got := h.app.dashBoard.currentID(); got != 1003 {
+		t.Fatalf("dashboard kanban cursor moved to %d, want it to stay on 1003", got)
+	}
+}
+
+// With the preview pane hidden, ctrl+u/ctrl+d fall back to their old
+// meaning in list views: paging the cursor by half a screen.
+func TestPreviewScrollFallsBackToPagingWhenHidden(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.keys("z") // hide the list's preview pane
+	if h.app.detailWidth() != 0 {
+		t.Fatal("test setup: preview pane should be hidden")
+	}
+	before := h.app.sprint.currentID()
+	h.keys("ctrl+d")
+	if h.app.sprint.currentID() == before {
+		t.Fatal("ctrl+d should page the list cursor when there is no preview to scroll")
 	}
 }

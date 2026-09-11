@@ -140,6 +140,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `L` `H` | expand / collapse all | `4` | backlog | `s` | state | `p` | set parent |
 | `tab` | focus detail pane | `[` `]` | prev / next sprint | `a` | assign | | |
 | `z` | toggle preview pane | `T` | team filter | `n` | new child item | | |
+| `ctrl+u` `ctrl+d` | scroll preview pane | | | | | | |
 | `D` | item details view | | | | | | |
 | `/` | filter | `S` | current sprint | `E` | effort | | |
 | `space` | select | `:` | command bar | `P` | priority | | |
@@ -153,8 +154,9 @@ item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Ep
 to bring its children along.
 
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
-column. A preview of the highlighted card sits on the right; `z` hides or shows it, and `tab`
-focuses it for scrolling.
+column. A preview of the highlighted card sits on the right; `z` hides or shows it, `ctrl+u`/
+`ctrl+d` scroll it in place when its description doesn't fit, and `tab` focuses it so the
+usual navigation keys scroll it instead.
 
 ## Assigning people
 
@@ -258,7 +260,8 @@ selected, the dashboard falls back to every sprint at once.
 `tab` cycles focus kanban → lanes → preview → kanban (skipping lanes when there is nothing
 below, and the preview when it's hidden or the terminal is too narrow); the usual navigation,
 selection and edit/state/assign actions work in whichever has focus, and `D`/`enter` drills
-into the highlighted card.
+into the highlighted card. `ctrl+u`/`ctrl+d` scroll the preview pane in place, from either the
+kanban or the lanes, without needing to `tab` into it first.
 
 `R` toggles auto refresh and saves the choice to your config, so it survives a restart. The
 header shows `↻60s` while it is on, and the interval is whatever `refresh_seconds` holds, 60

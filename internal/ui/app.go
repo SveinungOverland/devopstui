@@ -984,10 +984,36 @@ func (a *App) dashOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// scrollPreview scrolls the side preview pane by half a page when it is
+// visible, without touching the underlying list/board selection. It must
+// not be followed by refreshDetail() — that would call GotoTop() and undo
+// the scroll — so callers return immediately on success. Reports false
+// when there is no preview to scroll (hidden, or the terminal too narrow)
+// so the caller can fall back to its own meaning for the same key.
+func (a *App) scrollPreview(down bool) bool {
+	if a.detailWidth() == 0 {
+		return false
+	}
+	if down {
+		a.detail.HalfViewDown()
+	} else {
+		a.detail.HalfViewUp()
+	}
+	return true
+}
+
 func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
 	if a.dashFocusLanes {
 		ln := a.dashLanes
 		switch {
+		case key.Matches(msg, keys.PreviewDown):
+			if a.scrollPreview(true) {
+				return nil
+			}
+		case key.Matches(msg, keys.PreviewUp):
+			if a.scrollPreview(false) {
+				return nil
+			}
 		case key.Matches(msg, keys.Down):
 			ln.move(1, 0)
 		case key.Matches(msg, keys.Up):
@@ -1012,6 +1038,14 @@ func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	b := a.dashBoard
 	switch {
+	case key.Matches(msg, keys.PreviewDown):
+		if a.scrollPreview(true) {
+			return nil
+		}
+	case key.Matches(msg, keys.PreviewUp):
+		if a.scrollPreview(false) {
+			return nil
+		}
 	case key.Matches(msg, keys.Down):
 		b.move(0, 1)
 	case key.Matches(msg, keys.Up):
@@ -1053,6 +1087,16 @@ func (a *App) onListKey(msg tea.KeyMsg, l *list) tea.Cmd {
 		l.move(a.bodyHeight() / 2)
 	case key.Matches(msg, keys.PageUp):
 		l.move(-a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PreviewDown):
+		if a.scrollPreview(true) {
+			return nil
+		}
+		l.move(a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PreviewUp):
+		if a.scrollPreview(false) {
+			return nil
+		}
+		l.move(-a.bodyHeight() / 2)
 	case key.Matches(msg, keys.Expand):
 		if msg.String() == "enter" && a.detailWidth() == 0 {
 			a.focusDetail = true
@@ -1092,6 +1136,14 @@ func (a *App) onListKey(msg tea.KeyMsg, l *list) tea.Cmd {
 func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 	b := a.board
 	switch {
+	case key.Matches(msg, keys.PreviewDown):
+		if a.scrollPreview(true) {
+			return nil
+		}
+	case key.Matches(msg, keys.PreviewUp):
+		if a.scrollPreview(false) {
+			return nil
+		}
 	case key.Matches(msg, keys.Down):
 		b.move(0, 1)
 	case key.Matches(msg, keys.Up):
@@ -1769,10 +1821,10 @@ func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 		case key.Matches(msg, keys.Up):
 			v.desc.LineUp(1)
 			return nil
-		case key.Matches(msg, keys.PageDown):
+		case key.Matches(msg, keys.PreviewDown):
 			v.desc.HalfViewDown()
 			return nil
-		case key.Matches(msg, keys.PageUp):
+		case key.Matches(msg, keys.PreviewUp):
 			v.desc.HalfViewUp()
 			return nil
 		case key.Matches(msg, keys.Top):
