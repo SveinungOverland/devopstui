@@ -43,7 +43,9 @@ func (a *App) onActionKey(msg tea.KeyMsg) tea.Cmd {
 			return a.setFlash("description works on one item", true)
 		}
 		return a.editDescription(cur, func(v string) tea.Cmd {
-			return a.update(cur, model.Patch{Field: model.FieldDescription, Value: v})
+			// The editor stays open on ctrl+w, so this can run more than
+			// once: re-resolve to carry the revision the last write made.
+			return a.update(a.fresh(cur), model.Patch{Field: model.FieldDescription, Value: v})
 		})
 	case key.Matches(msg, keys.State):
 		return a.pickState(targets)

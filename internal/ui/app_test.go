@@ -86,6 +86,8 @@ func (h *harness) keys(ks ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlS}
 		case "ctrl+a":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlA}
+		case "ctrl+w":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlW}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -394,6 +396,75 @@ func TestDescriptionInlineEditor(t *testing.T) {
 	}
 }
 
+func TestEditorSaveWithoutClosing(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1003)
+	h.keys("d")
+	ed, ok := h.app.popup.(*mdEditor)
+	if !ok {
+		t.Fatalf("expected built-in editor, got %T", h.app.popup)
+	}
+	// Nothing typed yet: ctrl+w must not write.
+	h.keys("ctrl+w")
+	if len(h.fake.Updates) != 0 {
+		t.Fatalf("unchanged buffer wrote %+v", h.fake.Updates)
+	}
+
+	h.keys("i", "A", "esc", "ctrl+w")
+	if h.app.popup != ed {
+		t.Fatalf("ctrl+w must keep the editor open, popup = %T", h.app.popup)
+	}
+	if len(h.fake.Updates) != 1 || !strings.HasPrefix(h.fake.Updates[0].Patches[0].Value.(string), "A") {
+		t.Fatalf("updates = %+v", h.fake.Updates)
+	}
+	if ed.changed() || !ed.saved || ed.inflight != "" {
+		t.Fatalf("after a landed write: changed=%v saved=%v inflight=%q", ed.changed(), ed.saved, ed.inflight)
+	}
+	h.dump("23-desc-editor-saved")
+
+	// A second write from the same editor must carry the new revision
+	// rather than the one captured when it opened.
+	h.keys("i", "B", "esc", "ctrl+w")
+	if len(h.fake.Updates) != 2 {
+		t.Fatalf("second write did not land: %+v (flash %q)", h.fake.Updates, h.app.flash)
+	}
+	if v := h.fake.Updates[1].Patches[0].Value.(string); !strings.HasPrefix(v, "AB") {
+		t.Fatalf("second description = %q", v)
+	}
+	if h.app.flashErr {
+		t.Fatalf("second write flashed an error: %q", h.app.flash)
+	}
+	if it := h.app.lookup(1003); !strings.HasPrefix(it.Description, "AB") {
+		t.Fatalf("local item = %q", it.Description)
+	}
+
+	// Everything is saved, so q closes without arming the discard warning.
+	h.keys("q")
+	if h.app.popup != nil {
+		t.Fatalf("q should close a saved editor, popup = %T", h.app.popup)
+	}
+}
+
+func TestEditorFailedSaveKeepsChanges(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1003)
+	h.keys("d")
+	ed := h.app.popup.(*mdEditor)
+	h.fake.FailNext = errTest
+	h.keys("i", "A", "esc", "ctrl+w")
+	if !ed.changed() || ed.saved || ed.inflight != "" {
+		t.Fatalf("a failed write must stay unsaved: changed=%v saved=%v inflight=%q", ed.changed(), ed.saved, ed.inflight)
+	}
+	if !h.app.flashErr {
+		t.Fatalf("expected an error flash, got %q", h.app.flash)
+	}
+	// The text is still unsaved, so q warns before discarding it.
+	h.keys("q")
+	if h.app.popup == nil || !ed.quitArm {
+		t.Fatal("q should warn after a failed save")
+	}
+}
+
 func TestEditorCheckboxToggle(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.sprint.jumpTo(1002) // template with "- [ ] Happy path" on line 7
@@ -488,6 +559,18 @@ func TestFormDescriptionUsesEditor(t *testing.T) {
 		t.Fatalf("expected editor child, got %T", f.child)
 	}
 	h.dump("19-form-desc-editor")
+	// ctrl+w hands the text to the form without closing the editor; nothing
+	// reaches the server until the form itself saves.
+	h.keys("i", "X", "esc", "ctrl+w")
+	if _, ok := f.child.(*mdEditor); !ok {
+		t.Fatalf("ctrl+w must keep the editor open, child = %T", f.child)
+	}
+	if v, _ := f.values["System.Description"].(string); !strings.HasPrefix(v, "X") {
+		t.Fatalf("form value after ctrl+w = %v", f.values["System.Description"])
+	}
+	if len(h.fake.Updates) != 0 {
+		t.Fatalf("ctrl+w in the form must not write: %+v", h.fake.Updates)
+	}
 	h.keys("i", "X", "esc", "ctrl+s")
 	if v, ok := f.values["System.Description"].(string); !ok || !strings.HasPrefix(v, "X") {
 		t.Fatalf("form value = %v", f.values["System.Description"])

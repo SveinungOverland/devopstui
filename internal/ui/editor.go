@@ -34,12 +34,9 @@ func (a *App) editDescription(it *model.WorkItem, apply func(string) tea.Cmd) te
 	title := fmt.Sprintf("Description of #%d %s", it.ID, trunc(it.Title, 40))
 	editor := a.cfg.EditorCommand()
 	if editor == "" {
-		a.popup = newMDEditor(title, initial, func(v string) tea.Cmd {
-			if strings.TrimSpace(v) == strings.TrimSpace(initial) {
-				return a.setFlash("description unchanged", false)
-			}
-			return apply(v)
-		})
+		// The editor keeps its own baseline (ctrl+w saves without closing),
+		// so it decides what counts as a change.
+		a.popup = newMDEditor(title, initial, apply)
 		return nil
 	}
 
@@ -84,7 +81,8 @@ func stripHeaderComment(s string) string {
 //
 // Normal mode: j/k/h/l move, g/G top/bottom, space toggles a checkbox on
 // the current line, dd/yy cut/copy the line and p/P paste it, i/a/A/o/O
-// enter insert mode, ctrl+s saves, q closes.
+// enter insert mode, ctrl+w saves and keeps editing, ctrl+s saves and
+// closes, q closes.
 // Insert mode: type; esc returns to normal mode.
 type mdEditor struct {
 	title    string
@@ -92,7 +90,11 @@ type mdEditor struct {
 	preview  viewport.Model
 	showPrev bool
 	insert   bool
+	// initial is the baseline the buffer is compared against: the text as
+	// opened, and after a ctrl+w write the text that was saved.
 	initial  string
+	inflight string // text of a ctrl+w write still in flight, "" when none
+	saved    bool   // a write landed and the buffer still matches it
 	quitArm  bool   // q pressed once with unsaved changes
 	pending  string // first key of a two-key command ("d" or "y")
 	register string // last dd/yy line, pasted with p/P
@@ -237,6 +239,45 @@ func (e *mdEditor) changed() bool {
 	return strings.TrimSpace(e.area.Value()) != strings.TrimSpace(e.initial)
 }
 
+// write saves the buffer and keeps the editor open, so a long edit can be
+// committed in steps. The baseline only moves once the write lands (see
+// saveDone), so a failed save still counts as unsaved changes.
+func (e *mdEditor) write() tea.Cmd {
+	if !e.changed() {
+		return flash("description unchanged")
+	}
+	text := e.area.Value()
+	cmd := e.onSubmit(text)
+	if cmd == nil {
+		// Applied without a round trip — the edit form keeps the new text
+		// as a pending value and saves it with the rest of the fields.
+		e.markSaved(text)
+		return nil
+	}
+	e.inflight = text
+	return cmd
+}
+
+// saveDone reports the outcome of the write started by ctrl+w.
+func (e *mdEditor) saveDone(err error) {
+	text := e.inflight
+	e.inflight = ""
+	if err == nil && text != "" {
+		e.markSaved(text)
+	}
+}
+
+func (e *mdEditor) markSaved(text string) {
+	e.initial = text
+	e.saved = true
+	e.quitArm = false
+}
+
+// flash shows a message in the footer without touching the buffer.
+func flash(text string) tea.Cmd {
+	return func() tea.Msg { return flashMsg{text: text} }
+}
+
 func (e *mdEditor) Update(msg tea.Msg) (popup, tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -247,6 +288,9 @@ func (e *mdEditor) Update(msg tea.Msg) (popup, tea.Cmd) {
 	// Keys valid in both modes.
 	switch km.String() {
 	case "ctrl+s":
+		if !e.changed() {
+			return nil, flash("description unchanged")
+		}
 		return nil, e.onSubmit(e.area.Value())
 	case "ctrl+p":
 		e.showPrev = !e.showPrev
@@ -284,6 +328,10 @@ func (e *mdEditor) Update(msg tea.Msg) (popup, tea.Cmd) {
 		return e, nil // any other second key cancels the command
 	}
 	switch k {
+	// ctrl+w is vim's :w — save and carry on editing. It is normal mode
+	// only so the textarea keeps ctrl+w as delete-word while typing.
+	case "ctrl+w":
+		return e, e.write()
 	case "d", "y":
 		e.pending = k
 	case "p":
@@ -371,22 +419,28 @@ func (e *mdEditor) View(w, h int) string {
 
 	mode := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("0")).Background(cAccent).Render("NORMAL")
 	hints := sKey.Render("i") + sMuted.Render(" insert  ") + sKey.Render("j/k") + sMuted.Render(" move  ") +
-		sKey.Render("space") + sMuted.Render(" toggle [ ]  ") + sKey.Render("dd yy p") + sMuted.Render(" line ops  ") +
-		sKey.Render("ctrl+s") + sMuted.Render(" save  ") + sKey.Render("q") + sMuted.Render(" close")
+		sKey.Render("space") + sMuted.Render(" toggle [ ]  ") + sKey.Render("dd yy p") + sMuted.Render(" lines  ") +
+		sKey.Render("ctrl+w") + sMuted.Render(" save  ") + sKey.Render("ctrl+s") + sMuted.Render(" save+close  ") +
+		sKey.Render("q") + sMuted.Render(" close")
 	if e.insert {
 		mode = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("0")).Background(cSelect).Render("INSERT")
-		hints = sKey.Render("esc") + sMuted.Render(" normal mode  ") + sKey.Render("ctrl+s") + sMuted.Render(" save")
+		hints = sKey.Render("esc") + sMuted.Render(" normal mode  ") + sKey.Render("ctrl+s") + sMuted.Render(" save+close")
 	}
 	if e.quitArm {
-		hints = sErr.Render("unsaved changes: ") + sKey.Render("q") + sMuted.Render(" again to discard, ") + sKey.Render("ctrl+s") + sMuted.Render(" to save")
+		hints = sErr.Render("unsaved changes: ") + sKey.Render("q") + sMuted.Render(" again to discard, ") + sKey.Render("ctrl+s") + sMuted.Render(" to save and close")
 	}
 	if e.pending != "" {
 		hints = sKey.Render(e.pending) + sMuted.Render(" …  (") + sKey.Render(e.pending+e.pending) + sMuted.Render(" line)")
 	}
 	pos := sMuted.Render(fmt.Sprintf("  %d/%d", e.area.Line()+1, e.area.LineCount()))
 	modified := ""
-	if e.changed() {
+	switch {
+	case e.inflight != "":
+		modified = sMuted.Render(" [saving…]")
+	case e.changed():
 		modified = sSelected.Render(" [+]")
+	case e.saved:
+		modified = sOK.Render(" [saved]")
 	}
 	right := sKey.Render("ctrl+p") + sMuted.Render(" preview")
 	status := mode + pos + modified + "  " + hints

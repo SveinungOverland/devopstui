@@ -451,6 +451,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case itemUpdatedMsg:
 		a.busy = ""
+		a.reportSave(msg.err)
 		if msg.err != nil {
 			return a, a.setFlash(msg.err.Error(), true)
 		}
@@ -546,6 +547,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 	return a, nil
+}
+
+// reportSave tells a still-open description editor how its ctrl+w write
+// went, so the "saved" baseline only moves when the server took the text.
+func (a *App) reportSave(err error) {
+	p := a.popup
+	if f, ok := p.(*form); ok {
+		p = f.child
+	}
+	if e, ok := p.(*mdEditor); ok {
+		e.saveDone(err)
+	}
 }
 
 // updatePopup forwards msg to the popup. A popup callback may itself open a
@@ -1122,8 +1135,38 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 	a.backlog.apply(it)
 	a.dash.apply(it)
 	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	// The drill-down can hold items no list has (children fetched for it),
+	// so swap those pointers too or they keep a superseded revision.
+	if a.item != nil {
+		a.item.apply(it)
+		for i, s := range a.itemStack {
+			if s.ID == it.ID {
+				a.itemStack[i] = it
+			}
+		}
+	}
 	a.syncItemView()
 	a.refreshDetail()
+}
+
+// fresh re-resolves an item by id. A popup that stays open across a write
+// (the description editor) captured the item as it was when it opened; the
+// next write from it needs the revision the last one produced.
+func (a *App) fresh(it *model.WorkItem) *model.WorkItem {
+	if f := a.lookup(it.ID); f != nil {
+		return f
+	}
+	if a.item != nil {
+		if a.item.item.ID == it.ID {
+			return a.item.item
+		}
+		for _, c := range a.item.children {
+			if c.ID == it.ID {
+				return c
+			}
+		}
+	}
+	return it
 }
 
 // childItems returns the direct children of id across the loaded lists,

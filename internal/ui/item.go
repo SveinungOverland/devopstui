@@ -36,6 +36,18 @@ func newItemView(it *model.WorkItem, cfg model.BacklogConfig) *itemView {
 	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true}
 }
 
+// apply swaps in an updated copy of the item or one of its children.
+func (v *itemView) apply(it *model.WorkItem) {
+	if v.item != nil && v.item.ID == it.ID {
+		v.item = it
+	}
+	for i, c := range v.children {
+		if c.ID == it.ID {
+			v.children[i] = it
+		}
+	}
+}
+
 // setChildren rebuilds the kanban, keeping the cursor on the same child.
 func (v *itemView) setChildren(children []*model.WorkItem, states []string) {
 	cur := v.currentChild()

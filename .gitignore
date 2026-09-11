@@ -34,3 +34,6 @@ go.work.sum
 # Build output
 bin/
 dumps/
+.kata.local.toml
+/.kata.toml
+/CLAUDE.md

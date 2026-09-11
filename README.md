@@ -91,20 +91,27 @@ Press `d` on an item to edit its description:
   | Normal mode | | Insert mode | |
   |---|---|---|---|
   | `j` `k` | line down / up | `esc` | back to normal mode |
-  | `h` `l` `0` `$` | move within the line | `ctrl+s` | save |
+  | `h` `l` `0` `$` | move within the line | `ctrl+s` | save and close |
   | `g` `G` | top / bottom | | |
   | `space` | toggle `- [ ]` / `- [x]` on the line (a plain list item gains a checkbox) | | |
   | `i` `a` `A` | insert at cursor / after cursor / end of line | | |
   | `o` `O` | open a line below / above | | |
   | `dd` `yy` | cut / copy the line | | |
   | `p` `P` | paste the line below / above | | |
-  | `ctrl+s` | save | | |
+  | `ctrl+w` | save and keep editing, like vim's `:w` | | |
+  | `ctrl+s` | save and close | | |
   | `q` | close (press twice to discard unsaved changes) | | |
   | `ctrl+p` `ctrl+d` `ctrl+u` | toggle / scroll the preview | | |
 
+  The status line tracks what is on the server: `[+]` unsaved, `[saving…]` in flight,
+  `[saved]` written. A failed write leaves the text as unsaved, so `q` still warns before
+  discarding it. `ctrl+w` works in normal mode only, which leaves it free to delete the
+  previous word while you type.
+
   Set `editor: inline` to force this editor even when `$EDITOR` is set.
 
-The Description field in the `e` edit form uses the same editor.
+The Description field in the `e` edit form uses the same editor. There `ctrl+w` hands the text
+to the form as a pending change; the form's own `ctrl+s` writes it with the other fields.
 
 ## Keys
 
