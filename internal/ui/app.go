@@ -59,8 +59,25 @@ type App struct {
 	w, h int
 	view viewID
 
-	sprint, backlog, dash *list
-	board                 *board
+	sprint, backlog *list
+	board           *board
+
+	// Dashboard: a kanban of the requirement-level items assigned to @Me
+	// (dashBoard) on top, and below it a kanban-with-swimlanes of those
+	// PBIs' children (dashLanes) — state as columns, PBI as the lane.
+	// myItems is the raw MyItems() result the top kanban is filtered from;
+	// dashChildren is the last ChildrenOf() fetch for "my PBIs", keyed by
+	// parent id, used both to build the lanes and as a lookup/childItems
+	// source for those PBIs. dashLanesReq guards that fetch against a
+	// slower, superseded response landing after a fresher one.
+	myItems        []*model.WorkItem
+	dashChildren   map[int][]*model.WorkItem
+	dashLanesReq   int
+	dashBoard      *board
+	dashLanes      *lanes
+	dashFocusLanes bool // false = kanban focused, true = lanes focused
+	previewDash    bool // side preview pane beside the Dashboard's kanban
+
 	// item is the drill-down view; itemStack keeps the trail so esc walks
 	// back out, and itemReturn is the tab to land on at the bottom.
 	item         *itemView
@@ -98,20 +115,20 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	sp.Style = lipgloss.NewStyle().Foreground(cAccent)
 	a := &App{
 		client: client, cfg: cfg, cfgPath: cfgPath, savePAT: savePAT,
-		sprint:  newList("sprint is empty"),
-		backlog: newList("backlog is empty"),
-		dash:    newList("nothing assigned to you"),
-		board:   newBoard(),
-		spin:    sp,
-		loading: map[viewID]bool{},
-		cmd:     newCmdbar(),
-		view:    viewSprint,
+		sprint:    newList("sprint is empty"),
+		backlog:   newList("backlog is empty"),
+		board:     newBoard(),
+		dashBoard: newBoard(),
+		dashLanes: newLanes(),
+		spin:      sp,
+		loading:   map[viewID]bool{},
+		cmd:       newCmdbar(),
+		view:      viewSprint,
 
 		previewList:  true,
 		previewBoard: true,
+		previewDash:  true,
 	}
-	a.dash.flat = true
-	a.dash.showIter = true
 	a.wireLists()
 	a.ctx.Org = cfg.Org
 	a.ctx.Project = cfg.Project
@@ -133,14 +150,77 @@ func (a *App) include() func(*model.WorkItem) bool {
 // applyTeamFilter pushes the current filter into every view.
 func (a *App) applyTeamFilter() {
 	inc := a.include()
-	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+	for _, l := range []*list{a.sprint, a.backlog} {
 		l.include = inc
 		if l.all != nil {
 			l.rebuild()
 		}
 	}
 	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, inc)
+	a.refreshDashboard()
 	a.refreshDetail()
+}
+
+// refreshDashboard rebuilds the Dashboard's kanban and lanes from whatever
+// is already loaded (myItems, dashChildren) and the current team/sprint
+// filters, without refetching. Call loadDashLanes to actually refetch
+// children.
+func (a *App) refreshDashboard() {
+	inc := a.dashInclude()
+	a.dashBoard.setItems(a.currentBoard(), a.myItems, a.ctx.Backlog, inc)
+	a.dashLanes.setLanes(a.myPBIs(), a.dashChildren, nil)
+}
+
+// dashInclude combines the team filter with restricting to the selected
+// sprint, when one is selected — the Dashboard's own extra scoping on top
+// of "assigned to @Me", so it doesn't span every sprint at once while
+// you're clearly looking at one. Progress badges on the kanban still count
+// every loaded task regardless (board.setItems computes those before this
+// filter is applied), same trade-off already accepted for the team filter.
+func (a *App) dashInclude() func(*model.WorkItem) bool {
+	team := a.include()
+	iter := a.ctx.Iteration.Path
+	if iter == "" {
+		return team
+	}
+	return func(w *model.WorkItem) bool {
+		if w.IterationPath != iter {
+			return false
+		}
+		return team == nil || team(w)
+	}
+}
+
+// dashLayout splits the Dashboard's body height between the kanban (top)
+// and the lanes (bottom); topH also sizes the side preview pane when shown.
+// 5 = 1 summary line + 2 border rows for each of the two bordered rows.
+func (a *App) dashLayout() (topH, botH int) {
+	budget := max(a.bodyHeight()-5, 6)
+	// The lanes show every child (no more "+N" collapsing), so they get
+	// the bigger share of the body.
+	topH = max(budget*2/5, 5)
+	botH = max(budget-topH, 6)
+	return topH, botH
+}
+
+// myPBIs is the requirement-level items assigned to @Me, in the order
+// MyItems returned them, after dashInclude (team filter + selected
+// sprint). This is exactly the set dashBoard.setItems buckets into cards,
+// kept available separately because the lanes and the ChildrenOf fetch
+// need just the id list.
+func (a *App) myPBIs() []*model.WorkItem {
+	include := a.dashInclude()
+	var out []*model.WorkItem
+	for _, it := range a.myItems {
+		if a.ctx.Backlog.TaskLevel(it) || it.Kind == model.KindEpic || it.Kind == model.KindFeature {
+			continue
+		}
+		if include != nil && !include(it) {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 type teamFilterMsg struct {
@@ -185,7 +265,7 @@ func (a *App) pickTeamFilter() tea.Cmd {
 
 // wireLists gives the lists their callbacks into the app.
 func (a *App) wireLists() {
-	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+	for _, l := range []*list{a.sprint, a.backlog} {
 		l.taskLevel = func(w *model.WorkItem) bool { return a.ctx.Backlog.TaskLevel(w) }
 		l.parentTitle = func(id int) string {
 			if p := a.lookup(id); p != nil {
@@ -193,19 +273,6 @@ func (a *App) wireLists() {
 			}
 			return ""
 		}
-	}
-	a.dash.progressItems = func() []*model.WorkItem {
-		seen := map[int]bool{}
-		var out []*model.WorkItem
-		for _, l := range []*list{a.sprint, a.backlog, a.dash} {
-			for _, it := range l.all {
-				if !seen[it.ID] {
-					seen[it.ID] = true
-					out = append(out, it)
-				}
-			}
-		}
-		return out
 	}
 }
 
@@ -238,6 +305,18 @@ type itemsLoadedMsg struct {
 type itemUpdatedMsg struct {
 	item *model.WorkItem
 	err  error
+}
+
+// dashLanesLoadedMsg carries the bulk ChildrenOf fetch for the Dashboard's
+// lanes, issued after MyItems lands (it needs "my PBI" ids first). req ties
+// it to the request that produced it: only the response matching the
+// App's current dashLanesReq is applied, so an overlapping reload can never
+// lose to an older, slower one that happens to land later.
+type dashLanesLoadedMsg struct {
+	req      int
+	states   []string
+	children map[int][]*model.WorkItem
+	err      error
 }
 
 type popupMsg struct{ p popup }
@@ -387,6 +466,73 @@ func (a *App) reloadAll() tea.Cmd {
 	return tea.Batch(a.loadView(viewSprint), a.loadView(viewDash), a.loadView(viewBacklog))
 }
 
+// loadDashLanes bulk-fetches children for the current "my PBIs" set, for
+// the Dashboard's lanes, plus the column order for the dominant child
+// type. Called after MyItems lands, since it needs the PBI ids first.
+// dashLanesReq is bumped on every call so a slower, superseded fetch can
+// never overwrite a fresher one, regardless of arrival order.
+func (a *App) loadDashLanes() tea.Cmd {
+	pbis := a.myPBIs()
+	a.dashLanesReq++
+	req := a.dashLanesReq
+	if len(pbis) == 0 {
+		a.dashChildren = nil
+		a.dashLanes.setLanes(nil, nil, nil)
+		return nil
+	}
+	ids := make([]int, len(pbis))
+	for i, p := range pbis {
+		ids[i] = p.ID
+	}
+	project, cfg := a.ctx.Project, a.ctx.Backlog
+	known := a.dashChildren
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		children, err := a.client.ChildrenOf(ctx, project, ids)
+		if err != nil {
+			return dashLanesLoadedMsg{req: req, err: err}
+		}
+		// Column order comes from the type most children share, same idea
+		// as the item drill-down's kanban (dominantType, loadItemChildren).
+		// Bugs are excluded: the lanes drop them (they carry different
+		// states and already show on the kanban above when they're PBIs),
+		// so they shouldn't skew which states the shared columns use.
+		typ := dominantType(nonBugChildren(flattenChildren(children)))
+		if typ == "" {
+			typ = dominantType(nonBugChildren(flattenChildren(known)))
+		}
+		if typ == "" {
+			typ = cfg.TaskType
+		}
+		if typ == "" {
+			typ = "Task"
+		}
+		states, _ := a.client.States(ctx, project, typ)
+		return dashLanesLoadedMsg{req: req, children: children, states: states}
+	}
+}
+
+func flattenChildren(byParent map[int][]*model.WorkItem) []*model.WorkItem {
+	var out []*model.WorkItem
+	for _, children := range byParent {
+		out = append(out, children...)
+	}
+	return out
+}
+
+// nonBugChildren drops Bugs: the Dashboard's lanes don't show them (see
+// lanes.setLanes), so they shouldn't factor into picking the shared columns.
+func nonBugChildren(items []*model.WorkItem) []*model.WorkItem {
+	var out []*model.WorkItem
+	for _, it := range items {
+		if it.Kind != model.KindBug {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // ------------------------------------------------------------ update
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -424,6 +570,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.lastLoad = time.Now()
+		var cmd tea.Cmd
 		switch msg.view {
 		case viewSprint:
 			a.sprint.setItems(msg.items, msg.external)
@@ -431,7 +578,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewBacklog:
 			a.backlog.setItems(msg.items, nil)
 		case viewDash:
-			a.dash.setItems(msg.items, nil)
+			a.myItems = msg.items
+			a.refreshDashboard()
+			cmd = a.loadDashLanes()
 		}
 		a.syncItemView()
 		if a.pendingJump != 0 {
@@ -444,9 +593,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if a.view == viewBoard {
 				a.board.jumpTo(a.pendingJump)
 				a.pendingJump = 0
+			} else if a.view == viewDash {
+				a.dashBoard.jumpTo(a.pendingJump)
+				a.pendingJump = 0
 			}
 		}
 		a.refreshDetail()
+		return a, cmd
+
+	case dashLanesLoadedMsg:
+		if msg.req != a.dashLanesReq { // superseded by a newer fetch
+			return a, nil
+		}
+		if msg.err != nil {
+			return a, a.setFlash("active work: "+msg.err.Error(), true)
+		}
+		a.dashChildren = msg.children
+		a.dashLanes.setLanes(a.myPBIs(), a.dashChildren, msg.states)
 		return a, nil
 
 	case itemUpdatedMsg:
@@ -708,6 +871,11 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 			return cmd
 		}
 	}
+	if a.view == viewDash {
+		if cmd, handled := a.dashOverride(msg); handled {
+			return cmd
+		}
+	}
 
 	// Global keys.
 	switch {
@@ -752,9 +920,12 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		a.refreshDetail()
 		return nil
 	case key.Matches(msg, keys.Preview):
-		if a.view == viewBoard {
+		switch a.view {
+		case viewBoard:
 			a.previewBoard = !a.previewBoard
-		} else {
+		case viewDash:
+			a.previewDash = !a.previewDash
+		default:
 			a.previewList = !a.previewList
 		}
 		a.refreshDetail()
@@ -780,7 +951,92 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return a.onBoardKey(msg)
 	}
+	if a.view == viewDash {
+		if msg.String() == "enter" { // enter drills in from a card
+			return a.openItem(a.currentItem())
+		}
+		return a.onDashKey(msg)
+	}
 	return a.onListKey(msg, a.activeList())
+}
+
+// dashOverride handles the keys the Dashboard's layout redefines: Tab
+// cycles focus kanban → lanes → preview → kanban (skipping lanes when
+// empty, and preview when hidden or the terminal is too narrow). Leaving
+// the preview step is handled by the generic focusDetail block earlier in
+// onKey, which always clears focusDetail on Tab without touching
+// dashFocusLanes — since we reset it to false on the way into the preview,
+// that generic exit lands back on the kanban, completing the cycle.
+func (a *App) dashOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
+	if key.Matches(msg, keys.Focus) {
+		switch {
+		case !a.dashFocusLanes && len(a.dashLanes.ls) > 0:
+			a.dashFocusLanes = true
+		case a.detailWidth() > 0:
+			a.dashFocusLanes = false
+			a.focusDetail = true
+			a.refreshDetail()
+		default:
+			a.dashFocusLanes = false
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
+func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
+	if a.dashFocusLanes {
+		ln := a.dashLanes
+		switch {
+		case key.Matches(msg, keys.Down):
+			ln.move(1, 0)
+		case key.Matches(msg, keys.Up):
+			ln.move(-1, 0)
+		case key.Matches(msg, keys.Left):
+			ln.move(0, -1)
+		case key.Matches(msg, keys.Right):
+			ln.move(0, 1)
+		case key.Matches(msg, keys.Select):
+			ln.toggleSelect()
+		case key.Matches(msg, keys.ClearSel):
+			ln.selected = map[int]bool{}
+		case key.Matches(msg, keys.ColLeft):
+			return a.moveLaneColumn(-1)
+		case key.Matches(msg, keys.ColRight):
+			return a.moveLaneColumn(1)
+		default:
+			return a.onActionKey(msg)
+		}
+		a.refreshDetail()
+		return nil
+	}
+	b := a.dashBoard
+	switch {
+	case key.Matches(msg, keys.Down):
+		b.move(0, 1)
+	case key.Matches(msg, keys.Up):
+		b.move(0, -1)
+	case key.Matches(msg, keys.Left):
+		b.move(-1, 0)
+	case key.Matches(msg, keys.Right):
+		b.move(1, 0)
+	case key.Matches(msg, keys.Top):
+		b.row = 0
+	case key.Matches(msg, keys.Bottom):
+		b.move(0, 1<<20)
+	case key.Matches(msg, keys.Select):
+		b.toggleSelect()
+	case key.Matches(msg, keys.ClearSel):
+		b.selected = map[int]bool{}
+	case key.Matches(msg, keys.ColLeft):
+		return a.moveColumn(-1)
+	case key.Matches(msg, keys.ColRight):
+		return a.moveColumn(1)
+	default:
+		return a.onActionKey(msg)
+	}
+	a.refreshDetail()
+	return nil
 }
 
 func (a *App) onListKey(msg tea.KeyMsg, l *list) tea.Cmd {
@@ -969,7 +1225,7 @@ func (a *App) needsLoad(v viewID) bool {
 	case viewBacklog:
 		return a.backlog.all == nil && !a.loading[viewBacklog]
 	case viewDash:
-		return a.dash.all == nil && !a.loading[viewDash]
+		return a.myItems == nil && !a.loading[viewDash]
 	}
 	return false
 }
@@ -993,7 +1249,13 @@ func (a *App) setIteration(it model.Iteration) tea.Cmd {
 	}
 	a.ctx.Iteration = it
 	a.sprint.clearSelection()
-	return a.loadView(viewSprint)
+	// The Dashboard's kanban/lanes are also scoped to the selected sprint:
+	// re-bucket immediately from what's already loaded, then refetch the
+	// lanes' children since the qualifying set of "my PBIs" may have
+	// changed.
+	a.refreshDashboard()
+	a.refreshDetail()
+	return tea.Batch(a.loadView(viewSprint), a.loadDashLanes())
 }
 
 // ------------------------------------------------------------ pickers for context
@@ -1006,8 +1268,9 @@ func (a *App) pickProject() tea.Cmd {
 	a.popup = newPicker("Project", items, func(pi pickItem) tea.Cmd {
 		p := pi.Value.(model.Project)
 		a.ctx.Project, a.ctx.Team, a.ctx.Iteration = p.Name, "", model.Iteration{}
-		a.sprint, a.backlog, a.dash = newList("sprint is empty"), newList("backlog is empty"), newList("nothing assigned to you")
-		a.dash.flat, a.dash.showIter = true, true
+		a.sprint, a.backlog = newList("sprint is empty"), newList("backlog is empty")
+		a.dashBoard, a.dashLanes = newBoard(), newLanes()
+		a.myItems, a.dashChildren = nil, nil
 		a.wireLists()
 		return a.loadContext()
 	})
@@ -1071,8 +1334,22 @@ func (a *App) activeList() *list {
 		return a.sprint
 	case viewBacklog:
 		return a.backlog
+	}
+	return nil
+}
+
+// activeBoard is the kanban a column move (H/L) applies to: the Board tab's
+// board, or the Dashboard's kanban when its lanes don't have focus. Lanes
+// aren't a board (their state is fixed to "In Progress"), so there is no
+// column move for them.
+func (a *App) activeBoard() *board {
+	switch a.view {
+	case viewBoard:
+		return a.board
 	case viewDash:
-		return a.dash
+		if !a.dashFocusLanes {
+			return a.dashBoard
+		}
 	}
 	return nil
 }
@@ -1084,6 +1361,11 @@ func (a *App) currentItem() *model.WorkItem {
 		return a.item.current()
 	case a.view == viewBoard:
 		return a.board.current()
+	case a.view == viewDash:
+		if a.dashFocusLanes {
+			return a.dashLanes.current()
+		}
+		return a.dashBoard.current()
 	}
 	if l := a.activeList(); l != nil {
 		return l.current()
@@ -1101,6 +1383,11 @@ func (a *App) targetItems() []*model.WorkItem {
 		return nil
 	case a.view == viewBoard:
 		return a.board.targetItems()
+	case a.view == viewDash:
+		if a.dashFocusLanes {
+			return a.dashLanes.targetItems()
+		}
+		return a.dashBoard.targetItems()
 	}
 	if l := a.activeList(); l != nil {
 		return l.targetItems()
@@ -1109,21 +1396,38 @@ func (a *App) targetItems() []*model.WorkItem {
 }
 
 func (a *App) clearSelection() {
-	if a.view == viewBoard {
+	switch a.view {
+	case viewBoard:
 		a.board.selected = map[int]bool{}
-		return
-	}
-	if l := a.activeList(); l != nil {
-		l.clearSelection()
+	case viewDash:
+		a.dashBoard.selected = map[int]bool{}
+		a.dashLanes.selected = map[int]bool{}
+	default:
+		if l := a.activeList(); l != nil {
+			l.clearSelection()
+		}
 	}
 }
 
-// lookup finds an item by id in any loaded list.
+// lookup finds an item by id in any loaded list, or among the Dashboard's
+// data (myItems and the last ChildrenOf fetch for "my PBIs").
 func (a *App) lookup(id int) *model.WorkItem {
-	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+	for _, l := range []*list{a.sprint, a.backlog} {
 		if l.tree != nil {
 			if n, ok := l.tree.Get(id); ok {
 				return n.Item
+			}
+		}
+	}
+	for _, it := range a.myItems {
+		if it.ID == id {
+			return it
+		}
+	}
+	for _, children := range a.dashChildren {
+		for _, c := range children {
+			if c.ID == id {
+				return c
 			}
 		}
 	}
@@ -1133,8 +1437,20 @@ func (a *App) lookup(id int) *model.WorkItem {
 func (a *App) applyUpdate(it *model.WorkItem) {
 	a.sprint.apply(it)
 	a.backlog.apply(it)
-	a.dash.apply(it)
+	for i, mi := range a.myItems {
+		if mi.ID == it.ID {
+			a.myItems[i] = it
+		}
+	}
+	for _, children := range a.dashChildren {
+		for i, c := range children {
+			if c.ID == it.ID {
+				children[i] = it
+			}
+		}
+	}
 	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	a.refreshDashboard()
 	// The drill-down can hold items no list has (children fetched for it),
 	// so swap those pointers too or they keep a superseded revision.
 	if a.item != nil {
@@ -1169,17 +1485,29 @@ func (a *App) fresh(it *model.WorkItem) *model.WorkItem {
 	return it
 }
 
-// childItems returns the direct children of id across the loaded lists,
-// sorted by kind then id.
+// childItems returns the direct children of id across the loaded lists and
+// the Dashboard's data, sorted by kind then id.
 func (a *App) childItems(id int) []*model.WorkItem {
 	seen := map[int]bool{}
 	var out []*model.WorkItem
-	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+	for _, l := range []*list{a.sprint, a.backlog} {
 		for _, it := range l.all {
 			if it.ParentID == id && !seen[it.ID] {
 				seen[it.ID] = true
 				out = append(out, it)
 			}
+		}
+	}
+	for _, it := range a.myItems {
+		if it.ParentID == id && !seen[it.ID] {
+			seen[it.ID] = true
+			out = append(out, it)
+		}
+	}
+	for _, c := range a.dashChildren[id] {
+		if !seen[c.ID] {
+			seen[c.ID] = true
+			out = append(out, c)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1206,8 +1534,13 @@ func (a *App) refreshDetail() {
 	if w == 0 {
 		w = a.w - 4
 	}
+	height := a.bodyHeight() - 2
+	if a.view == viewDash {
+		topH, _ := a.dashLayout()
+		height = topH - 2
+	}
 	a.detail.Width = w
-	a.detail.Height = a.bodyHeight() - 2
+	a.detail.Height = height
 	a.detail.SetContent(renderDetail(it, parent, children, w, a.ctx.Backlog))
 	a.detail.GotoTop()
 }
@@ -1502,6 +1835,12 @@ func (a *App) detailWidth() int {
 		}
 		return min(a.w/3, 60)
 	}
+	if a.view == viewDash {
+		if !a.previewDash {
+			return 0
+		}
+		return min(a.w/3, 60)
+	}
 	if !a.previewList {
 		return 0
 	}
@@ -1583,6 +1922,19 @@ func (a *App) renderHeader() string {
 		summary = sMuted.Render(focus)
 	case a.view == viewBoard:
 		summary = sMuted.Render(a.currentBoard().Name)
+	case a.view == viewDash:
+		focus := "kanban"
+		switch {
+		case a.focusDetail:
+			focus = "preview"
+		case a.dashFocusLanes:
+			focus = "lanes"
+		}
+		pbis := 0
+		for _, col := range a.dashBoard.cols {
+			pbis += len(col)
+		}
+		summary = sMuted.Render(fmt.Sprintf("%s · %d PBI(s) · %d lane(s)", focus, pbis, len(a.dashLanes.ls)))
 	default:
 		if l := a.activeList(); l != nil {
 			summary = l.summary()
@@ -1637,15 +1989,15 @@ func (a *App) renderBody() string {
 		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
+	if a.view == viewDash {
+		return a.renderDash(a.w, h)
+	}
 	l := a.activeList()
 	lw := a.w - 2
 	if dw > 0 {
 		lw = a.w - dw - 4
 	}
 	content := l.view(lw, h-2)
-	if a.view == viewDash {
-		content = a.dashSummary(lw) + "\n" + l.view(lw, h-3)
-	}
 	left := listStyle.Width(lw).Height(h - 2).Render(content)
 	if dw == 0 {
 		return left
@@ -1654,19 +2006,39 @@ func (a *App) renderBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
+// renderDash lays out the Dashboard's two rows: a kanban of the PBIs
+// assigned to @Me on top, and swimlanes of their active subitems below.
+func (a *App) renderDash(w, h int) string {
+	summary := a.dashSummary(w)
+	topH, botH := a.dashLayout()
+
+	dw := a.detailWidth()
+	var top string
+	if dw > 0 {
+		detailStyle := sPanel
+		if a.focusDetail {
+			detailStyle = sPanelFocus
+		}
+		left := a.dashBoard.view(w-dw-2, topH, !a.dashFocusLanes && !a.focusDetail)
+		right := detailStyle.Width(dw).Height(topH - 2).Render(a.detail.View())
+		top = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	} else {
+		top = a.dashBoard.view(w, topH, !a.dashFocusLanes)
+	}
+	bottom := a.dashLanes.view(w, botH, a.dashFocusLanes)
+	return summary + "\n" + top + "\n" + bottom
+}
+
 func (a *App) dashSummary(width int) string {
-	inSprint, elsewhere := 0, 0
-	var effort float64
-	for _, it := range a.dash.all {
-		if it.IterationPath == a.ctx.Iteration.Path {
-			inSprint++
-			effort += it.Effort
-		} else {
-			elsewhere++
+	pbis := len(a.myPBIs())
+	children := 0
+	for _, l := range a.dashLanes.ls {
+		for _, col := range l.cols {
+			children += len(col)
 		}
 	}
-	s := fmt.Sprintf("%s in %s · %s elsewhere · %s effort open",
-		sKey.Render(strconv.Itoa(inSprint)), a.ctx.Iteration.Name, sKey.Render(strconv.Itoa(elsewhere)), sKey.Render(fmtEffort(effort)))
+	s := fmt.Sprintf("%s PBI(s) assigned to you · %s work item(s) across %s lane(s)",
+		sKey.Render(strconv.Itoa(pbis)), sKey.Render(strconv.Itoa(children)), sKey.Render(strconv.Itoa(len(a.dashLanes.ls))))
 	return pad(s, width)
 }
 
@@ -1686,6 +2058,11 @@ func (a *App) renderFooter() string {
 		}
 	case a.view == viewBoard:
 		bindings = footerBoard
+	case a.view == viewDash:
+		bindings = footerDashKanban
+		if a.dashFocusLanes {
+			bindings = footerDashLanes
+		}
 	}
 	if a.focusDetail {
 		bindings = []key.Binding{keys.Up, keys.Down, keys.Focus, keys.Edit, keys.Open}

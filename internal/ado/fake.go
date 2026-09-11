@@ -88,6 +88,15 @@ func NewFake() *Fake {
 	add(1020, 1012, "Bug", "Spans lost when retry budget exhausted", "Approved", "Sveinung Øverland", cur, 2, 1)
 	add(1021, 0, "Product Backlog Item", "Rotate signing keys quarterly", "New", "", cur, 3, 4)
 	add(1022, 0, "Bug", "Login page flickers on Safari", "New", "Priya Natarajan", cur, 1, 2)
+	// A teammate actively working under a PBI of mine, for the Dashboard's
+	// active-subitem lanes; the lane shows regardless of who this is
+	// assigned to.
+	add(1023, 1003, "Task", "Wire up magic link email template", "In Progress", "Priya Natarajan", cur, 0, 0)
+	// A bug filed under a different PBI of mine that otherwise has no
+	// children, for the Dashboard's lanes to drop: it carries
+	// requirement-level states, not task states, and shouldn't earn that
+	// PBI a lane on its own.
+	add(1024, 1020, "Bug", "Retry budget also drops the parent span id", "New", "Priya Natarajan", cur, 1, 2)
 	// A sub-team owns part of the area tree.
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
@@ -361,6 +370,21 @@ func (f *Fake) Children(ctx context.Context, project string, parentID int) ([]*m
 		return nil, err
 	}
 	return f.snapshot(func(w *model.WorkItem) bool { return w.ParentID == parentID && w.State != "Removed" }), nil
+}
+
+func (f *Fake) ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	want := map[int]bool{}
+	for _, id := range parentIDs {
+		want[id] = true
+	}
+	out := map[int][]*model.WorkItem{}
+	for _, it := range f.snapshot(func(w *model.WorkItem) bool { return want[w.ParentID] && w.State != "Removed" }) {
+		out[it.ParentID] = append(out[it.ParentID], it)
+	}
+	return out, nil
 }
 
 func (f *Fake) Get(ctx context.Context, id int) (*model.WorkItem, error) {

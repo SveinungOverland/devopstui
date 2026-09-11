@@ -37,6 +37,9 @@ type Client interface {
 	Parents(ctx context.Context, project string) ([]*model.WorkItem, error)
 	// Children returns the direct children of a work item.
 	Children(ctx context.Context, project string, parentID int) ([]*model.WorkItem, error)
+	// ChildrenOf batch-fetches children for several parents at once, keyed
+	// by parent id. Parents with no children are simply absent from the map.
+	ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error)
 
 	Get(ctx context.Context, id int) (*model.WorkItem, error)
 	// Update applies field patches with an optimistic concurrency check on rev.

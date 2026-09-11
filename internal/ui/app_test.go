@@ -329,7 +329,7 @@ func TestViewsAndPopups(t *testing.T) {
 	}
 	h.keys("1")
 	h.dump("10-dash")
-	if !strings.Contains(h.app.View(), "elsewhere") {
+	if !strings.Contains(h.app.View(), "PBI(s) assigned to you") {
 		t.Error("dash missing summary")
 	}
 	h.keys("4")
@@ -756,16 +756,336 @@ func TestNewChildAssigneeInheritanceLimits(t *testing.T) {
 	}
 }
 
-func TestDashboardShowsParent(t *testing.T) {
+func TestDashboardKanbanAndLanes(t *testing.T) {
 	h := newHarness(t, 160, 45)
+	a := h.app
 	h.keys("1")
-	h.dump("25-dash-parents")
-	v := h.app.View()
-	if !strings.Contains(v, "Add trace header to publisher  ↑ Propagate") {
-		t.Error("task row on the dashboard should keep its title and show its parent PBI")
+	h.dump("25-dash-kanban-lanes")
+
+	// The kanban only holds requirement-level items assigned to @Me: PBIs
+	// 1003/1013 and bug 1020, never the Epics/Features/Tasks also assigned
+	// to Sveinung (1002, 1012, 1015).
+	got := map[int]bool{}
+	for _, col := range a.dashBoard.cols {
+		for _, it := range col {
+			got[it.ID] = true
+		}
 	}
-	if !strings.Contains(v, "1/3") {
-		t.Error("dashboard badge should count all loaded tasks, not only mine")
+	for _, want := range []int{1003, 1013, 1020} {
+		if !got[want] {
+			t.Errorf("kanban missing my PBI #%d", want)
+		}
+	}
+	for _, unwanted := range []int{1002, 1012, 1015} {
+		if got[unwanted] {
+			t.Errorf("kanban should not show #%d (Epic/Feature/Task)", unwanted)
+		}
+	}
+
+	// The lanes are a kanban with state as columns and the parent PBI as
+	// the swimlane: a PBI with children gets a lane showing ALL of them,
+	// bucketed by state, not just the active ones. 1003 has one child
+	// (1023, In Progress); 1013 has three (1015/1017 To Do, 1016 Done).
+	// 1020's only child is a bug (1024), which lanes drop entirely (see
+	// TestDashboardLanesExcludeBugs), so it also gets no lane.
+	if len(a.dashLanes.ls) != 2 {
+		t.Fatalf("lanes = %+v, want exactly 2 (#1003 and #1013)", a.dashLanes.ls)
+	}
+	byParent := map[int]lane{}
+	for _, l := range a.dashLanes.ls {
+		byParent[l.parent.ID] = l
+	}
+	colOf := func(state string) int {
+		for i, s := range a.dashLanes.states {
+			if s == state {
+				return i
+			}
+		}
+		t.Fatalf("state %q missing from lane columns %v", state, a.dashLanes.states)
+		return -1
+	}
+	toDo, inProgress, done := colOf("To Do"), colOf("In Progress"), colOf("Done")
+
+	l1003 := byParent[1003]
+	if got := l1003.cols[inProgress]; len(got) != 1 || got[0].ID != 1023 {
+		t.Fatalf("#1003 In Progress column = %+v, want just #1023", got)
+	}
+	l1013 := byParent[1013]
+	if got := l1013.cols[toDo]; len(got) != 2 {
+		t.Fatalf("#1013 To Do column = %+v, want 2 items (1015, 1017)", got)
+	}
+	if got := l1013.cols[done]; len(got) != 1 || got[0].ID != 1016 {
+		t.Fatalf("#1013 Done column = %+v, want just #1016", got)
+	}
+
+	v := h.app.View()
+	if !strings.Contains(v, "Send invite email with magic link") { // #1003's title, its lane header
+		t.Error("lane header should show the parent PBI's title")
+	}
+	if !strings.Contains(v, "TASK 1023") || !strings.Contains(v, "Wire up") {
+		t.Error("lane should show the child's card")
+	}
+	if !strings.Contains(v, "To Do") || !strings.Contains(v, "In Progress") || !strings.Contains(v, "Done") {
+		t.Error("lanes should show the shared state columns")
+	}
+	// #1013's To Do column has two cards (1015, 1017): both must render in
+	// full, not collapse the second one into a "+1" badge.
+	if !strings.Contains(v, "TASK 1015") || !strings.Contains(v, "TASK 1017") {
+		t.Error("every card in a cell should render, not just the first with a +N badge")
+	}
+	if strings.Contains(v, "+1") || strings.Contains(v, "+2") {
+		t.Error("lanes should not collapse extra cards behind a +N badge")
+	}
+}
+
+func TestDashboardFocusAndActions(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	if a.dashFocusLanes {
+		t.Fatal("dashboard should start focused on the kanban")
+	}
+	a.dashBoard.jumpTo(1020)
+
+	h.keys("tab")
+	if !a.dashFocusLanes {
+		t.Fatal("tab should move focus to the lanes")
+	}
+	// The lanes' default cursor (lane 0, "To Do") is an empty cell for
+	// #1003 (its only child is In Progress); jump straight to it.
+	a.dashLanes.jumpTo(1023)
+	if it := a.currentItem(); it == nil || it.ID != 1023 {
+		t.Fatalf("lane cursor = %v, want #1023", it)
+	}
+
+	h.keys("D")
+	if a.view != viewItem || a.item == nil || a.item.item.ID != 1023 {
+		t.Fatalf("D should drill into the lane card, got view=%v item=%v", a.view, a.item)
+	}
+	h.keys("esc")
+	if a.view != viewDash || !a.dashFocusLanes {
+		t.Fatalf("esc should return to the dashboard with lanes still focused")
+	}
+
+	h.keys("tab") // lanes -> preview (the 3-way cycle: kanban -> lanes -> preview -> kanban)
+	if !a.focusDetail || a.dashFocusLanes {
+		t.Fatalf("tab from lanes should move focus to the preview, focusDetail=%v dashFocusLanes=%v", a.focusDetail, a.dashFocusLanes)
+	}
+	if !strings.Contains(h.app.View(), "Spans lost when retry budget exhausted") { // #1020's title, in the preview pane
+		t.Error("preview pane should show the highlighted PBI")
+	}
+
+	h.keys("tab") // preview -> kanban
+	if a.focusDetail || a.dashFocusLanes {
+		t.Fatalf("tab from preview should move focus back to the kanban, focusDetail=%v dashFocusLanes=%v", a.focusDetail, a.dashFocusLanes)
+	}
+	if it := a.currentItem(); it == nil || it.ID != 1020 {
+		t.Fatalf("kanban cursor after refocus = %v, want #1020", it)
+	}
+
+	// A state change from the kanban updates the card's column.
+	h.keys("s")
+	if _, ok := a.popup.(*picker); !ok {
+		t.Fatalf("expected state picker, got %T", a.popup)
+	}
+	h.keys("enter") // first state in the list
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].ID != 1020 {
+		t.Fatalf("updates = %+v", h.fake.Updates)
+	}
+}
+
+func TestDashboardColumnMove(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+	a.dashBoard.jumpTo(1003) // Committed
+
+	h.keys("L") // move column right: single write, no confirm
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].ID != 1003 || h.fake.Updates[0].Patches[0].Value != "In Progress" {
+		t.Fatalf("column move updates = %+v", h.fake.Updates)
+	}
+	if h.app.popup != nil {
+		t.Fatalf("unexpected popup %T", h.app.popup)
+	}
+	if it := a.currentItem(); it == nil || it.ID != 1003 || it.State != "In Progress" {
+		t.Fatalf("cursor should follow the moved card, got %v", it)
+	}
+
+	h.keys("H") // move back
+	if len(h.fake.Updates) != 2 || h.fake.Updates[1].Patches[0].Value != "Committed" {
+		t.Fatalf("column move back = %+v", h.fake.Updates)
+	}
+
+	// A column move must not touch the lanes or their focus.
+	if a.dashFocusLanes {
+		t.Error("column move should not change focus")
+	}
+}
+
+func TestDashboardLanesExcludeBugs(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	// #1024 is a Bug filed under #1020 (fake.go), #1020's only child. It
+	// must not appear anywhere in the lanes' columns, and shouldn't even
+	// earn #1020 a lane of its own...
+	for _, l := range a.dashLanes.ls {
+		if l.parent.ID == 1020 {
+			t.Error("a PBI whose only child is a bug should still get no lane")
+		}
+		for _, col := range l.cols {
+			for _, it := range col {
+				if it.ID == 1024 {
+					t.Fatalf("bug #1024 should not appear in the lanes, found in #%d's lane", l.parent.ID)
+				}
+			}
+		}
+	}
+	for _, s := range a.dashLanes.states {
+		if s == "New" { // #1024's state; only meaningful if it leaked a column
+			t.Error("lanes should not have grown a column for a bug's state")
+		}
+	}
+	// ...but it's still reachable as a child for the preview pane / drill-down.
+	found := false
+	for _, c := range a.dashChildren[1020] {
+		found = found || c.ID == 1024
+	}
+	if !found {
+		t.Error("bug #1024 should still be cached as #1020's child for the preview pane")
+	}
+}
+
+func TestDashboardFiltersBySelectedSprint(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	// All of Sveinung's PBIs (1003, 1013, 1020) sit in the current sprint,
+	// which is selected by default.
+	if pbis := len(a.myPBIs()); pbis == 0 {
+		t.Fatal("expected PBIs in the current sprint before switching")
+	}
+
+	// Switch to a sprint none of "my PBIs" belong to.
+	h.keys(":")
+	h.keys("s", "p", "r", "i", "n", "t", " ", "S", "p", "r", "i", "n", "t", " ", "4", "3", "enter")
+	if a.ctx.Iteration.Name != "Sprint 43" {
+		t.Fatalf("iteration = %q, want Sprint 43", a.ctx.Iteration.Name)
+	}
+	if pbis := len(a.myPBIs()); pbis != 0 {
+		t.Errorf("myPBIs after switching sprint = %d, want 0", pbis)
+	}
+	for _, col := range a.dashBoard.cols {
+		if len(col) != 0 {
+			t.Errorf("dashboard kanban should be empty outside the selected sprint, got %+v", col)
+		}
+	}
+	if len(a.dashLanes.ls) != 0 {
+		t.Errorf("dashboard lanes should be empty outside the selected sprint, got %+v", a.dashLanes.ls)
+	}
+
+	// Switching back to the current sprint restores them.
+	h.keys("S")
+	if pbis := len(a.myPBIs()); pbis == 0 {
+		t.Error("myPBIs should be restored after switching back to the current sprint")
+	}
+	found := false
+	for _, col := range a.dashBoard.cols {
+		for _, it := range col {
+			found = found || it.ID == 1003
+		}
+	}
+	if !found {
+		t.Error("#1003 should be back on the kanban after returning to its sprint")
+	}
+}
+
+// Down/Up must scan through a column's stacked cards before moving to
+// another lane — #1013's "To Do" cell has two cards (1015, 1017).
+func TestDashboardLaneNavigationScansColumn(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+	h.keys("tab") // focus lanes
+	a.dashLanes.jumpTo(1015)
+
+	h.keys("j") // down: same lane, same column, next row
+	if it := a.currentItem(); it == nil || it.ID != 1017 {
+		t.Fatalf("down should move to the next card in the cell, got %v", it)
+	}
+	if !a.dashFocusLanes || a.view != viewDash {
+		t.Fatal("navigating within a cell must not change focus or leave the dashboard")
+	}
+
+	h.keys("j") // down again: no more cards below in this column anywhere
+	if it := a.currentItem(); it == nil || it.ID != 1017 {
+		t.Fatalf("down at the column's last card should stay put, got %v", it)
+	}
+
+	h.keys("k") // up: back to the first card
+	if it := a.currentItem(); it == nil || it.ID != 1015 {
+		t.Fatalf("up should move to the previous card in the cell, got %v", it)
+	}
+	h.keys("k") // up again: no more cards above in this column anywhere
+	if it := a.currentItem(); it == nil || it.ID != 1015 {
+		t.Fatalf("up at the column's first card should stay put, got %v", it)
+	}
+}
+
+func TestDashboardLaneColumnMove(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+	h.keys("tab")            // focus lanes
+	a.dashLanes.jumpTo(1015) // Task under #1013, To Do
+
+	h.keys("L") // move right: To Do -> In Progress
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].ID != 1015 || h.fake.Updates[0].Patches[0].Value != "In Progress" {
+		t.Fatalf("lane column move updates = %+v", h.fake.Updates)
+	}
+	if it := a.currentItem(); it == nil || it.ID != 1015 || it.State != "In Progress" {
+		t.Fatalf("cursor should follow the moved card, got %v", it)
+	}
+	col := -1
+	for i, s := range a.dashLanes.states {
+		if s == "In Progress" {
+			col = i
+		}
+	}
+	if col < 0 {
+		t.Fatal("In Progress column missing")
+	}
+	var l1013 lane
+	for _, l := range a.dashLanes.ls {
+		if l.parent.ID == 1013 {
+			l1013 = l
+		}
+	}
+	found := false
+	for _, it := range l1013.cols[col] {
+		found = found || it.ID == 1015
+	}
+	if !found {
+		t.Error("#1015 should now sit in #1013's lane, In Progress column")
+	}
+
+	h.keys("H") // move back
+	if len(h.fake.Updates) != 2 || h.fake.Updates[1].Patches[0].Value != "To Do" {
+		t.Fatalf("lane column move back = %+v", h.fake.Updates)
+	}
+}
+
+// A very small terminal must not panic while laying out the dashboard's
+// two rows (kanban + lanes), only degrade gracefully.
+func TestDashboardRendersAtSmallSize(t *testing.T) {
+	h := newHarness(t, 80, 16)
+	h.keys("1")
+	v := h.app.View()
+	if v == "" {
+		t.Fatal("empty view at small size")
 	}
 }
 
@@ -849,9 +1169,16 @@ func TestTeamFilter(t *testing.T) {
 		}
 	}
 	h.keys("1")
-	for _, r := range a.dash.rows {
-		if r.Item.AreaPath != "Platform\\Green" {
-			t.Errorf("dashboard row %d outside the filter", r.Item.ID)
+	for _, col := range a.dashBoard.cols {
+		for _, it := range col {
+			if it.AreaPath != "Platform\\Green" {
+				t.Errorf("dashboard card %d outside the filter", it.ID)
+			}
+		}
+	}
+	for _, l := range a.dashLanes.ls {
+		if l.parent.AreaPath != "Platform\\Green" {
+			t.Errorf("dashboard lane parent %d outside the filter", l.parent.ID)
 		}
 	}
 	// New items land in the filtered team's area.

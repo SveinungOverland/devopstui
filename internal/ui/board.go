@@ -62,8 +62,24 @@ func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.Bac
 		}
 	}
 	b.clamp()
-	if cur != nil {
+	switch {
+	case cur != nil:
 		b.jumpTo(cur.ID)
+	case b.current() == nil:
+		// Nothing was selected before (the first load, typically) and the
+		// default column-0 landing spot is empty: land on the first card
+		// there is, so the preview pane isn't blank just because column 0
+		// happens to have nothing in it.
+		b.jumpToFirstCard()
+	}
+}
+
+func (b *board) jumpToFirstCard() {
+	for i, col := range b.cols {
+		if len(col) > 0 {
+			b.col, b.row = i, 0
+			return
+		}
 	}
 }
 

@@ -228,7 +228,37 @@ choice is saved as `filter_team` in the config.
 - **A new task inherits the assignee of the PBI above it**, since that is nearly always who
   will do it. The prompt shows who it will go to, and `a` changes it afterwards. Nothing is
   inherited above the task level: a Feature does not pick up its Epic's assignee.
-- On the dashboard, task rows show their parent PBI after the title.
+
+## Dashboard
+
+The dashboard (`1`) is two rows, both scoped to items assigned to `@Me` and, when a sprint is
+selected, further scoped to that sprint (the same one shown in the header and on the Sprint/
+Board tabs) — plus an optional preview pane:
+
+- **Top: a kanban** of your PBIs in the selected sprint (and bugs, if the team tracks them as
+  requirements), in the columns of the team's board — the same look as the Board tab, just
+  filtered to your work. `H`/`L` move the highlighted PBI to the neighbouring column (a state
+  change), same as on the Board tab. On a wide enough terminal, a preview pane sits to its
+  right (`z` toggles it).
+- **Bottom: a swimlane kanban** of those PBIs' children — state as the columns (shared across
+  every lane, same as any kanban), the parent PBI as the lane. A PBI shows every child, not
+  just active ones, so a lane reads as real progress: some in To Do, some In Progress, some
+  Done. When a cell holds several cards they all stack, full height, rather than collapsing
+  behind a "+N" — this row gets the bigger share of the body height for exactly that reason.
+  Bugs are left out (they carry requirement-level states, not task states, and already show as
+  their own card on the kanban above when they're at that level); a PBI with nothing left after
+  that simply has no lane. Children show regardless of who they are assigned to. `j`/`k` scroll
+  down/up through a column's cards — within the current lane first, then into the next lane's
+  cell for that same column — so moving through several cards in one cell doesn't jump you to
+  another lane early. `H`/`L` move the highlighted child to the neighbouring state.
+
+Switching sprints (`[`/`]`/`S`/`:sprint`) updates both rows immediately. With no sprint
+selected, the dashboard falls back to every sprint at once.
+
+`tab` cycles focus kanban → lanes → preview → kanban (skipping lanes when there is nothing
+below, and the preview when it's hidden or the terminal is too narrow); the usual navigation,
+selection and edit/state/assign actions work in whichever has focus, and `D`/`enter` drills
+into the highlighted card.
 
 `R` toggles auto refresh and saves the choice to your config, so it survives a restart. The
 header shows `↻60s` while it is on, and the interval is whatever `refresh_seconds` holds, 60

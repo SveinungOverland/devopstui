@@ -105,6 +105,11 @@ var helpGroups = [][]key.Binding{
 var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.Help}
 var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.Help}
 
+// footerDashKanban and footerDashLanes are the two focus modes of the
+// Dashboard's two-row layout.
+var footerDashKanban = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Focus, keys.Select, keys.Details, keys.Edit, keys.State, keys.Assign, keys.Help}
+var footerDashLanes = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.Focus, keys.Select, keys.Details, keys.State, keys.Assign, keys.Help}
+
 // footerItemDesc and footerItemKanban are the two focus modes of the
 // drill-down view.
 var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.New, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.Back, keys.Help}

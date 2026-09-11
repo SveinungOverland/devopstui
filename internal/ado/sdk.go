@@ -418,6 +418,29 @@ func (s *SDK) Children(ctx context.Context, project string, parentID int) ([]*mo
 		parentID))
 }
 
+func (s *SDK) ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error) {
+	out := map[int][]*model.WorkItem{}
+	if len(parentIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(parentIDs))
+	for i, id := range parentIDs {
+		ids[i] = strconv.Itoa(id)
+	}
+	items, err := s.query(ctx, project, fmt.Sprintf(
+		// System.Parent can be filtered on but, unlike in Children's single-id
+		// query, Azure DevOps rejects sorting by it when used with IN().
+		"SELECT [System.Id] FROM WorkItems WHERE [System.Parent] IN (%s) AND [System.State] <> 'Removed' ORDER BY [Microsoft.VSTS.Common.BacklogPriority] ASC, [System.Id] ASC",
+		strings.Join(ids, ",")))
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range items {
+		out[it.ParentID] = append(out[it.ParentID], it)
+	}
+	return out, nil
+}
+
 func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	wi, err := s.wit.GetWorkItem(ctx, workitemtracking.GetWorkItemArgs{Id: &id, Fields: &fields})
 	if err != nil {

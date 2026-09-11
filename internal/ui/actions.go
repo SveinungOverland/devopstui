@@ -323,9 +323,17 @@ func (a *App) knownPeople() []model.Person {
 		out = append(out, model.Person{DisplayName: name})
 	}
 	add(a.me)
-	for _, l := range []*list{a.sprint, a.backlog, a.dash} {
+	for _, l := range []*list{a.sprint, a.backlog} {
 		for _, it := range l.all {
 			add(it.AssignedTo)
+		}
+	}
+	for _, it := range a.myItems {
+		add(it.AssignedTo)
+	}
+	for _, children := range a.dashChildren {
+		for _, c := range children {
+			add(c.AssignedTo)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].DisplayName < out[j].DisplayName })
@@ -455,11 +463,15 @@ func (a *App) promptNumber(targets []*model.WorkItem, title, field string, curre
 
 // moveColumn changes the board column (via state) of the targets.
 func (a *App) moveColumn(dc int) tea.Cmd {
+	b := a.activeBoard()
+	if b == nil {
+		return nil
+	}
 	targets := a.targetItems()
 	if len(targets) == 0 {
 		return nil
 	}
-	_, col, ok := a.board.adjacentColumn(dc)
+	_, col, ok := b.adjacentColumn(dc)
 	if !ok {
 		return nil
 	}
@@ -468,6 +480,22 @@ func (a *App) moveColumn(dc int) tea.Cmd {
 		state = col.States[0]
 	}
 	return a.applyPatch(targets, "Move to "+col.Name, model.Patch{Field: model.FieldState, Value: state})
+}
+
+// moveLaneColumn changes the state of the Dashboard lanes' highlighted
+// work item(s) to the neighbouring column. Unlike moveColumn, the lanes'
+// columns are states directly (there is no board-column → state mapping to
+// go through).
+func (a *App) moveLaneColumn(dc int) tea.Cmd {
+	targets := a.dashLanes.targetItems()
+	if len(targets) == 0 {
+		return nil
+	}
+	state, ok := a.dashLanes.adjacentState(dc)
+	if !ok {
+		return nil
+	}
+	return a.applyPatch(targets, "Move to "+state, model.Patch{Field: model.FieldState, Value: state})
 }
 
 // ------------------------------------------------------------ choice popup
