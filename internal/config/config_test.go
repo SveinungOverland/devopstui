@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -43,5 +45,58 @@ func TestEnvOverridesFile(t *testing.T) {
 func TestMissingFileIsFine(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "nope.yaml")); err != nil {
 		t.Fatalf("missing file should not error: %v", err)
+	}
+}
+
+func TestPathPrefersDevopstuiConfigEnv(t *testing.T) {
+	t.Setenv("DEVOPSTUI_CONFIG", "/explicit/path/config.yaml")
+	if got := Path(); got != "/explicit/path/config.yaml" {
+		t.Errorf("Path() = %q, want explicit override", got)
+	}
+}
+
+func TestPathDefaultsToXDGConfigWhenNothingExists(t *testing.T) {
+	t.Setenv("DEVOPSTUI_CONFIG", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+
+	want := filepath.Join(home, ".config", "devopstui", "config.yaml")
+	if got := Path(); got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestPathHonoursXDGConfigHome(t *testing.T) {
+	t.Setenv("DEVOPSTUI_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+
+	want := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "devopstui", "config.yaml")
+	if got := Path(); got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestPathFallsBackToPlatformDirWhenOnlyItExists(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("only darwin's UserConfigDir diverges from ~/.config")
+	}
+	t.Setenv("DEVOPSTUI_CONFIG", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	platformPath := filepath.Join(home, "Library", "Application Support", "devopstui", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(platformPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(platformPath, []byte("org: https://dev.azure.com/contoso\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := Path(); got != platformPath {
+		t.Errorf("Path() = %q, want existing platform-dir file %q", got, platformPath)
 	}
 }

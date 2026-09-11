@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 )
@@ -53,14 +54,63 @@ func (c Config) EditorCommand() string {
 // Confirm returns whether single-item writes need confirmation.
 func (c Config) Confirm() bool { return c.ConfirmWrites != nil && *c.ConfirmWrites }
 
-// Path returns the config file location.
+// Path returns the config file location: the first of the known candidate
+// locations that already has a file, or the platform default if none do
+// yet. DEVOPSTUI_CONFIG always wins outright.
 func Path() string {
 	if p := os.Getenv("DEVOPSTUI_CONFIG"); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = "."
+	def := defaultPath()
+	for _, p := range candidatePaths() {
+		if p == def {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return def
+}
+
+// defaultPath is where a fresh config is written when none exists yet:
+// ~/.config on macOS/Linux (matching Lazygit and K9s, even on macOS where
+// os.UserConfigDir() disagrees), %AppData% on Windows (matching
+// os.UserConfigDir() there too).
+func defaultPath() string {
+	if runtime.GOOS == "windows" {
+		if dir, err := os.UserConfigDir(); err == nil {
+			return filepath.Join(dir, "devopstui", "config.yaml")
+		}
+	}
+	return xdgConfigPath()
+}
+
+// candidatePaths lists known config locations besides defaultPath, in the
+// order they should be searched: ~/.config first (the documented default,
+// and where defaultPath itself points on macOS/Linux), then the
+// platform-specific directory os.UserConfigDir() reports, as a fallback for
+// files that landed there before this search existed.
+func candidatePaths() []string {
+	paths := []string{xdgConfigPath()}
+	if dir, err := os.UserConfigDir(); err == nil {
+		paths = append(paths, filepath.Join(dir, "devopstui", "config.yaml"))
+	}
+	return paths
+}
+
+// xdgConfigPath is ~/.config/devopstui/config.yaml, honouring
+// XDG_CONFIG_HOME. It's the default on macOS/Linux, matching the
+// convention of Lazygit and K9s (which use it even on macOS, unlike
+// os.UserConfigDir()) and the location documented in the README.
+func xdgConfigPath() string {
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		dir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(dir, "devopstui", "config.yaml")
 }

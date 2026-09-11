@@ -16,6 +16,21 @@ devopstui  contoso › Platform › Team Blue › Sprint 42 Sep 7 – Sep 20    
 l expand  space select  e edit  s state  a assign  m move to sprint  p parent  / filter
 ```
 
+## Install
+
+```bash
+go install github.com/sveinungoverland/devopstui/cmd/devopstui@latest
+```
+
+This needs a Go toolchain and puts the `devopstui` binary in `$(go env GOPATH)/bin` (or
+`$GOBIN` if you've set it) — make sure that directory is on your `PATH`.
+
+To update, run the same command again; it fetches and builds the latest tagged release. Pin a
+specific version instead of `@latest` (e.g. `@v0.3.0`) if you want a reproducible install.
+
+Don't have Go, or just want to try it out? `go run ./cmd/devopstui --demo` (below) needs the
+toolchain too but skips the install step entirely.
+
 ## Run
 
 ```bash
@@ -229,3 +244,18 @@ Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|second
 make test        # unit + rendered-frame tests with the in-memory fake
 make dumps       # writes rendered frames to ./dumps for eyeballing
 ```
+
+For quick manual testing, `go run ./cmd/devopstui --demo` (or with real org flags/env) is the
+fastest inner loop — no build step, just edit and re-run.
+
+To test against the real `devopstui` binary as installed users get it, install from your local
+checkout instead of the published module:
+
+```bash
+go install ./cmd/devopstui
+```
+
+This builds from whatever is on disk, so re-running it after each change refreshes the
+installed binary with your edits — same command as end users run, just pointed at the local
+source tree instead of `@latest`. `make build` is the equivalent one-off build to `bin/devopstui`
+if you'd rather not touch `$GOBIN`.
