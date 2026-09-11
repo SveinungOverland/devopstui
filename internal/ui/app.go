@@ -961,23 +961,15 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // dashOverride handles the keys the Dashboard's layout redefines: Tab
-// cycles focus kanban → lanes → preview → kanban (skipping lanes when
-// empty, and preview when hidden or the terminal is too narrow). Leaving
-// the preview step is handled by the generic focusDetail block earlier in
-// onKey, which always clears focusDetail on Tab without touching
-// dashFocusLanes — since we reset it to false on the way into the preview,
-// that generic exit lands back on the kanban, completing the cycle.
+// toggles focus between the kanban (top) and the lanes (bottom); it is a
+// no-op when there are no lanes to focus. The preview pane is never part
+// of this cycle — it isn't a focusable pane at all on the Dashboard — so
+// ctrl+u/ctrl+d (scrollPreview) are the only way to scroll it, and they
+// work the same regardless of which of the two panes has focus.
 func (a *App) dashOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if key.Matches(msg, keys.Focus) {
-		switch {
-		case !a.dashFocusLanes && len(a.dashLanes.ls) > 0:
-			a.dashFocusLanes = true
-		case a.detailWidth() > 0:
-			a.dashFocusLanes = false
-			a.focusDetail = true
-			a.refreshDetail()
-		default:
-			a.dashFocusLanes = false
+		if len(a.dashLanes.ls) > 0 {
+			a.dashFocusLanes = !a.dashFocusLanes
 		}
 		return nil, true
 	}
@@ -1976,10 +1968,7 @@ func (a *App) renderHeader() string {
 		summary = sMuted.Render(a.currentBoard().Name)
 	case a.view == viewDash:
 		focus := "kanban"
-		switch {
-		case a.focusDetail:
-			focus = "preview"
-		case a.dashFocusLanes:
+		if a.dashFocusLanes {
 			focus = "lanes"
 		}
 		pbis := 0
@@ -2067,12 +2056,10 @@ func (a *App) renderDash(w, h int) string {
 	dw := a.detailWidth()
 	var top string
 	if dw > 0 {
-		detailStyle := sPanel
-		if a.focusDetail {
-			detailStyle = sPanelFocus
-		}
-		left := a.dashBoard.view(w-dw-2, topH, !a.dashFocusLanes && !a.focusDetail)
-		right := detailStyle.Width(dw).Height(topH - 2).Render(a.detail.View())
+		// The preview is never focusable on the Dashboard, so it never
+		// takes the focused-panel style.
+		right := sPanel.Width(dw).Height(topH - 2).Render(a.detail.View())
+		left := a.dashBoard.view(w-dw-2, topH, !a.dashFocusLanes)
 		top = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	} else {
 		top = a.dashBoard.view(w, topH, !a.dashFocusLanes)

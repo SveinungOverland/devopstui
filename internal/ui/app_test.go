@@ -872,17 +872,20 @@ func TestDashboardFocusAndActions(t *testing.T) {
 		t.Fatalf("esc should return to the dashboard with lanes still focused")
 	}
 
-	h.keys("tab") // lanes -> preview (the 3-way cycle: kanban -> lanes -> preview -> kanban)
-	if !a.focusDetail || a.dashFocusLanes {
-		t.Fatalf("tab from lanes should move focus to the preview, focusDetail=%v dashFocusLanes=%v", a.focusDetail, a.dashFocusLanes)
+	// The preview pane shows #1023 (the lane cursor); it is never itself a
+	// focusable pane, so tab only ever toggles between the kanban and the
+	// lanes (see TestPreviewScroll for ctrl+u/ctrl+d scrolling it while
+	// the lanes have focus).
+	if !strings.Contains(h.app.View(), "Wire up magic link email template") { // #1023's title, in the preview pane
+		t.Error("preview pane should show the highlighted lane card")
 	}
-	if !strings.Contains(h.app.View(), "Spans lost when retry budget exhausted") { // #1020's title, in the preview pane
-		t.Error("preview pane should show the highlighted PBI")
+	if a.focusDetail {
+		t.Fatal("the preview pane must never become focusable on the Dashboard")
 	}
 
-	h.keys("tab") // preview -> kanban
+	h.keys("tab") // lanes -> kanban (a 2-way toggle; the preview is not in the cycle)
 	if a.focusDetail || a.dashFocusLanes {
-		t.Fatalf("tab from preview should move focus back to the kanban, focusDetail=%v dashFocusLanes=%v", a.focusDetail, a.dashFocusLanes)
+		t.Fatalf("tab from lanes should move focus back to the kanban, focusDetail=%v dashFocusLanes=%v", a.focusDetail, a.dashFocusLanes)
 	}
 	if it := a.currentItem(); it == nil || it.ID != 1020 {
 		t.Fatalf("kanban cursor after refocus = %v, want #1020", it)
@@ -1283,6 +1286,25 @@ func TestPreviewScroll(t *testing.T) {
 	}
 	if got := h.app.dashBoard.currentID(); got != 1003 {
 		t.Fatalf("dashboard kanban cursor moved to %d, want it to stay on 1003", got)
+	}
+
+	// Same behavior with the lanes focused, not just the kanban — and it
+	// must not turn the preview itself into a focusable pane.
+	h.keys("tab") // kanban -> lanes
+	h.app.dashLanes.jumpTo(1015)
+	h.app.refreshDetail()
+	if h.app.detail.YOffset != 0 {
+		t.Fatalf("initial lane preview YOffset = %d, want 0", h.app.detail.YOffset)
+	}
+	h.keys("ctrl+d")
+	if h.app.detail.YOffset == 0 {
+		t.Fatal("ctrl+d should scroll the preview while the lanes have focus")
+	}
+	if got := h.app.dashLanes.currentID(); got != 1015 {
+		t.Fatalf("lanes cursor moved to %d, want it to stay on 1015", got)
+	}
+	if h.app.focusDetail {
+		t.Fatal("scrolling the preview must not focus it")
 	}
 }
 

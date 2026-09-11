@@ -44,7 +44,7 @@ var keys = keymap{
 	Expand:      b("expand", "l", "right", "enter"),
 	CollapseAll: b("collapse all", "H"),
 	ExpandAll:   b("expand all", "L"),
-	Focus:       b("focus detail", "tab"),
+	Focus:       b("switch focus", "tab"),
 	Preview:     b("toggle preview", "z"),
 	Details:     b("details", "D"),
 

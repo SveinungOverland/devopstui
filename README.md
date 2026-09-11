@@ -257,11 +257,10 @@ Board tabs) — plus an optional preview pane:
 Switching sprints (`[`/`]`/`S`/`:sprint`) updates both rows immediately. With no sprint
 selected, the dashboard falls back to every sprint at once.
 
-`tab` cycles focus kanban → lanes → preview → kanban (skipping lanes when there is nothing
-below, and the preview when it's hidden or the terminal is too narrow); the usual navigation,
-selection and edit/state/assign actions work in whichever has focus, and `D`/`enter` drills
-into the highlighted card. `ctrl+u`/`ctrl+d` scroll the preview pane in place, from either the
-kanban or the lanes, without needing to `tab` into it first.
+`tab` toggles focus between the kanban and the lanes (a no-op when there is nothing below); the
+usual navigation, selection and edit/state/assign actions work in whichever has focus, and
+`D`/`enter` drills into the highlighted card. The preview pane is never itself focusable here —
+`ctrl+u`/`ctrl+d` scroll it in place from either the kanban or the lanes, whichever has focus.
 
 `R` toggles auto refresh and saves the choice to your config, so it survives a restart. The
 header shows `↻60s` while it is on, and the interval is whatever `refresh_seconds` holds, 60
