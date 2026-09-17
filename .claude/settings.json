@@ -1,10 +1,22 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(go:*)",
+      "Bash(gofmt:*)",
+      "Bash(scripts/tui-shot.sh:*)",
+      "Bash(./scripts/tui-shot.sh:*)",
+      "Bash(scripts/shots.sh:*)",
+      "Bash(./scripts/shots.sh:*)",
+      "Bash(.github/scripts/project.sh:*)"
+    ]
+  },
   "hooks": {
     "SessionEnd": [
       {
         "hooks": [
           {
-            "command": "kata attention-hook end --source kata-agent-hook-end",
+            "command": "command -v kata >/dev/null 2>&1 && kata attention-hook end --source kata-agent-hook-end || true",
             "type": "command"
           }
         ],
@@ -15,7 +27,7 @@
       {
         "hooks": [
           {
-            "command": "kata attention-hook start --source kata-agent-hook-start",
+            "command": "command -v kata >/dev/null 2>&1 && kata attention-hook start --source kata-agent-hook-start || true",
             "type": "command"
           }
         ],

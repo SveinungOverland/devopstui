@@ -1,0 +1,31 @@
+name: Go + TUI environment
+description: >
+  Everything an agent needs to work on devopstui: the Go toolchain from go.mod,
+  a module cache, tmux for driving the TUI in a real pty, and the binary built.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Install tmux
+      shell: bash
+      # scripts/tui-shot.sh needs a real pty to drive the TUI and capture the
+      # screen; tmux is not on the runner image by default.
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq tmux
+        tmux -V
+
+    - name: Download modules and build
+      shell: bash
+      # Doing this up front means the agent's first `make test` is not also
+      # paying for the module download, and a broken base branch fails here
+      # with a clear message instead of halfway through a Claude run.
+      run: |
+        go mod download
+        make build

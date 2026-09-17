@@ -1,0 +1,46 @@
+name: CI
+
+# Build, vet, test, gofmt — and drive the real TUI once to prove it still
+# starts and draws. Without this a pull request's "ready for review" means
+# nothing, and the review agents have no signal to read.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # ready_for_review matters here. An agent pushes with the workflow's own
+    # token, and pushes made with GITHUB_TOKEN deliberately do not raise
+    # further events — so `synchronize` never fires for the commits an agent
+    # makes. Marking the PR ready is done with the board PAT, which does raise
+    # an event, and that is what gets CI onto the finished branch.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/go-tui-env
+
+      - name: Vet, test and gofmt
+        run: make check
+
+      - name: Capture the UI
+        run: make shots
+
+      - name: Upload the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ github.run_id }}
+          path: .shots/
+          if-no-files-found: error
+          retention-days: 7

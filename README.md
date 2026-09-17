@@ -275,9 +275,23 @@ Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|second
 ## Develop
 
 ```bash
+make check       # go vet, go test ./..., gofmt — what CI runs
 make test        # unit + rendered-frame tests with the in-memory fake
 make dumps       # writes rendered frames to ./dumps for eyeballing
+make shots       # drives the real binary in a tmux pty, captures ./.shots
 ```
+
+`make dumps` renders through the test harness; `make shots` runs the actual program in a
+terminal and presses keys at it, which is the only way to catch colour, cursor and wrapping
+problems. Capture one specific thing with:
+
+```bash
+scripts/tui-shot.sh --name board --keys "3,j,j,l"
+scripts/tui-shot.sh --name filtering --keys "/,type:trace,Enter" --size 80x24
+```
+
+Each scene lands in `.shots/<name>.txt` as the exact terminal grid, ready to paste into an
+issue or a pull request. `--svg` adds a colour image beside it.
 
 For quick manual testing, `go run ./cmd/devopstui --demo` (or with real org flags/env) is the
 fastest inner loop — no build step, just edit and re-run.
@@ -293,3 +307,17 @@ This builds from whatever is on disk, so re-running it after each change refresh
 installed binary with your edits — same command as end users run, just pointed at the local
 source tree instead of `@latest`. `make build` is the equivalent one-off build to `bin/devopstui`
 if you'd rather not touch `$GOBIN`.
+
+## Automation
+
+Work is driven from the **Devopstui Kanban** project board. Opening an issue gets it a written
+implementation plan; moving the card to `Ready` gets it a branch, a pull request and an agent
+that builds it, screenshots the result and hands it back for review.
+
+```
+issue ──▶ Backlog ──▶ Ready ──▶ In progress ──▶ In review ──▶ Done
+            plan     ^ you       branch + PR      reviews      merged
+```
+
+[docs/automation.md](docs/automation.md) has the setup, the workflows and what to do when
+something gets stuck.

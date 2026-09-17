@@ -1,0 +1,60 @@
+name: PR — closed
+
+# Merged: the card goes to "Done". Closed without merging: the card goes back
+# to "Backlog" so it is not left sitting at "In review" with nothing happening.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PROJECT_TITLE: ${{ vars.PROJECT_TITLE || 'Devopstui Kanban' }}
+  PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+
+jobs:
+  settle:
+    if: startsWith(github.event.pull_request.head.ref, 'claude/issue-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Move the card
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          issue="${BRANCH#claude/issue-}"
+          case "$issue" in
+            ''|*[!0-9]*) echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1 ;;
+          esac
+
+          if [ "$MERGED" = "true" ]; then
+            .github/scripts/project.sh set-status "$issue" "Done"
+            gh issue edit "$issue" \
+              --remove-label "claude:in-review" \
+              --remove-label "claude:implementing" \
+              --remove-label "claude:blocked" 2>/dev/null || true
+            # "Closes #n" in the PR body normally closes the issue on merge;
+            # this covers a PR whose description lost the reference.
+            if [ "$(gh issue view "$issue" --json state --jq .state)" = "OPEN" ]; then
+              gh issue close "$issue" --reason completed \
+                --comment "Done in #$PR."
+            fi
+          else
+            .github/scripts/project.sh set-status "$issue" "Backlog"
+            gh issue edit "$issue" \
+              --remove-label "claude:in-review" \
+              --remove-label "claude:implementing" 2>/dev/null || true
+            gh issue comment "$issue" --body \
+              "#$PR was closed without merging, so this is back in \`Backlog\`. Move it to \`Ready\` to start again — the branch \`$BRANCH\` is still there and will be reused."
+          fi
