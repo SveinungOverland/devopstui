@@ -1,5 +1,7 @@
 # devopstui
 
+> This is a vibe coded project I have created to make devops bearable for me. The code will probably be bad, the commit messages unintelligible and features barely working.
+
 A keyboard-driven terminal UI for Azure DevOps boards and sprints, in the spirit of
 Lazygit and K9s. See [PLAN.md](PLAN.md) for the design and roadmap.
 
@@ -37,11 +39,11 @@ toolchain too but skips the install step entirely.
 go run ./cmd/devopstui --demo
 ```
 
-Assigning searches your whole organisation, which needs the optional *Identity (read)* scope;
+Assigning searches your whole organisation, which needs the optional _Identity (read)_ scope;
 without it the picker still covers everyone on the project's teams.
 
-Against a real organisation you need a personal access token with *Work Items (read & write)*
-and *Project & Team (read)* scopes:
+Against a real organisation you need a personal access token with _Work Items (read & write)_
+and _Project & Team (read)_ scopes:
 
 ```bash
 export AZURE_DEVOPS_ORG_URL=https://dev.azure.com/<org>
@@ -70,16 +72,16 @@ Use `--config <path>` or `DEVOPSTUI_CONFIG` to keep several configs, one per org
 devopstui --config ~/.config/devopstui/work.yaml
 ```
 
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `org` | | Organisation URL, e.g. `https://dev.azure.com/contoso` |
-| `pat` | | Personal access token. Prefer the environment variable. |
-| `project`, `team` | | Starting context, rewritten on change. `team` owns the sprints. |
-| `filter_team` | | Show only this team's area paths in every view (`T` at runtime) |
-| `confirm_writes` | `false` | Ask before single-item edits too (bulk and re-parent always ask) |
-| `refresh_seconds` | `0` | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets) |
-| `editor` | | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
-| `description_format` | `markdown` | `markdown` (native) or `html` (convert on save) |
+| Key                  | Default    | Meaning                                                              |
+| -------------------- | ---------- | -------------------------------------------------------------------- |
+| `org`                |            | Organisation URL, e.g. `https://dev.azure.com/contoso`               |
+| `pat`                |            | Personal access token. Prefer the environment variable.              |
+| `project`, `team`    |            | Starting context, rewritten on change. `team` owns the sprints.      |
+| `filter_team`        |            | Show only this team's area paths in every view (`T` at runtime)      |
+| `confirm_writes`     | `false`    | Ask before single-item edits too (bulk and re-parent always ask)     |
+| `refresh_seconds`    | `0`        | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets)         |
+| `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
+| `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
 See [config.example.yaml](config.example.yaml) for the commented version.
 
@@ -103,20 +105,20 @@ Press `d` on an item to edit its description:
 - Otherwise the built-in editor opens: line-numbered text on the left, live rendered preview on
   the right. It is modal like vim and starts in **normal** mode:
 
-  | Normal mode | | Insert mode | |
-  |---|---|---|---|
-  | `j` `k` | line down / up | `esc` | back to normal mode |
-  | `h` `l` `0` `$` | move within the line | `ctrl+s` | save and close |
-  | `g` `G` | top / bottom | | |
-  | `space` | toggle `- [ ]` / `- [x]` on the line (a plain list item gains a checkbox) | | |
-  | `i` `a` `A` | insert at cursor / after cursor / end of line | | |
-  | `o` `O` | open a line below / above | | |
-  | `dd` `yy` | cut / copy the line | | |
-  | `p` `P` | paste the line below / above | | |
-  | `ctrl+w` | save and keep editing, like vim's `:w` | | |
-  | `ctrl+s` | save and close | | |
-  | `q` | close (press twice to discard unsaved changes) | | |
-  | `ctrl+p` `ctrl+d` `ctrl+u` | toggle / scroll the preview | | |
+  | Normal mode                |                                                                           | Insert mode |                     |
+  | -------------------------- | ------------------------------------------------------------------------- | ----------- | ------------------- |
+  | `j` `k`                    | line down / up                                                            | `esc`       | back to normal mode |
+  | `h` `l` `0` `$`            | move within the line                                                      | `ctrl+s`    | save and close      |
+  | `g` `G`                    | top / bottom                                                              |             |                     |
+  | `space`                    | toggle `- [ ]` / `- [x]` on the line (a plain list item gains a checkbox) |             |                     |
+  | `i` `a` `A`                | insert at cursor / after cursor / end of line                             |             |                     |
+  | `o` `O`                    | open a line below / above                                                 |             |                     |
+  | `dd` `yy`                  | cut / copy the line                                                       |             |                     |
+  | `p` `P`                    | paste the line below / above                                              |             |                     |
+  | `ctrl+w`                   | save and keep editing, like vim's `:w`                                    |             |                     |
+  | `ctrl+s`                   | save and close                                                            |             |                     |
+  | `q`                        | close (press twice to discard unsaved changes)                            |             |                     |
+  | `ctrl+p` `ctrl+d` `ctrl+u` | toggle / scroll the preview                                               |             |                     |
 
   The status line tracks what is on the server: `[+]` unsaved, `[saving…]` in flight,
   `[saved]` written. A failed write leaves the text as unsaved, so `q` still warns before
@@ -132,22 +134,22 @@ to the form as a pending change; the form's own `ctrl+s` writes it with the othe
 
 Keys are vim-style mnemonics: the letter is the first letter of the action.
 
-| Navigate | | Views | | Change | | Move | |
-|---|---|---|---|---|---|---|---|
-| `j` `k` | down / up | `1` | dashboard | `e` | edit form | `m` | move to sprint… |
-| `g` `G` | top / bottom | `2` | sprint tree | `t` | title | `M` | move to next sprint |
-| `l` `h` | expand / collapse | `3` | board | `d` | description | `B` | move to backlog |
-| `L` `H` | expand / collapse all | `4` | backlog | `s` | state | `p` | set parent |
-| `tab` | focus detail pane | `[` `]` | prev / next sprint | `a` | assign | | |
-| `z` | toggle preview pane | `T` | team filter | `n` | new child item | | |
-| `ctrl+u` `ctrl+d` | scroll preview pane | | | | | | |
-| `D` | item details view | | | | | | |
-| `/` | filter | `S` | current sprint | `E` | effort | | |
-| `space` | select | `:` | command bar | `P` | priority | | |
-| `v` | visual select | `r` | refresh | `o` | open in browser | | |
-| `ctrl+a` | select all | `R` | auto refresh on/off | `y` | yank id | | |
-| | | `f` | flat / tree | | | | |
-| `esc` | clear selection | `c` | show closed | `?` `q` | help / quit | | |
+| Navigate          |                       | Views   |                     | Change  |                 | Move |                     |
+| ----------------- | --------------------- | ------- | ------------------- | ------- | --------------- | ---- | ------------------- |
+| `j` `k`           | down / up             | `1`     | dashboard           | `e`     | edit form       | `m`  | move to sprint…     |
+| `g` `G`           | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
+| `l` `h`           | expand / collapse     | `3`     | board               | `d`     | description     | `B`  | move to backlog     |
+| `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
+| `tab`             | focus detail pane     | `[` `]` | prev / next sprint  | `a`     | assign          |      |                     |
+| `z`               | toggle preview pane   | `T`     | team filter         | `n`     | new child item  |      |                     |
+| `ctrl+u` `ctrl+d` | scroll preview pane   |         |                     |         |                 |      |                     |
+| `D`               | item details view     |         |                     |         |                 |      |                     |
+| `/`               | filter                | `S`     | current sprint      | `E`     | effort          |      |                     |
+| `space`           | select                | `:`     | command bar         | `P`     | priority        |      |                     |
+| `v`               | visual select         | `r`     | refresh             | `o`     | open in browser |      |                     |
+| `ctrl+a`          | select all            | `R`     | auto refresh on/off | `y`     | yank id         |      |                     |
+|                   |                       | `f`     | flat / tree         |         |                 |      |                     |
+| `esc`             | clear selection       | `c`     | show closed         | `?` `q` | help / quit     |      |                     |
 
 Any change key acts on the **selection** when there is one, otherwise on the highlighted
 item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Epic offers
@@ -188,16 +190,16 @@ right, one column per state.
 ╰─────────────────────────────────────╯╰──────────────────────────────────────────╯
 ```
 
-| Key | |
-|-----|--|
-| `tab` | switch focus between the description and the kanban |
-| `j` `k` `h` `l` | scroll the description, or move between cards and columns |
-| `H` `L` | move the highlighted child to the neighbouring column (sets its state) |
-| `n` | add a child; on a highlighted child it adds a sibling |
-| `D` `enter` | drill into the highlighted child |
-| `esc` `q` | walk back out, one level at a time |
-| `z` | give the description the full width |
-| `r` | re-fetch the children |
+| Key             |                                                                        |
+| --------------- | ---------------------------------------------------------------------- |
+| `tab`           | switch focus between the description and the kanban                    |
+| `j` `k` `h` `l` | scroll the description, or move between cards and columns              |
+| `H` `L`         | move the highlighted child to the neighbouring column (sets its state) |
+| `n`             | add a child; on a highlighted child it adds a sibling                  |
+| `D` `enter`     | drill into the highlighted child                                       |
+| `esc` `q`       | walk back out, one level at a time                                     |
+| `z`             | give the description the full width                                    |
+| `r`             | re-fetch the children                                                  |
 
 Every action key works here too and applies to whatever has focus: the item itself while the
 description is focused, otherwise the highlighted child. So `s` sets a child's state, `d` edits
