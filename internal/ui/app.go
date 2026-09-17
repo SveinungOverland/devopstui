@@ -168,7 +168,7 @@ func (a *App) applyTeamFilter() {
 func (a *App) refreshDashboard() {
 	inc := a.dashInclude()
 	a.dashBoard.setItems(a.currentBoard(), a.myItems, a.ctx.Backlog, inc)
-	a.dashLanes.setLanes(a.myPBIs(), a.dashChildren, nil)
+	a.dashLanes.setLanes(a.myActivePBIs(), a.dashChildren, nil)
 }
 
 // dashInclude combines the team filter with restricting to the selected
@@ -205,9 +205,10 @@ func (a *App) dashLayout() (topH, botH int) {
 
 // myPBIs is the requirement-level items assigned to @Me, in the order
 // MyItems returned them, after dashInclude (team filter + selected
-// sprint). This is exactly the set dashBoard.setItems buckets into cards,
-// kept available separately because the lanes and the ChildrenOf fetch
-// need just the id list.
+// sprint). This is exactly the set dashBoard.setItems buckets into cards
+// and dashSummary counts. The lanes and the ChildrenOf fetch use the
+// narrower myActivePBIs instead, since the work-items panel only makes
+// sense for PBIs/Bugs currently in progress.
 func (a *App) myPBIs() []*model.WorkItem {
 	include := a.dashInclude()
 	var out []*model.WorkItem
@@ -219,6 +220,20 @@ func (a *App) myPBIs() []*model.WorkItem {
 			continue
 		}
 		out = append(out, it)
+	}
+	return out
+}
+
+// myActivePBIs is myPBIs further restricted to PBIs/Bugs that are currently
+// being worked on (model.IsInProgress) — the parent set for the Dashboard's
+// lanes, so the work-items panel only shows children of items actually in
+// progress, not every PBI/Bug assigned to @Me.
+func (a *App) myActivePBIs() []*model.WorkItem {
+	var out []*model.WorkItem
+	for _, it := range a.myPBIs() {
+		if model.IsInProgress(it.State) {
+			out = append(out, it)
+		}
 	}
 	return out
 }
@@ -466,13 +481,14 @@ func (a *App) reloadAll() tea.Cmd {
 	return tea.Batch(a.loadView(viewSprint), a.loadView(viewDash), a.loadView(viewBacklog))
 }
 
-// loadDashLanes bulk-fetches children for the current "my PBIs" set, for
+// loadDashLanes bulk-fetches children for the current "my active PBIs" set
+// (myActivePBIs, i.e. myPBIs further narrowed to items in progress), for
 // the Dashboard's lanes, plus the column order for the dominant child
 // type. Called after MyItems lands, since it needs the PBI ids first.
 // dashLanesReq is bumped on every call so a slower, superseded fetch can
 // never overwrite a fresher one, regardless of arrival order.
 func (a *App) loadDashLanes() tea.Cmd {
-	pbis := a.myPBIs()
+	pbis := a.myActivePBIs()
 	a.dashLanesReq++
 	req := a.dashLanesReq
 	if len(pbis) == 0 {
@@ -609,7 +625,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.setFlash("active work: "+msg.err.Error(), true)
 		}
 		a.dashChildren = msg.children
-		a.dashLanes.setLanes(a.myPBIs(), a.dashChildren, msg.states)
+		a.dashLanes.setLanes(a.myActivePBIs(), a.dashChildren, msg.states)
 		return a, nil
 
 	case itemUpdatedMsg:
@@ -2048,7 +2064,8 @@ func (a *App) renderBody() string {
 }
 
 // renderDash lays out the Dashboard's two rows: a kanban of the PBIs
-// assigned to @Me on top, and swimlanes of their active subitems below.
+// assigned to @Me on top, and swimlanes of the subitems of those PBIs that
+// are currently in progress (model.IsInProgress) below.
 func (a *App) renderDash(w, h int) string {
 	summary := a.dashSummary(w)
 	topH, botH := a.dashLayout()

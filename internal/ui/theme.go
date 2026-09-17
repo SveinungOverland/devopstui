@@ -83,12 +83,12 @@ func kindStyle(k model.Kind) lipgloss.Style {
 }
 
 func stateStyle(state string) lipgloss.Style {
-	switch state {
-	case "Done", "Closed", "Resolved", "Completed":
+	switch {
+	case state == "Done" || state == "Closed" || state == "Resolved" || state == "Completed":
 		return lipgloss.NewStyle().Foreground(cOK)
-	case "In Progress", "Active", "Committed", "Doing":
+	case model.IsInProgress(state):
 		return lipgloss.NewStyle().Foreground(cAccent)
-	case "Removed":
+	case state == "Removed":
 		return lipgloss.NewStyle().Foreground(cMuted).Strikethrough(true)
 	default:
 		return lipgloss.NewStyle().Foreground(cText)

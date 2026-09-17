@@ -61,6 +61,20 @@ type WorkItem struct {
 	URL              string // browser URL
 }
 
+// IsInProgress reports whether state represents work that is actively being
+// worked on, as opposed to not-yet-started (New, Approved, To Do, …) or
+// finished (Done, Closed, Removed, …). Scrum-template boards never reach a
+// state literally called "In Progress" — they go New -> Approved ->
+// Committed -> Done — so "Committed" counts here too, matching the same
+// semantic bucket stateStyle uses for its "doing" color.
+func IsInProgress(state string) bool {
+	switch state {
+	case "In Progress", "Active", "Committed", "Doing":
+		return true
+	}
+	return false
+}
+
 // Assignee returns a display value for the assignee column.
 func (w WorkItem) Assignee() string {
 	if w.AssignedTo == "" {

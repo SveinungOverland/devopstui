@@ -965,13 +965,45 @@ func TestDashboardLanesExcludeBugs(t *testing.T) {
 	}
 }
 
+func TestDashboardLanesExcludeInactivePBIs(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	// #1025 is a PBI assigned to Sveinung sitting in "Approved" (fake.go)
+	// with a real Task child, #1026 (not a bug, unlike TestDashboardLanesExcludeBugs's
+	// #1024) — proving lanes are gated on the parent's own state, not just
+	// on whether it has non-bug children.
+	found := false
+	for _, col := range a.dashBoard.cols {
+		for _, it := range col {
+			found = found || it.ID == 1025
+		}
+	}
+	if !found {
+		t.Error("kanban should still show #1025 (all my PBIs show there, regardless of state)")
+	}
+	for _, l := range a.dashLanes.ls {
+		if l.parent.ID == 1025 {
+			t.Error("a PBI that isn't in progress should get no lane, even with a real task child")
+		}
+		for _, col := range l.cols {
+			for _, it := range col {
+				if it.ID == 1026 {
+					t.Fatalf("task #1026 should not appear in the lanes while its parent #1025 isn't in progress")
+				}
+			}
+		}
+	}
+}
+
 func TestDashboardFiltersBySelectedSprint(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	a := h.app
 	h.keys("1")
 
-	// All of Sveinung's PBIs (1003, 1013, 1020) sit in the current sprint,
-	// which is selected by default.
+	// All of Sveinung's PBIs (1003, 1013, 1020, 1025) sit in the current
+	// sprint, which is selected by default.
 	if pbis := len(a.myPBIs()); pbis == 0 {
 		t.Fatal("expected PBIs in the current sprint before switching")
 	}

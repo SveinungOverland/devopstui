@@ -33,8 +33,10 @@ type lanes struct {
 
 func newLanes() *lanes { return &lanes{selected: map[int]bool{}} }
 
-// setLanes rebuilds the lanes from parents (the user's PBIs, in display
-// order) and childrenOf (every fetched child, keyed by parent id). states
+// setLanes rebuilds the lanes from parents (the caller's pre-filtered PBIs —
+// the Dashboard passes only those currently in progress, see
+// App.myActivePBIs — in display order) and childrenOf (every fetched child,
+// keyed by parent id). states
 // sets the column order; pass nil to keep whatever was set before (e.g.
 // after a purely local update that didn't refetch). Any state seen on a
 // child but missing from states gets its own column at the end, so nothing

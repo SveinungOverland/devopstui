@@ -97,6 +97,12 @@ func NewFake() *Fake {
 	// requirement-level states, not task states, and shouldn't earn that
 	// PBI a lane on its own.
 	add(1024, 1020, "Bug", "Retry budget also drops the parent span id", "New", "Priya Natarajan", cur, 1, 2)
+	// A PBI of mine that hasn't started yet, with a real (non-bug) Task
+	// child, for the Dashboard's lanes to drop: only PBIs currently in
+	// progress (model.IsInProgress) earn a lane, regardless of whether they
+	// have children.
+	add(1025, 1002, "Product Backlog Item", "Add CAPTCHA to signup form", "Approved", "Sveinung Øverland", cur, 3, 2)
+	add(1026, 1025, "Task", "Wire CAPTCHA widget into signup form", "To Do", "Sveinung Øverland", cur, 0, 0)
 	// A sub-team owns part of the area tree.
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
