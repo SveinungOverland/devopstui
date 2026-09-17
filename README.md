@@ -199,7 +199,9 @@ right, one column per state.
 | `D` `enter`     | drill into the highlighted child                                       |
 | `esc` `q`       | walk back out, one level at a time                                     |
 | `z`             | give the description the full width                                    |
-| `r`             | re-fetch the children                                                  |
+| `C`             | show the discussion comments, full width                               |
+| `u`             | (in the comments pane) fetch older comments                            |
+| `r`             | re-fetch the children and comments                                     |
 
 Every action key works here too and applies to whatever has focus: the item itself while the
 description is focused, otherwise the highlighted child. So `s` sets a child's state, `d` edits

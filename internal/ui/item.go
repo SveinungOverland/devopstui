@@ -27,13 +27,23 @@ type itemView struct {
 	descOnly bool // z: hide the kanban and use the full width
 	loading  bool
 
-	cfg      model.BacklogConfig
-	lastDesc string
-	lastW    int
+	comments         []model.Comment // oldest first
+	commentsNext     string          // continuation token for an older page, "" when none left
+	commentsLoading  bool
+	commentsVer      int  // bumped by setComments/prependComments, to know when to re-render
+	pendingScrollTop bool // prependComments wants the viewport to land on the newly-loaded page
+	commentsOnly     bool // C: hide description and kanban, full width comments
+	cmts             viewport.Model
+
+	cfg        model.BacklogConfig
+	lastDesc   string
+	lastW      int
+	lastCmtVer int
+	lastCmtW   int
 }
 
 func newItemView(it *model.WorkItem, cfg model.BacklogConfig) *itemView {
-	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true}
+	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), cmts: viewport.New(40, 10), loading: true}
 }
 
 // apply swaps in an updated copy of the item or one of its children.
@@ -60,6 +70,21 @@ func (v *itemView) setChildren(children []*model.WorkItem, states []string) {
 		v.jumpTo(cur.ID)
 	}
 	v.clamp()
+}
+
+// setComments replaces the loaded page of comments, newest read first.
+func (v *itemView) setComments(comments []model.Comment, next string) {
+	v.comments = comments
+	v.commentsNext = next
+	v.commentsVer++
+}
+
+// prependComments adds an older page fetched via the continuation token.
+func (v *itemView) prependComments(older []model.Comment, next string) {
+	v.comments = append(append([]model.Comment(nil), older...), v.comments...)
+	v.commentsNext = next
+	v.commentsVer++
+	v.pendingScrollTop = true
 }
 
 // buildColumns places every child in the column matching its state. States
@@ -166,6 +191,10 @@ func (v *itemView) view(w, h int, spin string) string {
 	headH := lipgloss.Height(head)
 	paneH := max(h-headH, 3)
 
+	if v.commentsOnly {
+		return head + "\n" + v.renderComments(w, paneH, spin)
+	}
+
 	descW, kanW := w, 0
 	stacked := false
 	switch {
@@ -261,6 +290,53 @@ func (v *itemView) renderDesc(w, h int) string {
 		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
 	}
 	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
+}
+
+func (v *itemView) renderComments(w, h int, spin string) string {
+	inner := max(w-4, 20)
+	head := sMuted.Render(fmt.Sprintf("Comments (%d)", len(v.comments)))
+	if v.commentsLoading {
+		head += "  " + spin
+	}
+
+	if len(v.comments) == 0 && !v.commentsLoading {
+		return sPanelFocus.Width(w - 2).Height(h - 2).Render(head + "\n\n" + sMuted.Render("no comments yet"))
+	}
+
+	if v.commentsVer != v.lastCmtVer || inner != v.lastCmtW {
+		v.lastCmtVer, v.lastCmtW = v.commentsVer, inner
+		v.cmts.SetContent(v.renderCommentBody(inner))
+		if v.pendingScrollTop {
+			v.cmts.GotoTop()
+			v.pendingScrollTop = false
+		} else {
+			v.cmts.GotoBottom()
+		}
+	}
+	v.cmts.Width = inner
+	v.cmts.Height = max(h-3, 1)
+	if v.commentsNext != "" {
+		head += sMuted.Render("   press ") + sKey.Render("u") + sMuted.Render(" for older")
+	}
+	if v.cmts.TotalLineCount() > v.cmts.Height {
+		head += sMuted.Render(fmt.Sprintf("  %d%%", int(v.cmts.ScrollPercent()*100)))
+	}
+	return sPanelFocus.Width(w - 2).Height(h - 2).Render(head + "\n" + v.cmts.View())
+}
+
+// renderCommentBody renders every loaded comment, oldest first, as a chat
+// log: an author/timestamp header per entry, then its Markdown body.
+func (v *itemView) renderCommentBody(w int) string {
+	var b strings.Builder
+	for i, c := range v.comments {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(sKey.Render(c.Author) + sMuted.Render("  "+ago(c.CreatedDate)))
+		b.WriteString("\n")
+		b.WriteString(markdown.Render(c.Text, w))
+	}
+	return b.String()
 }
 
 func (v *itemView) renderKanban(w, h int, spin string) string {

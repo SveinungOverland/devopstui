@@ -40,6 +40,10 @@ type Client interface {
 	// ChildrenOf batch-fetches children for several parents at once, keyed
 	// by parent id. Parents with no children are simply absent from the map.
 	ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error)
+	// Comments returns one page of a work item's discussion, oldest first.
+	// token is "" for the newest page; the returned next token is "" once
+	// there is nothing older left to fetch.
+	Comments(ctx context.Context, project string, id int, token string) (comments []model.Comment, next string, err error)
 
 	Get(ctx context.Context, id int) (*model.WorkItem, error)
 	// Update applies field patches with an optimistic concurrency check on rev.

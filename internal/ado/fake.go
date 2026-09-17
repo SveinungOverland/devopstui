@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,12 +17,17 @@ type Fake struct {
 	mu       sync.Mutex
 	me       string
 	items    map[int]*model.WorkItem
+	comments map[int][]model.Comment // oldest first
 	iters    []model.Iteration
 	nextID   int
 	Updates  []FakeUpdate // recorded writes, for tests
 	Latency  time.Duration
 	FailNext error
 }
+
+// commentPageSize is small on purpose so demo data and tests can exercise
+// the "load older" fetch-more path without seeding huge threads.
+const commentPageSize = 2
 
 // FakeUpdate is a recorded write.
 type FakeUpdate struct {
@@ -32,7 +38,7 @@ type FakeUpdate struct {
 
 // NewFake returns a Fake pre-populated with a small realistic backlog.
 func NewFake() *Fake {
-	f := &Fake{me: "Sveinung Øverland", items: map[int]*model.WorkItem{}, Latency: 150 * time.Millisecond}
+	f := &Fake{me: "Sveinung Øverland", items: map[int]*model.WorkItem{}, comments: map[int][]model.Comment{}, Latency: 150 * time.Millisecond}
 	now := time.Now()
 	monday := now.AddDate(0, 0, -int(now.Weekday())+1)
 	sprint := func(n int, offset int) model.Iteration {
@@ -66,6 +72,9 @@ func NewFake() *Fake {
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
 			Description: demoDescription(id, title),
 			URL:         fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+		}
+		if cs := demoComments(id, now); len(cs) > 0 {
+			f.comments[id] = cs
 		}
 	}
 	add(1001, 0, "Epic", "Self-service onboarding", "In Progress", "Alex Kim", backlog, 0, 1)
@@ -141,6 +150,37 @@ level=error msg="token expired" id=%d
 | prod | sometimes |`, title, id)
 	default:
 		return fmt.Sprintf("%s.\n\nSmall change, no acceptance criteria beyond `go test ./...` passing.", title)
+	}
+}
+
+// demoComments seeds a discussion thread for some items and leaves others
+// empty, so both states show up in --demo mode and golden frames.
+func demoComments(id int, now time.Time) []model.Comment {
+	author := func(name string, ago time.Duration) (string, string, time.Time) {
+		display, uniq := resolvePerson(name)
+		return display, uniq, now.Add(-ago)
+	}
+	switch id % 3 {
+	case 0:
+		return nil
+	case 1:
+		var cs []model.Comment
+		for i, c := range []struct {
+			name string
+			ago  time.Duration
+			text string
+		}{
+			{"Alex Kim", 3 * 24 * time.Hour, "Started on this — will push a draft today."},
+			{"Priya Natarajan", 2 * 24 * time.Hour, "Nice, let me know if you want a second pair of eyes on the design."},
+			{"Sveinung Øverland", time.Hour, "Draft is up, PTAL @Priya Natarajan."},
+		} {
+			a, u, when := author(c.name, c.ago)
+			cs = append(cs, model.Comment{ID: id*100 + i + 1, Author: a, AuthorUnique: u, Text: c.text, CreatedDate: when, ModifiedDate: when})
+		}
+		return cs
+	default:
+		a, u, when := author("Priya Natarajan", 30*time.Minute)
+		return []model.Comment{{ID: id*100 + 1, Author: a, AuthorUnique: u, Text: "Can we get an estimate on this by Friday?", CreatedDate: when, ModifiedDate: when}}
 	}
 }
 
@@ -385,6 +425,32 @@ func (f *Fake) ChildrenOf(ctx context.Context, project string, parentIDs []int) 
 		out[it.ParentID] = append(out[it.ParentID], it)
 	}
 	return out, nil
+}
+
+// Comments paginates f.comments[id] (oldest first) from the newest end
+// backwards, commentPageSize at a time, so demo mode and tests can exercise
+// the fetch-more path.
+func (f *Fake) Comments(ctx context.Context, project string, id int, token string) ([]model.Comment, string, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, "", err
+	}
+	f.mu.Lock()
+	all := f.comments[id]
+	f.mu.Unlock()
+
+	end := len(all)
+	if token != "" {
+		if n, err := strconv.Atoi(token); err == nil && n >= 0 && n <= len(all) {
+			end = n
+		}
+	}
+	start := max(end-commentPageSize, 0)
+	page := append([]model.Comment(nil), all[start:end]...)
+	next := ""
+	if start > 0 {
+		next = strconv.Itoa(start)
+	}
+	return page, next, nil
 }
 
 func (f *Fake) Get(ctx context.Context, id int) (*model.WorkItem, error) {

@@ -659,6 +659,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case commentsLoadedMsg:
+		if a.item == nil || a.item.item.ID != msg.id {
+			return a, nil // drilled elsewhere while the fetch was in flight
+		}
+		a.item.commentsLoading = false
+		if msg.err != nil {
+			return a, a.setFlash("comments: "+msg.err.Error(), true)
+		}
+		if msg.older {
+			a.item.prependComments(msg.comments, msg.next)
+		} else {
+			a.item.setComments(msg.comments, msg.next)
+		}
+		return a, nil
+
 	case teamFilterMsg:
 		if msg.err != nil {
 			return a, a.setFlash("team filter: "+msg.err.Error(), true)
@@ -1654,6 +1669,14 @@ type itemLoadedMsg struct {
 	err      error
 }
 
+type commentsLoadedMsg struct {
+	id       int
+	comments []model.Comment
+	next     string
+	older    bool // a "load more" fetch, to prepend rather than replace
+	err      error
+}
+
 // openItem drills into a work item. The locally known children show at
 // once; a fetch then fills in anything the current view has not loaded.
 func (a *App) openItem(it *model.WorkItem) tea.Cmd {
@@ -1675,8 +1698,43 @@ func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 	v.parent = a.lookup(it.ParentID)
 	v.focusKan = len(a.childItems(it.ID)) > 0
 	v.setChildren(a.childItems(it.ID), nil)
+	v.commentsLoading = true
 	a.item = v
-	return a.loadItemChildren(it)
+	return tea.Batch(a.loadItemChildren(it), a.loadItemComments(it))
+}
+
+// loadItemComments fetches the newest page of a work item's discussion.
+func (a *App) loadItemComments(it *model.WorkItem) tea.Cmd {
+	project, id := a.ctx.Project, it.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		comments, next, err := a.client.Comments(ctx, project, id, "")
+		if err != nil {
+			return commentsLoadedMsg{id: id, err: err}
+		}
+		return commentsLoadedMsg{id: id, comments: comments, next: next}
+	}
+}
+
+// loadMoreComments fetches the next (older) page via the continuation token,
+// to be prepended ahead of what is already loaded.
+func (a *App) loadMoreComments() tea.Cmd {
+	v := a.item
+	if v == nil || v.commentsNext == "" || v.commentsLoading {
+		return nil
+	}
+	project, id, token := a.ctx.Project, v.item.ID, v.commentsNext
+	v.commentsLoading = true
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		comments, next, err := a.client.Comments(ctx, project, id, token)
+		if err != nil {
+			return commentsLoadedMsg{id: id, older: true, err: err}
+		}
+		return commentsLoadedMsg{id: id, comments: comments, next: next, older: true}
+	}
 }
 
 func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
@@ -1781,7 +1839,7 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, keys.Back):
 		return a.closeItem(), true
 	case key.Matches(msg, keys.Focus):
-		if !v.descOnly {
+		if !v.descOnly && !v.commentsOnly {
 			v.focusKan = !v.focusKan
 		}
 		return nil, true
@@ -1789,11 +1847,19 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		v.descOnly = !v.descOnly
 		if v.descOnly {
 			v.focusKan = false // the kanban is gone; focus follows
+			v.commentsOnly = false
+		}
+		return nil, true
+	case key.Matches(msg, keys.Comments):
+		v.commentsOnly = !v.commentsOnly
+		if v.commentsOnly {
+			v.descOnly = false
 		}
 		return nil, true
 	case key.Matches(msg, keys.Refresh):
 		v.loading = true
-		return a.loadItemChildren(v.item), true
+		v.commentsLoading = true
+		return tea.Batch(a.loadItemChildren(v.item), a.loadItemComments(v.item)), true
 	case key.Matches(msg, keys.Details), msg.String() == "enter":
 		if c := v.currentChild(); v.focusKan && c != nil {
 			return a.openItem(c), true
@@ -1805,6 +1871,31 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 	v := a.item
+	if v.commentsOnly {
+		switch {
+		case key.Matches(msg, keys.Down):
+			v.cmts.LineDown(1)
+			return nil
+		case key.Matches(msg, keys.Up):
+			v.cmts.LineUp(1)
+			return nil
+		case key.Matches(msg, keys.PreviewDown):
+			v.cmts.HalfViewDown()
+			return nil
+		case key.Matches(msg, keys.PreviewUp):
+			v.cmts.HalfViewUp()
+			return nil
+		case key.Matches(msg, keys.Top):
+			v.cmts.GotoTop()
+			return nil
+		case key.Matches(msg, keys.Bottom):
+			v.cmts.GotoBottom()
+			return nil
+		case key.Matches(msg, keys.LoadMore):
+			return a.loadMoreComments()
+		}
+		return a.onActionKey(msg)
+	}
 	if !v.focusKan {
 		switch {
 		case key.Matches(msg, keys.Down):
@@ -1960,7 +2051,10 @@ func (a *App) renderHeader() string {
 		}
 		tabs = append(tabs, sCrumbSep.Render("▸ ")+strings.Join(trail, sCrumbSep.Render(" ▸ ")))
 		focus := "description"
-		if a.item.focusKan {
+		switch {
+		case a.item.commentsOnly:
+			focus = fmt.Sprintf("comments (%d)", len(a.item.comments))
+		case a.item.focusKan:
 			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
 		}
 		summary = sMuted.Render(focus)
@@ -2091,9 +2185,13 @@ func (a *App) renderFooter() string {
 	bindings := footerTree
 	switch {
 	case a.view == viewItem && a.item != nil:
-		bindings = footerItemDesc
-		if a.item.focusKan {
+		switch {
+		case a.item.commentsOnly:
+			bindings = footerItemComments
+		case a.item.focusKan:
 			bindings = footerItemKanban
+		default:
+			bindings = footerItemDesc
 		}
 	case a.view == viewBoard:
 		bindings = footerBoard

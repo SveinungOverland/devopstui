@@ -441,6 +441,48 @@ func (s *SDK) ChildrenOf(ctx context.Context, project string, parentIDs []int) (
 	return out, nil
 }
 
+// Comments returns one page of a work item's discussion. The API hands back
+// newest-first pages with a token to fetch the next (older) one; this
+// reverses each page to oldest-first so the UI can read it top-to-bottom
+// like a chat log, appending older pages above newer ones.
+//
+// NOTE: the exact GetComments/GetCommentsArgs shape below was written
+// against the azure-devops-go-api/v7 workitemtracking package from memory
+// and could not be compiled or verified against the vendored source in this
+// change; double check it against go.sum's pinned version if it fails to
+// build.
+func (s *SDK) Comments(ctx context.Context, project string, id int, token string) ([]model.Comment, string, error) {
+	args := workitemtracking.GetCommentsArgs{Project: &project, WorkItemId: &id}
+	if token != "" {
+		args.ContinuationToken = &token
+	}
+	res, err := s.wit.GetComments(ctx, args)
+	if err != nil {
+		return nil, "", err
+	}
+	var out []model.Comment
+	if res != nil && res.Comments != nil {
+		for _, c := range *res.Comments {
+			out = append(out, model.Comment{
+				ID:           deref(c.Id),
+				Author:       identityRefName(c.CreatedBy),
+				AuthorUnique: identityRefUnique(c.CreatedBy),
+				Text:         markdown.FromHTML(deref(c.Text)),
+				CreatedDate:  adoTime(c.CreatedDate),
+				ModifiedDate: adoTime(c.ModifiedDate),
+			})
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	next := ""
+	if res != nil && res.ContinuationToken != nil {
+		next = *res.ContinuationToken
+	}
+	return out, next, nil
+}
+
 func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	wi, err := s.wit.GetWorkItem(ctx, workitemtracking.GetWorkItemArgs{Id: &id, Fields: &fields})
 	if err != nil {
@@ -570,6 +612,30 @@ func identityUnique(v any) string {
 		return str(m["uniqueName"])
 	}
 	return ""
+}
+
+// identityRefName/identityRefUnique read a typed webapi.IdentityRef, as
+// returned by the comments API, unlike identityName/identityUnique above
+// which read the untyped map[string]any a work item's Fields decode to.
+func identityRefName(ref *webapi.IdentityRef) string {
+	if ref == nil {
+		return ""
+	}
+	return deref(ref.DisplayName)
+}
+
+func identityRefUnique(ref *webapi.IdentityRef) string {
+	if ref == nil {
+		return ""
+	}
+	return deref(ref.UniqueName)
+}
+
+func adoTime(t *azuredevops.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.Time
 }
 
 func str(v any) string {

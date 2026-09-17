@@ -204,6 +204,62 @@ func TestItemViewDrillAndBack(t *testing.T) {
 	}
 }
 
+func TestItemViewComments(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1003) // PBI with 3 seeded comments, page size 2
+	h.keys("D")
+	v := h.app.item
+
+	h.keys("C")
+	if !v.commentsOnly {
+		t.Fatal("C should show the comments pane full width")
+	}
+	out := h.app.View()
+	h.dump("30-item-view-comments")
+	if !strings.Contains(out, "Comments (2)") {
+		t.Errorf("comments header missing, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Draft is up") || !strings.Contains(out, "second pair of eyes") {
+		t.Error("the newest page of comments is missing")
+	}
+	if strings.Contains(out, "Started on this") {
+		t.Error("the older comment should not be loaded yet")
+	}
+	if !strings.Contains(out, "for older") {
+		t.Error("should hint that older comments can be fetched")
+	}
+
+	h.keys("u")
+	out = h.app.View()
+	h.dump("31-item-view-comments-more")
+	if !strings.Contains(out, "Comments (3)") || !strings.Contains(out, "Started on this") {
+		t.Error("u should fetch the older comment")
+	}
+	if strings.Contains(out, "for older") {
+		t.Error("the fetch-more hint should be gone once nothing is left")
+	}
+
+	h.keys("C")
+	if v.commentsOnly {
+		t.Error("C should toggle the comments pane back off")
+	}
+	if !v.focusKan {
+		t.Error("leaving the comments pane should restore the kanban focus")
+	}
+}
+
+func TestItemViewCommentsEmpty(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1002) // Feature with no seeded comments
+	h.keys("D")
+	h.keys("C")
+	out := h.app.View()
+	h.dump("32-item-view-comments-empty")
+	if !strings.Contains(out, "no comments yet") {
+		t.Error("empty comments state missing")
+	}
+}
+
 func TestItemViewWithoutChildren(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.sprint.jumpTo(1021) // PBI with no children

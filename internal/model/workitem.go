@@ -78,6 +78,16 @@ func (w WorkItem) AssigneeRef() string {
 	return w.AssignedTo
 }
 
+// Comment is one entry in a work item's discussion thread.
+type Comment struct {
+	ID           int
+	Author       string // display name
+	AuthorUnique string // sign-in address, "" when unknown
+	Text         string // markdown
+	CreatedDate  time.Time
+	ModifiedDate time.Time
+}
+
 // Iteration is a team sprint.
 type Iteration struct {
 	ID     string
