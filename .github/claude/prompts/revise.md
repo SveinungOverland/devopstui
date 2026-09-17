@@ -1,7 +1,7 @@
 # Playbook: address review feedback
 
-A human requested changes on the pull request. The board is back at
-`In progress` and the PR is a draft again. Your job is to address the feedback
+A human requested changes on the pull request. The issue is back at
+`agent:in-progress` and the PR is a draft again. Your job is to address the feedback
 on the existing branch.
 
 Read `.github/claude/CONTEXT.md` first, then the playbook rules in
@@ -40,8 +40,8 @@ UI — they apply here too.
 - Post one comment summarising what changed this round, as a short list keyed
   to the feedback. No essay.
 
-Do not mark the PR ready for review and do not touch the board — the workflow
-does both when this run finishes cleanly. Do not write `@claude` in any comment.
+Do not mark the PR ready for review and do not change the `agent:` labels — the
+workflow does both when this run finishes cleanly. Do not write `@claude` in any comment.
 
 Never resolve a human's review thread yourself unless you fixed exactly what it
 asked for; leaving it open is how the reviewer knows to look again.

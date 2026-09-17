@@ -310,14 +310,18 @@ if you'd rather not touch `$GOBIN`.
 
 ## Automation
 
-Work is driven from the **Devopstui Kanban** project board. Opening an issue gets it a written
-implementation plan; moving the card to `Ready` gets it a branch, a pull request and an agent
-that builds it, screenshots the result and hands it back for review.
+Work is driven from labels on issues. Opening an issue gets it a written implementation plan;
+adding `agent:ready` gets it a branch, a pull request and an agent that builds it, screenshots
+the result and hands it back for review.
 
 ```
-issue ──▶ Backlog ──▶ Ready ──▶ In progress ──▶ In review ──▶ Done
-            plan     ^ you       branch + PR      reviews      merged
+issue ──▶ backlog ──▶ agent:ready ──▶ agent:in-progress ──▶ agent:in-review ──▶ closed
+            plan         ^ you           branch + PR            reviews          merged
 ```
+
+Adding the label is the only manual step, and it needs no setup beyond the Claude GitHub App:
+labels live in the repository, so the workflows' own token can read and write them, and
+`issues: labeled` starts a workflow the moment you click.
 
 [docs/automation.md](docs/automation.md) has the setup, the workflows and what to do when
 something gets stuck.

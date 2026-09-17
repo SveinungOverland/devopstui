@@ -1,116 +1,101 @@
-# Board-driven automation
+# Label-driven automation
 
-Issues on the **Devopstui Kanban** project board drive the work. You move a
-card; agents do the rest and move it back to you.
+Labels on an issue drive the work. You add one label; agents do the rest and
+hand it back to you.
 
 ```
- issue opened ──▶ Backlog ──▶ Ready ──▶ In progress ──▶ In review ──▶ Done
-      │            │            │            │              │           │
-      │            │            │            │              │           └─ PR merged
-      │            │            │            │              └─ PR ready, review agents run
-      │            │            │            └─ branch + draft PR, agent implements
-      │            │            └─ YOU move the card. The only manual step.
-      │            └─ plan comment posted: changes, risks, decisions needed
-      └─ added to the board automatically
+ issue opened ──▶ backlog ──▶ agent:ready ──▶ agent:in-progress ──▶ agent:in-review ──▶ closed
+      │             │             │                  │                    │               │
+      │             │             │                  │                    │               └─ PR merged
+      │             │             │                  │                    └─ PR ready, reviews run
+      │             │             │                  └─ branch + draft PR, agent implements
+      │             │             └─ YOU add this label. The only manual step.
+      │             └─ plan comment posted: changes, risks, decisions needed
+      └─ an open issue with no agent: label is the backlog
 ```
 
-Everything except the move to `Ready` happens on its own. `Ready` is the
-go-ahead, and it is deliberately the one thing a human does.
+Adding `agent:ready` is the only manual step. Everything else is written by the
+workflows.
 
 ## Setup
 
-1. **Create the board.** A GitHub Project (v2) called `Devopstui Kanban`, owned
-   by the same account as the repository, with a single-select `Status` field
-   whose options are exactly:
-
-   `Backlog`, `Ready`, `In progress`, `In review`, `Done`
-
-   Spelling is matched case-insensitively, so `In Progress` is fine, but an
-   option that is missing entirely will fail the run that needs it.
-
-2. **Install the Claude GitHub App** on the repository and set
+1. **Install the Claude GitHub App** on the repository and set
    `secrets.CLAUDE_CODE_OAUTH_TOKEN`. Run `/install-github-app` from Claude
    Code if it is not already set up.
 
-3. **Add `secrets.PROJECTS_TOKEN`.** A personal access token that can read and
-   write the project:
+2. **Run *Automation bootstrap*** from the Actions tab. It creates the six
+   `agent:` labels so `agent:ready` is there to pick from the label menu.
 
-   - classic PAT: `repo` + `project` scopes;
-   - or fine-grained PAT: repository *Contents*, *Issues* and *Pull requests*
-     read/write, plus account *Projects* read/write.
-
-   Add `workflow` scope too if you want agents to be able to change the files
-   in `.github/workflows/` themselves.
-
-   This token is needed because **the automatic `GITHUB_TOKEN` cannot touch
-   Projects v2 at all** — it is scoped to the repository, and projects live
-   outside it.
-
-4. **Run *Automation bootstrap*** from the Actions tab. It creates the labels
-   and checks that the token can see the board and all five Status options. It
-   fails loudly if something is missing, which is the point.
-
-5. **Merge to the default branch.** Two separate reasons, both absolute:
-   scheduled workflows only run from there, so the poll does not start until
-   `project-sync.yml` is on `main`; and `claude-code-action` refuses to run at
-   all from a workflow file whose content differs from the version on the
-   default branch. On a pull request that adds or edits one you will see:
+3. **Merge to the default branch.** `claude-code-action` refuses to run from a
+   workflow file whose content differs from the version on the default branch.
+   On a pull request that adds or edits one you will see:
 
    > Workflow validation failed. The workflow file must exist and have
    > identical content to the version on the repository's default branch.
 
    That is the action protecting itself, not a misconfiguration. It also means
    an agent's own pull request that edits a file under `.github/workflows/`
-   will have its Claude reviews skipped on that PR — the change has to land
-   first. The prompt playbooks under `.github/claude/` are ordinary files, not
-   workflows, so those take effect on the branch immediately.
+   will have its Claude reviews skipped on that PR. The prompt playbooks under
+   `.github/claude/` are ordinary files, not workflows, so those take effect on
+   the branch immediately.
 
-Optional repository variables:
+That is the whole required setup. There is no project, no board, and **no
+personal access token** — labels are part of the repository, so the automatic
+`GITHUB_TOKEN` can read and write them.
 
-| Variable         | Default            | Use                                                   |
-| ---------------- | ------------------ | ----------------------------------------------------- |
-| `PROJECT_TITLE`  | `Devopstui Kanban` | If the board is called something else.                |
-| `PROJECT_NUMBER` | –                  | Pin by number instead of title; skips the title match. |
-| `MAX_IMPLEMENT`  | `2`                | Agents started per poll.                              |
-| `MAX_REVIEW`     | `3`                | Reviews started per poll.                             |
+### The one optional extra
 
-## Why the board is polled
+`secrets.AUTOMATION_TOKEN`, a PAT with `repo` scope, changes exactly one thing:
+whether agent pull requests show CI check badges.
 
-GitHub does not deliver project events to repository workflows.
-`projects_v2_item` webhooks exist only for organisation-level webhooks and
-GitHub Apps, and `projects_v2_item` is not one of the events that can trigger a
-workflow. There is no way to run a workflow the moment a card moves.
+Events raised with the automatic `GITHUB_TOKEN` deliberately do not start
+further workflows — that is GitHub preventing infinite loops. So a PR opened
+and a branch pushed by an agent raise no `pull_request` events, and `ci.yml`
+never runs on them. Set `AUTOMATION_TOKEN` and the PR is opened and marked
+ready with it instead, which does raise events, and the checks appear.
 
-So `project-sync.yml` runs on a `*/5 * * * *` schedule and reconciles instead:
-it reads the board, compares it against what has actually happened, and starts
-whatever is missing. A card moved to `Ready` is normally picked up within five
-minutes — sometimes longer, because GitHub delays scheduled runs under load. If
-you do not want to wait, hit **Run workflow** on *Project sync*.
+Without it nothing breaks:
 
-The reconciler is idempotent. Every check asks "has this already happened?"
-before starting anything, so running it twice, or in parallel with itself, does
-nothing twice:
+- `agent-implement.yml` runs `make check` itself before handing the PR over,
+  and refuses to advance the issue if it fails;
+- the impact review runs as a chained job rather than off a `ready_for_review`
+  event.
 
-- a card at `Ready` is skipped if the issue already has `claude:implementing`;
-- a card at `In review` is skipped if the PR's current commit already has an
-  impact review — matched on the head SHA, so a new commit gets a new review
-  but a card parked at `In review` does not get reviewed every five minutes;
-- a closed issue that is not at `Done` is moved there.
+## Why labels rather than a project board
+
+A project board was the obvious fit, and it does not work: GitHub will not
+start a repository workflow when a project card moves. `projects_v2_item`
+webhooks exist only at organisation level and are not an Actions trigger, and
+Projects v2 is outside the reach of `GITHUB_TOKEN` entirely, so a board version
+of this needs a scheduled poll, a PAT with project scope, and a reconciler to
+compare board state against reality.
+
+Labels have none of those problems:
+
+- `issues: labeled` is a first-class workflow trigger, so work starts the
+  moment you add the label rather than up to five minutes later;
+- labels live in the repository, so `GITHUB_TOKEN` is enough;
+- **only someone with write access can add a label**, so the permission check
+  on the trigger is GitHub's rather than something this repository has to
+  implement.
+
+The last one matters more than it looks. `agent:ready` is the point where an
+agent starts writing code, and it is gated by repository permissions without a
+line of code on our side.
 
 ## What each workflow does
 
-| Workflow                    | Starts when                                    | Does                                                                   |
-| --------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
-| `issue-plan.yml`            | issue opened or reopened                       | Adds it to the board at `Backlog`, posts the plan comment.             |
-| `project-sync.yml`          | every 5 minutes                                | Reads the board, starts implement and review runs, fixes drift.        |
-| `agent-implement.yml`       | called by sync or by pr-feedback               | Branch, draft PR, implementation, verification, hand-off to review.    |
-| `agent-review.yml`          | PR ready for review, or called by sync         | The impact and security review.                                        |
-| `claude-code-review.yml`    | PR ready for review, new commits on a ready PR | Line-level inline comments.                                            |
-| `pr-feedback.yml`           | a human requests changes                       | Sends the card back to `In progress` and the agent back to work.       |
-| `pr-merged.yml`             | PR closed                                      | `Done` if merged, back to `Backlog` if not.                            |
-| `ci.yml`                    | push and pull request                          | `make check` plus a UI capture.                                        |
-| `automation-bootstrap.yml`  | manual                                         | Labels, and a health check of the board wiring.                        |
-| `claude.yml`                | `@claude` in a comment                         | The manual escape hatch, outside the pipeline.                         |
+| Workflow                   | Starts when                                    | Does                                                                |
+| -------------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
+| `issue-plan.yml`           | issue opened or reopened                       | Posts the plan comment, ensures the labels exist.                   |
+| `agent-implement.yml`      | `agent:ready` added                            | Branch, draft PR, implementation, verification, hand-off to review. |
+| `agent-review.yml`         | chained from implement, or PR ready for review | The impact and security review.                                     |
+| `claude-code-review.yml`   | PR ready for review, new commits on a ready PR | Line-level inline comments.                                         |
+| `pr-feedback.yml`          | a human requests changes                       | Puts the agent back on it, in `revise` mode.                        |
+| `pr-merged.yml`            | PR closed                                      | Closes the issue if merged, clears the labels either way.           |
+| `ci.yml`                   | push and pull request                          | `make check` plus a UI capture.                                     |
+| `automation-bootstrap.yml` | manual                                         | Creates the labels.                                                 |
+| `claude.yml`               | `@claude` in a comment                         | The manual escape hatch, outside the pipeline.                      |
 
 The agents' instructions are in `.github/claude/prompts/` — `plan.md`,
 `implement.md`, `revise.md`, `review.md` — with shared project context in
@@ -142,40 +127,45 @@ They are deliberately separate, and they do not overlap:
 Neither approves, requests changes, or merges. That is yours.
 
 Both stay quiet while a PR is a draft, which is exactly while the implementing
-agent is working. Marking the PR ready is the hand-off, and it is what starts
-them.
+agent is working. Marking the PR ready is the hand-off.
 
-## Draft state mirrors the board
+The impact review can be asked for twice — once by the chained job and once by
+`ready_for_review` when `AUTOMATION_TOKEN` is set. The first one to finish
+leaves a `<!-- claude-impact-review: <sha> -->` marker, and the second sees it
+and stands down. A review that produced nothing does *not* leave a marker, so
+the other path is still free to try.
 
-| Board         | Pull request |
-| ------------- | ------------ |
-| `In progress` | draft        |
-| `In review`   | ready        |
+## Draft state mirrors the label
+
+| Issue               | Pull request |
+| ------------------- | ------------ |
+| `agent:in-progress` | draft        |
+| `agent:in-review`   | ready        |
 
 The implement workflow marks the PR ready at the end of a clean run; the
 feedback workflow puts it back to draft before another pass. This is what keeps
-reviews off half-finished branches without needing any extra bookkeeping.
+reviews off half-finished branches without extra bookkeeping.
 
 ## Tokens
 
-Three, with different jobs, kept apart on purpose:
+| Token                      | Used for                                                       |
+| -------------------------- | --------------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`  | Authenticating Claude. Required.                               |
+| `GITHUB_TOKEN` (automatic) | Everything else: labels, comments, commits, PR edits.          |
+| `AUTOMATION_TOKEN`         | Optional. Only opens the PR and marks it ready, so CI runs.    |
 
-| Token                      | Used for                                                          | Where |
-| -------------------------- | ----------------------------------------------------------------- | ----- |
-| `CLAUDE_CODE_OAUTH_TOKEN`  | Authenticating Claude.                                            | The action's own input. |
-| `PROJECTS_TOKEN`           | The board, opening the PR, the draft/ready toggle.                | Steps that run no model output. |
-| `GITHUB_TOKEN` (automatic) | Everything the agent itself does: commits, comments, PR edits.    | The step Claude runs in. |
-
-**The PAT is never in the environment of a step that runs an agent.** Issue
-bodies, PR descriptions and review comments are untrusted input, and an agent
-reading them should not have a token that reaches beyond this repository. The
-agent's blast radius is the `permissions:` block of its job.
+`AUTOMATION_TOKEN` is never put in the environment of a step that runs an
+agent, and never written into the checkout's git config. Issue bodies, PR
+descriptions and review comments are untrusted input, and an agent reading them
+should not hold a token that reaches beyond this repository. An agent's blast
+radius is the `permissions:` block of its job.
 
 Two more guards for the same reason:
 
 - `issue-plan.yml` only runs automatically for issues opened by the repository
   owner, a member or a collaborator. Anyone else's issue waits for a maintainer
-  to start the workflow by hand.
+  to start the workflow by hand — an issue can be opened by anyone, and that
+  text is fed to an agent.
 - `pr-feedback.yml` ignores reviews from bots, so a review agent cannot restart
   the implementation loop. Only a human requesting changes does that.
 
@@ -185,17 +175,14 @@ instructions, and to report anything that tries to redirect it.
 ## Working with it
 
 **Normal loop.** Open an issue, read the plan, answer anything under "Decisions
-needed", move the card to `Ready`. Come back to a PR. Review it: request
-changes to send it round again, merge when you are happy.
+needed", add `agent:ready`. Come back to a PR. Review it: request changes to
+send it round again, merge when you are happy.
 
-**Start something now** without waiting for the poll: *Project sync* →
-**Run workflow**.
+**Re-run one issue**: *Agent — implement* → **Run workflow**, with the issue
+number, and `implement` or `revise`.
 
-**Re-run one issue** without touching the board: *Agent — implement* → **Run
-workflow**, with the issue number, and `implement` or `revise`.
-
-**Stop an agent**: cancel the run, then move the card off `Ready`. Remove the
-`claude:implementing` label if you want the next poll to pick it up again.
+**Stop an agent**: cancel the run, then remove `agent:in-progress`. Nothing
+restarts on its own — there is no poll.
 
 **Take over a branch by hand.** The branch is `claude/issue-<number>` and it is
 an ordinary branch — push to it, and the agent will build on your commits the
@@ -203,63 +190,49 @@ next time it runs.
 
 ## Labels
 
-| Label                    | Means                                               |
-| ------------------------ | --------------------------------------------------- |
-| `claude:planned`         | A plan comment has been posted.                     |
-| `claude:needs-decision`  | The plan is blocked on an answer. Do not move to `Ready` yet. |
-| `claude:implementing`    | An agent is on it. Also what stops a second one starting. |
-| `claude:in-review`       | Implementation finished, PR is up.                  |
-| `claude:blocked`         | A run failed. The comment on the issue links the log. |
+| Label                  | Means                                                        |
+| ---------------------- | ------------------------------------------------------------ |
+| `agent:ready`          | **You add this.** It starts an agent.                        |
+| `agent:in-progress`    | An agent has it. Also what stops a second one starting.       |
+| `agent:in-review`      | Implementation finished, PR is up.                            |
+| `agent:planned`        | A plan comment has been posted.                               |
+| `agent:needs-decision` | The plan is blocked on an answer. Do not add `agent:ready` yet. |
+| `agent:blocked`        | A run failed. The comment on the issue links the log.         |
+
+`.github/scripts/status.sh` is the only thing that writes them, and it keeps
+exactly one status label on an issue at a time.
 
 ## When something goes wrong
 
-**Nothing happens when a card moves to `Ready`.** Check *Project sync* in the
-Actions tab. If runs are not appearing at all: scheduled workflows only run
-from the default branch, and GitHub disables them after 60 days without
-repository activity — push anything, or re-enable from the Actions tab.
-
-**`no projects visible to this token`.** `PROJECTS_TOKEN` is missing, expired,
-or has no project scope. Run *Automation bootstrap* — it says which.
-
-**`Status has no option '...'`.** The board's option names drifted from the
-five the workflows use. The error lists what the board actually has.
-
-**A run failed and the card is stuck at `In progress`.** The issue has
-`claude:blocked` and a comment linking the log. Fix the cause, then move the
-card out of `Ready` and back in.
-
-**Two agents on one issue.** Should not happen: `concurrency` groups runs by
-issue, and the `claude:implementing` label stops the poll from starting a
-second. If it does, cancel one — the branch is shared and the second run will
-reuse it.
-
-**The PR was opened but nothing was implemented.** Look for the empty
-`Start work on #n` commit: the agent's run failed after the branch was created.
-The branch and PR are reused on the next attempt, so just retry.
+**Nothing happens when I add `agent:ready`.** Check the Actions tab for *Agent
+— implement*. If no run appears at all, the workflow is not on the default
+branch yet — see setup step 3.
 
 **A Claude job finished in seconds having done nothing.** Read its log for
 "Workflow validation failed". The workflow file differs from the copy on the
-default branch, which is exactly the case on any PR that touches
-`.github/workflows/`. Merge it and the workflow starts working.
+default branch, which is the case on any PR that touches `.github/workflows/`.
+Merge it and the workflow starts working.
 
-**An artifact upload says "No files were found".** `actions/upload-artifact`
-skips hidden files by default, so a path that is itself hidden matches nothing
-even when it is full of files. This is why the captures go to `shots/` rather
-than `.shots/`. Keep new output directories visible.
+**A run failed and the issue is stuck at `agent:in-progress`.** It also has
+`agent:blocked` and a comment linking the log. Fix the cause, then remove
+`agent:in-progress` and add `agent:ready` again.
 
-**A comment says the review "finished without posting a review".** The review
-agent ran but left nothing. The workflow posts that marker itself so the poll
-does not start a fresh review every five minutes for the same commit — which is
-the failure mode worth avoiding. Re-run *Agent — impact review* with the PR
-number to try again.
+**Agent PRs have no CI checks.** Expected without `AUTOMATION_TOKEN` — see
+"The one optional extra". The implement workflow still ran `make check`.
+
+**An artifact upload says "No files were found".**
+`actions/upload-artifact` skips hidden files by default, so a path that is
+itself hidden matches nothing even when it is full of files. This is why the
+captures go to `shots/` rather than `.shots/`. Keep new output directories
+visible.
+
+**Two agents on one issue.** Should not happen: `concurrency` groups runs by
+issue number, and `agent:in-progress` is set before any work starts. If it
+does, cancel one — the branch is shared and the second run reuses it.
 
 ## Cost
 
-Every poll costs a GitHub Actions minute or so; the agent runs cost Claude
-usage. If it is more than you want:
-
-- raise the cron interval in `project-sync.yml` (`*/15 * * * *` is plenty for
-  most days);
-- lower `MAX_IMPLEMENT`;
-- drop `synchronize` from `claude-code-review.yml` so the inline review runs
-  once per hand-off rather than on every push.
+Agent runs cost Claude usage; the workflows themselves are a few Actions
+minutes. There is no idle cost at all, because nothing polls. If it is more
+than you want, drop `synchronize` from `claude-code-review.yml` so the inline
+review runs once per hand-off rather than on every push.

@@ -36,8 +36,8 @@ else
 	git checkout -B "$BRANCH" "origin/$base"
 	# A pull request needs at least one commit between head and base. This
 	# empty one exists so the PR can be opened now, at the start of the work,
-	# rather than after the fact — the board says "In progress" and there is
-	# already somewhere to watch it happen.
+	# rather than after the fact — the issue is labelled `agent:in-progress`
+	# and there is already somewhere to watch it happen.
 	git commit --allow-empty -m "Start work on #$ISSUE: $title"
 	git push -u origin "$BRANCH"
 	printf '%s\n' "start-work: created branch $BRANCH from $base"
@@ -50,7 +50,7 @@ if [ -z "$pr" ]; then
 		cat <<-EOF
 			Closes #$ISSUE
 
-			🤖 Opened automatically when #$ISSUE moved to \`Ready\` on the board.
+			🤖 Opened automatically when #$ISSUE was labelled \`agent:ready\`.
 			An agent is implementing it now; this description is rewritten when the
 			work lands. Request changes on this PR to send it back for another pass.
 		EOF

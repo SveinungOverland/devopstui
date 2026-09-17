@@ -4,9 +4,9 @@ name: Agent — impact review
 # codebase, what might go wrong later, and whether it is safe. Line-level
 # nitpicking is claude-code-review.yml's job, not this one.
 #
-# Runs when a PR becomes ready for review (which is how the implement workflow
-# hands over), when a ready PR gets new commits, and on demand from
-# project-sync.yml for a card parked at "In review".
+# Runs when a PR becomes ready for review, when a ready PR gets new commits,
+# and as a chained job at the end of agent-implement.yml — which is what makes
+# it run even when no personal access token is configured.
 
 on:
   pull_request:
@@ -31,9 +31,12 @@ permissions:
   id-token: write
   actions: read
 
+# Queued rather than cancelled: when two paths both ask for a review of the
+# same PR, the second should run, find the first's marker and stand down.
+# Cancelling would instead kill a review that was most of the way through.
 concurrency:
   group: agent-review-${{ inputs.pr || github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   review:
@@ -63,10 +66,23 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          # This commit may already have been reviewed: the implement workflow
+          # chains a review job, and a repository with AUTOMATION_TOKEN set
+          # also gets one from `ready_for_review`. Whichever arrives second
+          # finds the marker and stands down, so both paths can coexist.
+          sha=$(jq -r .headRefOid /tmp/pr.json)
+          bodies=$(gh api "repos/$REPO/issues/$PR/comments" \
+            --paginate --jq '.[].body' 2>/dev/null || true)
+          if grep -qF "claude-impact-review: $sha" <<<"$bodies"; then
+            echo "Commit $sha has already been reviewed — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           {
             echo "skip=false"
             echo "number=$PR"
-            echo "sha=$(jq -r .headRefOid /tmp/pr.json)"
+            echo "sha=$sha"
             echo "branch=$(jq -r .headRefName /tmp/pr.json)"
             # The issue this PR closes, so the reviewer can check the change
             # against what was actually asked for: from the branch name the
@@ -120,13 +136,12 @@ jobs:
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh api:*),Bash(gh issue view:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(make:*),Bash(go:*),Bash(gofmt:*),Bash(grep:*),Bash(rg:*),Bash(scripts/tui-shot.sh:*),Bash(./scripts/tui-shot.sh:*),Read,Glob,Grep"
             --max-turns 50
 
-      # The poller decides whether a commit still needs reviewing by looking
-      # for the marker comment. If the agent finishes without leaving one — it
-      # failed, it ran out of turns, it just forgot — nothing would record the
-      # attempt and this PR would be reviewed again on every poll, for as long
-      # as the card sits at "In review". So the marker is guaranteed here
-      # instead: one comment per commit, whatever happened.
-      - name: Record that this commit was reviewed
+      # A review that produced nothing should still say so on the PR, or a
+      # silent failure looks identical to "nothing to report". This note
+      # deliberately carries no `claude-impact-review:` marker: only a review
+      # that actually happened writes one, so the other path — the
+      # ready_for_review event — is still free to try this commit again.
+      - name: Note a review that produced nothing
         if: always() && steps.pr.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -146,10 +161,9 @@ jobs:
             exit 0
           fi
           {
-            printf '<!-- claude-impact-review: %s -->\n' "$SHA"
             printf 'The impact review for `%s` finished as **%s** without posting a review.\n' \
               "${SHA:0:7}" "$OUTCOME"
-            printf '\n[Run log](%s). Re-run that workflow to try again — this commit will not\n' "$RUN_URL"
-            printf 'be picked up by the board poll again on its own.\n'
-          } > /tmp/marker.md
-          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/marker.md
+            printf '\n[Run log](%s). Re-run *Agent — impact review* with this PR number to\n' "$RUN_URL"
+            printf 'try again.\n'
+          } > /tmp/note.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/note.md

@@ -1,7 +1,7 @@
 name: PR — changes requested
 
-# A human requested changes on an agent's pull request: send the card back to
-# "In progress" and put the agent back on it.
+# A human requested changes on an agent's pull request: put the agent back on
+# it. The implement workflow relabels the issue `agent:in-progress` itself.
 #
 # Reviews from bots are ignored on purpose. The impact review and the inline
 # code review both comment on these PRs, and letting a bot's review restart the

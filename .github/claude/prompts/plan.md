@@ -73,8 +73,9 @@ actually reads:
   `PLAN.md` and the existing code." and say so plainly.
 
 If any decision genuinely blocks implementation — meaning building it the wrong
-way would have to be thrown away — add the `claude:needs-decision` label with
-`gh issue edit <number> --add-label claude:needs-decision` and say at the top of
-the comment that the issue should not be moved to `Ready` until it is answered.
+way would have to be thrown away — add the label with
+`.github/scripts/status.sh flag <number> add needs-decision` and say at the top of
+the comment that the issue should not be labelled `agent:ready` until it is
+answered.
 
 Do not write `@claude` anywhere in the comment: it would trigger another run.

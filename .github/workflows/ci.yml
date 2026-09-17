@@ -11,8 +11,8 @@ on:
     # ready_for_review matters here. An agent pushes with the workflow's own
     # token, and pushes made with GITHUB_TOKEN deliberately do not raise
     # further events — so `synchronize` never fires for the commits an agent
-    # makes. Marking the PR ready is done with the board PAT, which does raise
-    # an event, and that is what gets CI onto the finished branch.
+    # makes. With the optional AUTOMATION_TOKEN set, marking the PR ready does
+    # raise an event, and that is what gets CI onto the finished branch.
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:

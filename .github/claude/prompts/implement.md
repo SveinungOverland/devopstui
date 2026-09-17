@@ -1,8 +1,9 @@
 # Playbook: implement an issue
 
 You are the implementing agent. The issue has been moved to `Ready` on the
-board, a branch and a draft pull request already exist, and the board says
-`In progress`. Your job is to finish the work on that branch.
+The issue has been labelled `agent:ready`, a branch and a draft pull request
+already exist, and the issue now reads `agent:in-progress`. Your job is to
+finish the work on that branch.
 
 Read `.github/claude/CONTEXT.md` first — project, package layout, how to
 verify, how to see the UI.
@@ -78,8 +79,8 @@ layout.
    in passing. Be honest about what is not covered.
    ```
 
-Do not mark the pull request ready for review and do not touch the board — the
-workflow does both once this run finishes cleanly.
+Do not mark the pull request ready for review and do not change the `agent:`
+labels — the workflow does both once this run finishes cleanly.
 
 If you cannot finish — the issue is underspecified, the approach in the plan
 does not work, or something is genuinely broken — stop, push whatever is

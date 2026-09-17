@@ -8,31 +8,7 @@
       "Bash(./scripts/tui-shot.sh:*)",
       "Bash(scripts/shots.sh:*)",
       "Bash(./scripts/shots.sh:*)",
-      "Bash(.github/scripts/project.sh:*)"
-    ]
-  },
-  "hooks": {
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "command": "command -v kata >/dev/null 2>&1 && kata attention-hook end --source kata-agent-hook-end || true",
-            "type": "command"
-          }
-        ],
-        "matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other"
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "command -v kata >/dev/null 2>&1 && kata attention-hook start --source kata-agent-hook-start || true",
-            "type": "command"
-          }
-        ],
-        "matcher": "startup|resume|clear"
-      }
+      "Bash(.github/scripts/status.sh:*)"
     ]
   }
 }

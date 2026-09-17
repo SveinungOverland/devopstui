@@ -1,9 +1,9 @@
 name: Claude Code
 
 # The manual escape hatch: mention @claude in an issue or a PR comment to ask
-# for something outside the board pipeline. Everything automatic lives in
-# issue-plan.yml, project-sync.yml, agent-implement.yml and agent-review.yml —
-# see docs/automation.md.
+# for something outside the label pipeline. Everything automatic lives in
+# issue-plan.yml, agent-implement.yml and agent-review.yml — see
+# docs/automation.md.
 
 on:
   issue_comment:

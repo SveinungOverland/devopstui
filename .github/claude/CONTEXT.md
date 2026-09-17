@@ -1,7 +1,7 @@
 # devopstui — context for automated agents
 
 Read this first in any automated run. It describes the project, how to verify a
-change, and the board contract the automation runs on.
+change, and the label contract the automation runs on.
 
 ## What this is
 
@@ -87,21 +87,32 @@ Match the code already in the file. Specifically:
 - Every write to Azure DevOps goes through `internal/ado`, is confirmable, and
   keeps working against `ado.Fake` so `--demo` and the tests stay honest.
 
-## Board contract
+## Label contract
 
-Work is driven from the **Devopstui Kanban** project board. The `Status` field
-is the control surface, and the automation both reads and writes it:
+Work is driven from labels on the issue. An issue carries at most one `agent:`
+status at a time, and that status is the whole control surface:
 
-| Status        | Meaning                                                                       |
-| ------------- | ----------------------------------------------------------------------------- |
-| `Backlog`     | Triaged. A plan comment is posted here; nothing is built yet.                 |
-| `Ready`       | **The human's go-ahead.** Picked up automatically: branch, draft PR, build.   |
-| `In progress` | An agent is implementing. The PR exists and is a draft.                       |
-| `In review`   | Implementation finished, PR marked ready, review agents run.                  |
-| `Done`        | PR merged.                                                                    |
+| Issue state                | Meaning                                                                     |
+| -------------------------- | --------------------------------------------------------------------------- |
+| open, no `agent:` status   | The backlog. A plan comment is posted here; nothing is built yet.           |
+| `agent:ready`              | **The human's go-ahead.** Adding it starts an agent: branch, draft PR, build. |
+| `agent:in-progress`        | An agent is implementing. The PR exists and is a draft.                     |
+| `agent:in-review`          | Implementation finished, PR marked ready, the review agent runs.            |
+| closed                     | Done, by a merged PR.                                                       |
 
-Never move an issue to `Ready` yourself — that transition belongs to the human.
-Moving to `In progress`, `In review` and `Done` is done by the workflows in
-`.github/workflows/`, using `.github/scripts/project.sh`.
+Three more labels are independent of the status: `agent:planned` (a plan
+comment exists), `agent:needs-decision` (the plan is waiting on an answer) and
+`agent:blocked` (a run failed).
+
+Never add `agent:ready` yourself — that one belongs to the human, and only
+someone with write access can apply it, which is what makes it a safe trigger.
+The rest are set by the workflows in `.github/workflows/` through
+`.github/scripts/status.sh`:
+
+```bash
+.github/scripts/status.sh set 42 in-progress   # exactly one status label
+.github/scripts/status.sh get 42
+.github/scripts/status.sh flag 42 add blocked
+```
 
 `docs/automation.md` explains the whole pipeline.

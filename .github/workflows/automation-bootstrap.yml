@@ -1,9 +1,11 @@
 name: Automation bootstrap
 
-# Run this once after adding the automation, and any time something looks
-# wrong. It creates the labels the workflows use and checks that the token can
-# actually see the board and its Status options — which is the thing that
-# breaks first, and silently.
+# Creates the `agent:` labels the pipeline runs on. Run it once after adding
+# the automation so `agent:ready` is there to pick from the label menu.
+#
+# The workflows create the labels they need as they go, so this is really a
+# convenience: it puts all six in the picker with their colours and
+# descriptions before anyone needs them.
 
 on:
   workflow_dispatch:
@@ -24,57 +26,36 @@ jobs:
       - name: Create the labels
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          label() {
-            gh label create "$1" --color "$2" --description "$3" --force
-          }
-          label "claude:planned"        "1d76db" "An implementation plan has been posted"
-          label "claude:needs-decision" "fbca04" "Blocked on a human decision in the plan"
-          label "claude:implementing"   "5319e7" "An agent is working on this right now"
-          label "claude:in-review"      "0e8a16" "Implementation finished, PR is up for review"
-          label "claude:blocked"        "b60205" "An automated run failed and needs a look"
-
-      - name: Check the board wiring
-        id: doctor
-        env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-          PROJECT_TITLE: ${{ vars.PROJECT_TITLE || 'Devopstui Kanban' }}
-          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::secrets.PROJECTS_TOKEN is not set. The board cannot be read or written without it — see docs/automation.md."
-            exit 1
-          fi
           {
-            echo '### Board'
-            echo '```'
-            .github/scripts/project.sh doctor
-            echo '```'
+            echo '### Labels'
+            echo ''
+            .github/scripts/status.sh ensure-labels | sed 's/^/- `/; s/$/`/'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-          missing=""
-          have=$(.github/scripts/project.sh options | tr '[:upper:]' '[:lower:]')
-          for want in backlog ready "in progress" "in review" done; do
-            grep -qxF "$want" <<<"$have" || missing="$missing '$want'"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::The Status field is missing:$missing. Add these options to the board — the workflows set them by name."
-            exit 1
-          fi
-          echo "All five Status options are present." | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Summarise what is left to do by hand
-        if: always()
+      - name: Explain the pipeline
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
 
+          ### How it runs
+
+          | Issue state | Means |
+          | --- | --- |
+          | open, no `agent:` status | Backlog. A plan comment is posted here. |
+          | `agent:ready` | **Your go-ahead.** Adding it starts an agent. |
+          | `agent:in-progress` | An agent is working. The PR is a draft. |
+          | `agent:in-review` | Implementation finished, the PR is ready. |
+          | closed | Done, by a merged PR. |
+
           ### Still yours to check
 
-          - `secrets.CLAUDE_CODE_OAUTH_TOKEN` — set, and the Claude GitHub App installed on this repository.
-          - `secrets.PROJECTS_TOKEN` — a PAT with **project** scope (read *and* write) plus `repo`. The
-            automatic `GITHUB_TOKEN` cannot touch Projects v2 at all.
-          - The board's Status options match the five names above, spelled the same way.
+          - `secrets.CLAUDE_CODE_OAUTH_TOKEN` is set, and the Claude GitHub App is
+            installed on this repository. Nothing else is required.
+          - Optionally `secrets.AUTOMATION_TOKEN`, a PAT with `repo` scope. Without it
+            agent pull requests carry no CI check badges, because events raised with the
+            automatic `GITHUB_TOKEN` do not start further workflows. Everything else
+            works either way.
           - `docs/automation.md` explains the rest of the pipeline.
           MD
