@@ -64,7 +64,7 @@ layout.
 
    ## How it looks
    ```text
-   (paste the relevant .shots/*.txt capture here — before and after if the
+   (paste the relevant shots/*.txt capture here — before and after if the
    change alters existing layout; skip this section only if nothing visible
    changed)
    ```

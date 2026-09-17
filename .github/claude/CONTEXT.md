@@ -51,12 +51,12 @@ Two levels, both available in CI:
 
 ```bash
 make dumps     # View() snapshots from the test harness, into dumps/
-make shots     # the real binary driven in a tmux pty, into .shots/
+make shots     # the real binary driven in a tmux pty, into shots/
 ```
 
 `make shots` runs `scripts/shots.sh`, which takes the standard tour of the app
 (sprint tree, dashboard, board, backlog, details, state popup, filter,
-description editor, help). Each scene lands in `.shots/<name>.txt` as the exact
+description editor, help). Each scene lands in `shots/<name>.txt` as the exact
 terminal grid. Capture one scene yourself with:
 
 ```bash
@@ -70,7 +70,7 @@ that only goes wrong at terminal level. `type:foo` types literal text and
 `wait:1.5` pauses. Add `--svg` for a colour image next to the text.
 
 **Show the UI in the pull request.** When a change is visible, paste the
-relevant `.shots/*.txt` capture into the PR description or a comment inside a
+relevant `shots/*.txt` capture into the PR description or a comment inside a
 ```` ``` ```` fence, before and after if the change alters existing layout. A
 reviewer should not have to run the program to see what changed.
 

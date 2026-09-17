@@ -278,7 +278,7 @@ Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|second
 make check       # go vet, go test ./..., gofmt — what CI runs
 make test        # unit + rendered-frame tests with the in-memory fake
 make dumps       # writes rendered frames to ./dumps for eyeballing
-make shots       # drives the real binary in a tmux pty, captures ./.shots
+make shots       # drives the real binary in a tmux pty, captures ./shots
 ```
 
 `make dumps` renders through the test harness; `make shots` runs the actual program in a
@@ -290,7 +290,7 @@ scripts/tui-shot.sh --name board --keys "3,j,j,l"
 scripts/tui-shot.sh --name filtering --keys "/,type:trace,Enter" --size 80x24
 ```
 
-Each scene lands in `.shots/<name>.txt` as the exact terminal grid, ready to paste into an
+Each scene lands in `shots/<name>.txt` as the exact terminal grid, ready to paste into an
 issue or a pull request. `--svg` adds a colour image beside it.
 
 For quick manual testing, `go run ./cmd/devopstui --demo` (or with real org flags/env) is the

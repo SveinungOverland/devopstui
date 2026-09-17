@@ -11,7 +11,7 @@ Capture the screen.
 ## The standard tour
 
 ```bash
-make shots          # builds, then writes .shots/*.txt for nine scenes
+make shots          # builds, then writes shots/*.txt for nine scenes
 ```
 
 Scenes: sprint tree, dashboard, board, backlog, details pane, state popup,
@@ -49,7 +49,7 @@ For a change to existing layout, capture the same scene on both sides:
 ```bash
 git stash && make build && scripts/tui-shot.sh --name before --keys "3"
 git stash pop && make build && scripts/tui-shot.sh --name after --keys "3"
-diff .shots/before.txt .shots/after.txt
+diff shots/before.txt shots/after.txt
 ```
 
 Put both in the pull request inside fenced code blocks. A reviewer should not

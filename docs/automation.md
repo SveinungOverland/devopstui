@@ -50,8 +50,20 @@ go-ahead, and it is deliberately the one thing a human does.
    and checks that the token can see the board and all five Status options. It
    fails loudly if something is missing, which is the point.
 
-5. **Merge to the default branch.** Scheduled workflows only run from there, so
-   the poll does not start until `project-sync.yml` is on `main`.
+5. **Merge to the default branch.** Two separate reasons, both absolute:
+   scheduled workflows only run from there, so the poll does not start until
+   `project-sync.yml` is on `main`; and `claude-code-action` refuses to run at
+   all from a workflow file whose content differs from the version on the
+   default branch. On a pull request that adds or edits one you will see:
+
+   > Workflow validation failed. The workflow file must exist and have
+   > identical content to the version on the repository's default branch.
+
+   That is the action protecting itself, not a misconfiguration. It also means
+   an agent's own pull request that edits a file under `.github/workflows/`
+   will have its Claude reviews skipped on that PR — the change has to land
+   first. The prompt playbooks under `.github/claude/` are ordinary files, not
+   workflows, so those take effect on the branch immediately.
 
 Optional repository variables:
 
@@ -224,6 +236,16 @@ reuse it.
 **The PR was opened but nothing was implemented.** Look for the empty
 `Start work on #n` commit: the agent's run failed after the branch was created.
 The branch and PR are reused on the next attempt, so just retry.
+
+**A Claude job finished in seconds having done nothing.** Read its log for
+"Workflow validation failed". The workflow file differs from the copy on the
+default branch, which is exactly the case on any PR that touches
+`.github/workflows/`. Merge it and the workflow starts working.
+
+**An artifact upload says "No files were found".** `actions/upload-artifact`
+skips hidden files by default, so a path that is itself hidden matches nothing
+even when it is full of files. This is why the captures go to `shots/` rather
+than `.shots/`. Keep new output directories visible.
 
 **A comment says the review "finished without posting a review".** The review
 agent ran but left nothing. The workflow posts that marker itself so the poll

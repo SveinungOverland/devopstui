@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shots.sh — capture the standard tour of the UI into .shots/.
+# shots.sh — capture the standard tour of the UI into shots/.
 #
 # Run this after a change that touches rendering or key handling, then read the
 # .txt files (or paste the relevant one into the PR) to show what the UI looks
@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SHOT=scripts/tui-shot.sh
-OUT="${TUI_SHOT_DIR:-.shots}"
+OUT="${TUI_SHOT_DIR:-shots}"
 EXTRA=()
 [ "${1:-}" = "--svg" ] && EXTRA+=(--svg)
 

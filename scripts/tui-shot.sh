@@ -24,7 +24,7 @@ set -euo pipefail
 NAME=""
 KEYS=""
 SIZE="140x40"
-OUT_DIR="${TUI_SHOT_DIR:-.shots}"
+OUT_DIR="${TUI_SHOT_DIR:-shots}"
 CMD="./bin/devopstui --demo"
 DELAY="0.5"
 SETTLE="2.5"
