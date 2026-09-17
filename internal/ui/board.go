@@ -9,6 +9,10 @@ import (
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
+// boardColMinW is the narrowest a board column can get before columns
+// scroll instead of shrinking further.
+const boardColMinW = 26
+
 // board is the Kanban view: items from the current sprint bucketed by column.
 type board struct {
 	def      model.Board
@@ -181,7 +185,11 @@ func (b *board) view(width, height int, focused bool) string {
 	if len(b.cols) == 0 {
 		return sMuted.Render("no board columns")
 	}
-	colW := min(max(width/len(b.cols), 26), 44)
+	// Columns stretch to fill the full width when they all fit; only once
+	// there are enough of them that they'd drop below the minimum does
+	// scrolling kick in (same idea as lanes.go), so a handful of columns
+	// never leaves the rest of the row blank.
+	colW := max(width/len(b.cols), boardColMinW)
 	visible := max(width/colW, 1)
 	if b.col < b.offsetC {
 		b.offsetC = b.col
