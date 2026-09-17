@@ -1,0 +1,52 @@
+name: PR — changes requested
+
+# A human requested changes on an agent's pull request: put the agent back on
+# it. The implement workflow relabels the issue `agent:in-progress` itself.
+#
+# Reviews from bots are ignored on purpose. The impact review and the inline
+# code review both comment on these PRs, and letting a bot's review restart the
+# implementation would close a loop with nobody in it.
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+# A reusable workflow cannot grant itself more than its caller has, so these
+# are what agent-implement.yml needs, not what this workflow uses directly.
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+  actions: read
+
+jobs:
+  route:
+    if: >-
+      github.event.review.state == 'changes_requested' &&
+      github.event.review.user.type != 'Bot' &&
+      startsWith(github.event.pull_request.head.ref, 'claude/issue-')
+    runs-on: ubuntu-latest
+    outputs:
+      issue: ${{ steps.issue.outputs.number }}
+    steps:
+      - name: Read the issue number off the branch
+        id: issue
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          number="${BRANCH#claude/issue-}"
+          case "$number" in
+            ''|*[!0-9]*) echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1 ;;
+          esac
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "Changes requested on #$number by ${{ github.event.review.user.login }}."
+
+  revise:
+    needs: route
+    uses: ./.github/workflows/agent-implement.yml
+    with:
+      issue: ${{ needs.route.outputs.issue }}
+      mode: revise
+    secrets: inherit

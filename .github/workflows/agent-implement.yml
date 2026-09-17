@@ -1,0 +1,195 @@
+name: Agent — implement
+
+# Does the work for one issue: branch, draft PR, implementation, verification,
+# then hands the PR over for review.
+#
+# Starts when a human adds the `agent:ready` label. That label is the whole
+# trigger: only someone with write access can apply one, so the permission
+# check is GitHub's rather than ours, and `issues: labeled` fires immediately —
+# no polling, no schedule, nothing to reconcile.
+
+on:
+  issues:
+    types: [labeled]
+  workflow_call:
+    inputs:
+      issue:
+        description: Issue number to work on.
+        type: string
+        required: true
+      mode:
+        description: implement (first pass) or revise (address review feedback).
+        type: string
+        default: implement
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number to work on.
+        type: string
+        required: true
+      mode:
+        description: implement (first pass) or revise (address review feedback).
+        type: choice
+        options: [implement, revise]
+        default: implement
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+  actions: read
+
+# One agent per issue. Not cancel-in-progress: a half-finished run that is
+# killed mid-push leaves the branch in a worse state than a queued one.
+concurrency:
+  group: agent-issue-${{ inputs.issue || github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  ISSUE: ${{ inputs.issue || github.event.issue.number }}
+  MODE: ${{ inputs.mode || 'implement' }}
+  REPO: ${{ github.repository }}
+
+jobs:
+  implement:
+    # Any label event that is not `agent:ready` is somebody organising their
+    # issues, not asking for work.
+    if: >-
+      github.event_name != 'issues' || github.event.label.name == 'agent:ready'
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.prep.outputs.pr }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Take the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          state=$(gh issue view "$ISSUE" --repo "$REPO" --json state --jq .state)
+          if [ "$state" != "OPEN" ]; then
+            echo "::error::#$ISSUE is $state — not starting work on a closed issue."
+            exit 1
+          fi
+          .github/scripts/status.sh set "$ISSUE" in-progress
+          .github/scripts/status.sh flag "$ISSUE" rm blocked
+
+      # Opening the PR with a personal access token is what makes CI and the
+      # review workflows run on it: events raised with the automatic
+      # GITHUB_TOKEN deliberately do not start further workflows. It is
+      # optional — without it the PR simply carries no check badges, and the
+      # verification below plus the chained review job still run.
+      - name: Create or reuse the branch and draft PR
+        id: prep
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || github.token }}
+        run: .github/scripts/start-work.sh
+
+      - name: Set up Go, tmux and build
+        uses: ./.github/actions/go-tui-env
+
+      - name: Implement
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          prompt: |
+            You are working on ${{ github.repository }} issue #${{ env.ISSUE }}.
+
+            Branch `${{ steps.prep.outputs.branch }}` is checked out and pull
+            request #${{ steps.prep.outputs.pr }} is open as a draft against
+            `${{ steps.prep.outputs.base }}`. The issue is labelled
+            `agent:in-progress`.
+
+            Follow the playbook in
+            `.github/claude/prompts/${{ env.MODE == 'revise' && 'revise' || 'implement' }}.md`
+            exactly, and read `.github/claude/CONTEXT.md` before you start.
+
+            Commit your work and push it to `${{ steps.prep.outputs.branch }}`.
+            Do not mark the pull request ready for review and do not change the
+            `agent:` labels — the workflow does both once this run finishes.
+          claude_args: |
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,WebFetch"
+            --max-turns 80
+
+      - name: Push anything the agent left behind
+        run: |
+          set -euo pipefail
+          branch="${{ steps.prep.outputs.branch }}"
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The agent left uncommitted changes on $branch:"
+            git status --short
+            exit 1
+          fi
+          git fetch origin "$branch"
+          if [ -n "$(git log --oneline "origin/$branch..HEAD")" ]; then
+            echo "Pushing commits the agent did not push:"
+            git log --oneline "origin/$branch..HEAD"
+            git push origin "HEAD:$branch"
+          fi
+
+      # The issue only moves on for a branch that actually builds. This runs
+      # independently of whatever the agent reported.
+      - name: Verify the branch
+        run: make check
+
+      - name: Capture the UI
+        if: always()
+        continue-on-error: true
+        run: make shots
+
+      - name: Upload the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-issue-${{ env.ISSUE }}-${{ github.run_attempt }}
+          path: shots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Mark the PR ready and the issue in review
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          gh pr ready "${{ steps.prep.outputs.pr }}" --repo "$REPO" || true
+          .github/scripts/status.sh set "$ISSUE" in-review
+
+      - name: Report a run that did not finish
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Everything here takes --repo explicitly: one of the failures this
+          # step exists to report is the checkout, which would leave gh with no
+          # git remote to infer the repository from.
+          .github/scripts/status.sh flag "$ISSUE" add blocked || true
+          printf '%s\n' \
+            "The **$MODE** run for this issue did not finish: [run log]($RUN_URL)." \
+            "" \
+            "The issue keeps \`agent:in-progress\` and gains \`agent:blocked\`. Nothing was" \
+            "marked ready for review. To retry, remove \`agent:in-progress\` and add" \
+            "\`agent:ready\` again, or run the *Agent — implement* workflow by hand." \
+            > /tmp/blocked.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file /tmp/blocked.md
+
+  # Chained rather than left to the `ready_for_review` event, because that
+  # event only fires when AUTOMATION_TOKEN is set. The review skips itself if
+  # the head commit already has one, so having both paths is harmless.
+  review:
+    needs: implement
+    if: needs.implement.outputs.pr != ''
+    uses: ./.github/workflows/agent-review.yml
+    with:
+      pr: ${{ needs.implement.outputs.pr }}
+    secrets: inherit

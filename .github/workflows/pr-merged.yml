@@ -1,0 +1,55 @@
+name: PR — closed
+
+# Merged: the issue is closed, which is what "done" means here. Closed without
+# merging: the status labels come off, which puts the issue back in the backlog
+# rather than leaving it sitting at `agent:in-review` with nothing happening.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  REPO: ${{ github.repository }}
+
+jobs:
+  settle:
+    if: startsWith(github.event.pull_request.head.ref, 'claude/issue-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Settle the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          issue="${BRANCH#claude/issue-}"
+          case "$issue" in
+            ''|*[!0-9]*) echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1 ;;
+          esac
+
+          # Either way the issue leaves the pipeline, so every status label goes.
+          .github/scripts/status.sh set "$issue" none
+          .github/scripts/status.sh flag "$issue" rm blocked
+
+          if [ "$MERGED" = "true" ]; then
+            # "Closes #n" in the PR body normally closes the issue on merge;
+            # this covers a PR whose description lost the reference.
+            if [ "$(gh issue view "$issue" --repo "$REPO" --json state --jq .state)" = "OPEN" ]; then
+              gh issue close "$issue" --repo "$REPO" --reason completed \
+                --comment "Done in #$PR."
+            fi
+          else
+            gh issue comment "$issue" --repo "$REPO" --body \
+              "#$PR was closed without merging, so this is back in the backlog. Add \`agent:ready\` to start again — the branch \`$BRANCH\` is still there and will be reused."
+          fi

@@ -1,0 +1,61 @@
+name: Automation bootstrap
+
+# Creates the `agent:` labels the pipeline runs on. Run it once after adding
+# the automation so `agent:ready` is there to pick from the label menu.
+#
+# The workflows create the labels they need as they go, so this is really a
+# convenience: it puts all six in the picker with their colours and
+# descriptions before anyone needs them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Create the labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          {
+            echo '### Labels'
+            echo ''
+            .github/scripts/status.sh ensure-labels | sed 's/^/- `/; s/$/`/'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain the pipeline
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
+
+          ### How it runs
+
+          | Issue state | Means |
+          | --- | --- |
+          | open, no `agent:` status | Backlog. A plan comment is posted here. |
+          | `agent:ready` | **Your go-ahead.** Adding it starts an agent. |
+          | `agent:in-progress` | An agent is working. The PR is a draft. |
+          | `agent:in-review` | Implementation finished, the PR is ready. |
+          | closed | Done, by a merged PR. |
+
+          ### Still yours to check
+
+          - `secrets.CLAUDE_CODE_OAUTH_TOKEN` is set, and the Claude GitHub App is
+            installed on this repository. Nothing else is required.
+          - Optionally `secrets.AUTOMATION_TOKEN`, a PAT with `repo` scope. Without it
+            agent pull requests carry no CI check badges, because events raised with the
+            automatic `GITHUB_TOKEN` do not start further workflows. Everything else
+            works either way.
+          - `docs/automation.md` explains the rest of the pipeline.
+          MD

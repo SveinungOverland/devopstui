@@ -1,5 +1,10 @@
 name: Claude Code
 
+# The manual escape hatch: mention @claude in an issue or a PR comment to ask
+# for something outside the label pipeline. Everything automatic lives in
+# issue-plan.yml, agent-implement.yml and agent-review.yml — see
+# docs/automation.md.
+
 on:
   issue_comment:
     types: [created]
@@ -19,16 +24,24 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      # Write, so that asking Claude for a change in a comment can actually
+      # produce one. The action still only answers people with write access.
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      # The same Go toolchain, tmux and prebuilt binary the automated agents
+      # get, so an ad-hoc request can build, test and screenshot too.
+      - name: Set up Go, tmux and build
+        uses: ./.github/actions/go-tui-env
 
       - name: Run Claude Code
         id: claude
@@ -40,11 +53,6 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          claude_args: '--allowed-tools Bash(gh pr *),Bash(go *)'
-
+          claude_args: |
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,WebFetch"
+            --append-system-prompt "Read .github/claude/CONTEXT.md before doing anything in this repository: it covers the package layout, how to verify a change with `make check`, and how to capture what the TUI looks like with scripts/tui-shot.sh. Show the UI in a fenced code block whenever a change is visible. Do not move cards on the project board — the workflows own that."
