@@ -161,10 +161,14 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          gh issue edit "${{ inputs.issue }}" \
+          # --repo throughout: this step exists to report a failure, and one of
+          # the failures it has to survive is the checkout itself, which would
+          # leave gh with no git remote to infer the repository from.
+          gh issue edit "${{ inputs.issue }}" --repo "$REPO" \
             --add-label "claude:blocked" --remove-label "claude:implementing" 2>/dev/null || true
           printf '%s\n' \
             "The **${{ inputs.mode }}** run for this issue did not finish: [run log]($RUN_URL)." \
@@ -173,4 +177,4 @@ jobs:
             "marked ready for review. To retry, move the card out of and back into \`Ready\`," \
             "or run the *Agent — implement* workflow by hand with this issue number." \
             > /tmp/blocked.md
-          gh issue comment "${{ inputs.issue }}" --body-file /tmp/blocked.md
+          gh issue comment "${{ inputs.issue }}" --repo "$REPO" --body-file /tmp/blocked.md

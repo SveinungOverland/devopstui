@@ -48,9 +48,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr || github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh pr view "$PR" --json number,headRefName,headRefOid,isDraft,state,body > /tmp/pr.json
+          # --repo is not optional here: this step runs before the checkout, so
+          # gh has no git remote to infer the repository from. It resolves the
+          # head SHA that the checkout below uses, so it has to come first.
+          gh pr view "$PR" --repo "$REPO" \
+            --json number,headRefName,headRefOid,isDraft,state,body > /tmp/pr.json
           state=$(jq -r .state /tmp/pr.json)
           draft=$(jq -r .isDraft /tmp/pr.json)
           if [ "$state" != "OPEN" ] || [ "$draft" = "true" ]; then
@@ -127,11 +132,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.pr.outputs.number }}
           SHA: ${{ steps.pr.outputs.sha }}
+          REPO: ${{ github.repository }}
           OUTCOME: ${{ steps.review.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          bodies=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" \
+          # Explicit --repo again: this runs even when an earlier step failed,
+          # which may mean there is no checkout to infer the repository from.
+          bodies=$(gh api "repos/$REPO/issues/$PR/comments" \
             --paginate --jq '.[].body' 2>/dev/null || true)
           if grep -qF "claude-impact-review: $SHA" <<<"$bodies"; then
             echo "The agent left its review. Nothing to do."
@@ -144,4 +152,4 @@ jobs:
             printf '\n[Run log](%s). Re-run that workflow to try again — this commit will not\n' "$RUN_URL"
             printf 'be picked up by the board poll again on its own.\n'
           } > /tmp/marker.md
-          gh pr comment "$PR" --body-file /tmp/marker.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/marker.md
