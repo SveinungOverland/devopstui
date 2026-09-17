@@ -36,10 +36,13 @@ jobs:
           BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          number="${BRANCH#claude/issue-}"
-          case "$number" in
-            ''|*[!0-9]*) echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1 ;;
-          esac
+          # claude/issue-42 or claude/issue-42-20260917-1830 — an @claude run
+          # names its branch with a timestamp suffix.
+          if [[ "$BRANCH" =~ ^claude/issue-([0-9]+)(-.*)?$ ]]; then
+            number="${BASH_REMATCH[1]}"
+          else
+            echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1
+          fi
           echo "number=$number" >> "$GITHUB_OUTPUT"
           echo "Changes requested on #$number by ${{ github.event.review.user.login }}."
 

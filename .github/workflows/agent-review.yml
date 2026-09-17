@@ -10,7 +10,10 @@ name: Agent — impact review
 
 on:
   pull_request:
-    types: [ready_for_review, synchronize, reopened]
+    # `opened` covers a pull request that is not a draft from the start — a
+    # human's, or one opened over a branch an @claude run left behind. The
+    # pipeline's own PRs start as drafts and arrive via ready_for_review.
+    types: [opened, ready_for_review, synchronize, reopened]
   workflow_call:
     inputs:
       pr:

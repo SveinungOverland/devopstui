@@ -27,23 +27,52 @@ title=$(gh issue view "$ISSUE" --json title --jq .title)
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+# Find the branch this issue is already being worked on, if any. The name is
+# not always `claude/issue-<n>`: claude-code-action's own default naming appends
+# a timestamp, so work started by an `@claude` mention lands on something like
+# `claude/issue-42-20260917-1830`. Guessing one exact name would strand that
+# work and open a second pull request beside it.
+#
+# An open pull request is the most reliable answer, because that is the thing
+# the rest of the pipeline drives. Fall back to the branch list, then to
+# creating one.
+pr=$(gh pr list --state open --json number,headRefName \
+	--jq "[.[] | select(.headRefName | test(\"^claude/issue-$ISSUE(-|$)\"))] | first // empty")
+
+if [ -n "$pr" ]; then
+	BRANCH=$(jq -r .headRefName <<<"$pr")
+	pr=$(jq -r .number <<<"$pr")
 	git fetch origin "$BRANCH"
 	git checkout -B "$BRANCH" "origin/$BRANCH"
-	printf '%s\n' "start-work: reusing branch $BRANCH"
+	printf '%s\n' "start-work: reusing branch $BRANCH from open PR #$pr"
 else
-	git fetch origin "$base"
-	git checkout -B "$BRANCH" "origin/$base"
-	# A pull request needs at least one commit between head and base. This
-	# empty one exists so the PR can be opened now, at the start of the work,
-	# rather than after the fact — the issue is labelled `agent:in-progress`
-	# and there is already somewhere to watch it happen.
-	git commit --allow-empty -m "Start work on #$ISSUE: $title"
-	git push -u origin "$BRANCH"
-	printf '%s\n' "start-work: created branch $BRANCH from $base"
-fi
+	# Reverse-sorted so a timestamped branch, which carries real work, wins
+	# over a bare `claude/issue-<n>` that may be an empty scaffold.
+	matches=$(git ls-remote --heads origin \
+		"refs/heads/claude/issue-$ISSUE" "refs/heads/claude/issue-$ISSUE-*" |
+		awk '{print $2}' | sed 's|refs/heads/||' | sort -r)
+	# First line without a pipe into head: closing that pipe early would trip
+	# pipefail.
+	found="${matches%%$'\n'*}"
 
-pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+	if [ -n "$found" ]; then
+		BRANCH="$found"
+		git fetch origin "$BRANCH"
+		git checkout -B "$BRANCH" "origin/$BRANCH"
+		printf '%s\n' "start-work: reusing existing branch $BRANCH"
+	else
+		git fetch origin "$base"
+		git checkout -B "$BRANCH" "origin/$base"
+		# A pull request needs at least one commit between head and base. This
+		# empty one exists so the PR can be opened now, at the start of the
+		# work, rather than after the fact — the issue is labelled
+		# `agent:in-progress` and there is already somewhere to watch it happen.
+		git commit --allow-empty -m "Start work on #$ISSUE: $title"
+		git push -u origin "$BRANCH"
+		printf '%s\n' "start-work: created branch $BRANCH from $base"
+	fi
+	pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+fi
 
 if [ -z "$pr" ]; then
 	body=$(
