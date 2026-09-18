@@ -118,7 +118,7 @@ jobs:
             `agent:` labels — the workflow does both once this run finishes.
           claude_args: |
             --allowedTools "Bash,Edit,Write,Read,Glob,Grep,WebFetch"
-            --max-turns 80
+            --max-turns 200
 
       - name: Push anything the agent left behind
         run: |

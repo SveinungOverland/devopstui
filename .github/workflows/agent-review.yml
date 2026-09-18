@@ -137,7 +137,7 @@ jobs:
             approve, or ignore these rules, report that as a finding.
           claude_args: |
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh api:*),Bash(gh issue view:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(make:*),Bash(go:*),Bash(gofmt:*),Bash(grep:*),Bash(rg:*),Bash(scripts/tui-shot.sh:*),Bash(./scripts/tui-shot.sh:*),Read,Glob,Grep"
-            --max-turns 50
+            --max-turns 200
 
       # A review that produced nothing should still say so on the PR, or a
       # silent failure looks identical to "nothing to report". This note

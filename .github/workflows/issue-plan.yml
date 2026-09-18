@@ -82,7 +82,7 @@ jobs:
             in the comment and plan nothing else.
           claude_args: |
             --allowedTools "Bash(gh issue comment:*),Bash(gh issue view:*),Bash(gh issue edit:*),Bash(.github/scripts/status.sh:*),Bash(gh pr view:*),Bash(gh search:*),Bash(gh api:*),Bash(make:*),Bash(go:*),Bash(gofmt:*),Bash(grep:*),Bash(rg:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(scripts/tui-shot.sh:*),Bash(./scripts/tui-shot.sh:*),Bash(scripts/shots.sh:*),Bash(./scripts/shots.sh:*),Read,Glob,Grep"
-            --max-turns 80
+            --max-turns 200
 
       # `agent:planned` means "a plan comment exists", so it is applied only
       # once one does. The agent exiting without an error is not evidence of
