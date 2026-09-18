@@ -91,8 +91,13 @@ jobs:
       # it. The comment is this workflow's only artefact, so the run is judged
       # on whether one appeared — the same way agent-review.yml looks for its
       # own marker rather than trusting the outcome of the step.
+      # Not `always()`, which also covers cancellation: `cancel-in-progress`
+      # kills the older run for an issue when a newer one starts, and a
+      # cancelled run has simply not reached the point of posting a plan. It
+      # must not announce that as a run that produced nothing — the run that
+      # superseded it does the reporting.
       - name: Label the issue as planned, or report a run that posted no plan
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           OUTCOME: ${{ steps.plan.outcome }}
@@ -130,7 +135,14 @@ jobs:
           # keep matching the comment shape in plan.md.
           if grep -qE "claude-issue-plan: $ISSUE([^0-9]|$)" <<<"$bodies" ||
             grep -qE '^## Plan[[:space:]]*$' <<<"$bodies"; then
-            .github/scripts/status.sh flag "$ISSUE" add planned
+            # No `|| true` here, unlike the cleanup below: a plan that cannot
+            # be labelled has to fail, or `agent:planned` quietly stops meaning
+            # anything, which is the bug this step exists to fix. Say which way
+            # it went, so a red job is not read as a missing plan.
+            .github/scripts/status.sh flag "$ISSUE" add planned || {
+              echo "::error::#$ISSUE has a plan, but labelling it failed."
+              exit 1
+            }
             # Clearing a stale block from an earlier failed run is cleanup, so
             # it never decides the outcome of this one.
             .github/scripts/status.sh flag "$ISSUE" rm blocked || true
