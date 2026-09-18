@@ -33,10 +33,14 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          issue="${BRANCH#claude/issue-}"
-          case "$issue" in
-            ''|*[!0-9]*) echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1 ;;
-          esac
+          # claude/issue-42 or claude/issue-42-20260917-1830 — an @claude run
+          # names its branch with a timestamp suffix, and those PRs come through
+          # here too.
+          if [[ "$BRANCH" =~ ^claude/issue-([0-9]+)(-.*)?$ ]]; then
+            issue="${BASH_REMATCH[1]}"
+          else
+            echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1
+          fi
 
           # Either way the issue leaves the pipeline, so every status label goes.
           .github/scripts/status.sh set "$issue" none
