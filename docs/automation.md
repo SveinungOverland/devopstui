@@ -122,13 +122,23 @@ takes the run's own word for it. Each one checks for its artefact afterwards:
   `<!-- claude-issue-plan: <issue> -->`. Found, the issue gets `agent:planned` —
   the label means a plan exists, so it is applied on one existing. Not found,
   the issue gets `agent:blocked` and a comment saying nothing was produced, and
-  the run fails rather than finishing green over an empty issue.
+  the run fails rather than finishing green over an empty issue. Only a bot's
+  comment counts: this repository is public, so a body-only check would let
+  anyone who can comment pass an issue off as planned.
 - `agent-implement.yml` runs `make check` against the branch, and pushes
   anything the agent committed but did not push.
 - `agent-review.yml` looks for its own `claude-impact-review: <sha>` marker and
   notes on the PR when a review produced nothing.
 
 So a green run means the artefact is there, and a red one is worth opening.
+
+`issue-plan.yml`'s check lives in `.github/scripts/settle-plan.sh` rather than
+inline in the YAML, because that is the part of this pipeline that has actually
+had bugs and a script is the part that can be tested. `make check` runs
+`.github/scripts/settle-plan.test.sh`, which drives it against a stubbed `gh`
+and `status.sh` — including the two bugs review caught: an issue number that
+matched `#160` when checking `#16`, and a body-only check a planted comment
+could satisfy.
 
 ## The two reviews
 

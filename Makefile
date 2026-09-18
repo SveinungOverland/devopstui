@@ -1,4 +1,4 @@
-.PHONY: build run demo test vet dumps shots shots-svg check
+.PHONY: build run demo test vet dumps shots shots-svg test-scripts check
 
 build:
 	go build -o bin/devopstui ./cmd/devopstui
@@ -27,8 +27,14 @@ shots: build
 shots-svg: build
 	./scripts/shots.sh --svg
 
+# The pipeline's own shell is not Go, so `go test` never sees it — and that is
+# where the label bugs were. Same idea as the Go tests: drive it with stubbed
+# gh/status.sh and assert what it does.
+test-scripts:
+	./.github/scripts/settle-plan.test.sh
+
 # What CI runs, and what to run before pushing.
-check: vet test
+check: vet test test-scripts
 	@unformatted=$$(gofmt -l .); \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed:"; echo "$$unformatted"; exit 1; \

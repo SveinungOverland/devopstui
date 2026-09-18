@@ -89,8 +89,13 @@ jobs:
       # that: a run that stops early finishes green, and labelling on
       # `success()` alone put `agent:planned` on an issue with nothing under
       # it. The comment is this workflow's only artefact, so the run is judged
-      # on whether one appeared — the same way agent-review.yml looks for its
-      # own marker rather than trusting the outcome of the step.
+      # on whether one appeared.
+      #
+      # The logic lives in a script because it is the part of this pipeline
+      # that has actually had bugs, and a script is the part `make check` can
+      # test. It needs the checkout, so a run that failed before that one is
+      # simply red, with nothing said on the issue.
+      #
       # Not `always()`, which also covers cancellation: `cancel-in-progress`
       # kills the older run for an issue when a newer one starts, and a
       # cancelled run has simply not reached the point of posting a plan. It
@@ -102,61 +107,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OUTCOME: ${{ steps.plan.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          # The number is interpolated into a URL and a regex below, and on a
-          # workflow_dispatch it is whatever was typed into the form.
-          [[ "$ISSUE" =~ ^[0-9]+$ ]] || {
-            echo "::error::Not an issue number: '$ISSUE'"; exit 1
-          }
-          # Only comments left by a bot count. This repository is public, so
-          # anyone can comment on an issue, and a body-only check would let a
-          # passer-by post the marker and pass the issue off as planned — the
-          # very state this step exists to rule out. It also keeps a human
-          # writing "## Plan" in a reply from tripping the fallback below.
-          #
-          # Explicit --repo: this step runs even when an earlier step failed,
-          # which may mean there is no checkout for gh to infer it from.
-          # A read that fails is its own failure and is reported as one —
-          # treating it as "no comments" would blame the agent for a plan it
-          # may well have posted.
-          if ! bodies=$(gh api "repos/$REPO/issues/$ISSUE/comments" \
-            --paginate --jq '.[] | select(.user.type == "Bot") | .body'); then
-            echo "::error::Could not read the comments on #$ISSUE."
-            exit 1
-          fi
-          # The marker is what plan.md asks for. `([^0-9]|$)` anchors the
-          # number so #16 is not satisfied by a marker for #160 — unlike
-          # agent-review.yml's 40-character SHA, a short issue number is a
-          # prefix of plenty of others. The `## Plan` heading is a fallback, so
-          # a plan that is right in every other way is never reported missing
-          # over one dropped line; `[[:space:]]*$` tolerates the CRLF the API
-          # returns for a comment that was written in the browser. Both must
-          # keep matching the comment shape in plan.md.
-          if grep -qE "claude-issue-plan: $ISSUE([^0-9]|$)" <<<"$bodies" ||
-            grep -qE '^## Plan[[:space:]]*$' <<<"$bodies"; then
-            # No `|| true` here, unlike the cleanup below: a plan that cannot
-            # be labelled has to fail, or `agent:planned` quietly stops meaning
-            # anything, which is the bug this step exists to fix. Say which way
-            # it went, so a red job is not read as a missing plan.
-            .github/scripts/status.sh flag "$ISSUE" add planned || {
-              echo "::error::#$ISSUE has a plan, but labelling it failed."
-              exit 1
-            }
-            # Clearing a stale block from an earlier failed run is cleanup, so
-            # it never decides the outcome of this one.
-            .github/scripts/status.sh flag "$ISSUE" rm blocked || true
-            exit 0
-          fi
-          .github/scripts/status.sh flag "$ISSUE" add blocked || true
-          {
-            printf 'The planning run finished as **%s** without posting a plan.\n' "$OUTCOME"
-            printf '\nThe issue is **not** labelled `agent:planned` — there is no plan to read —\n'
-            printf 'and carries `agent:blocked` instead. Do not add `agent:ready` until a plan\n'
-            printf 'is here.\n'
-            printf '\n[Run log](%s). Re-run *Agent — plan an issue* with this issue number to\n' "$RUN_URL"
-            printf 'try again.\n'
-          } > /tmp/no-plan.md
-          gh issue comment "$ISSUE" --repo "$REPO" --body-file /tmp/no-plan.md
-          echo "::error::The planning run for #$ISSUE posted no plan comment."
-          exit 1
+        run: .github/scripts/settle-plan.sh
