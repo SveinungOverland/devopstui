@@ -1029,6 +1029,9 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	if key.Matches(msg, keys.New) {
 		return a.createChild()
 	}
+	if key.Matches(msg, keys.NewBug) {
+		return a.createBug()
+	}
 	if a.view == viewItem {
 		return a.onItemKey(msg)
 	}

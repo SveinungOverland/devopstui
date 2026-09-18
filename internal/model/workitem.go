@@ -257,6 +257,30 @@ func (c BacklogConfig) ChildType(parent *WorkItem) string {
 	return ""
 }
 
+// BugChildOf reports whether a Bug may stand in for the type ChildType
+// would otherwise create under parent, following the team's bug setting.
+func (c BacklogConfig) BugChildOf(parent *WorkItem) bool {
+	typ := c.ChildType(parent)
+	if typ == "" {
+		return false
+	}
+	req := c.RequirementType
+	if req == "" {
+		req = "Product Backlog Item"
+	}
+	task := c.TaskType
+	if task == "" {
+		task = "Task"
+	}
+	switch c.BugsBehavior {
+	case "asRequirements":
+		return strings.EqualFold(typ, req)
+	case "asTasks":
+		return strings.EqualFold(typ, task)
+	}
+	return false
+}
+
 // Patch describes one field change to apply to a work item.
 type Patch struct {
 	Field string // e.g. "System.Title"
