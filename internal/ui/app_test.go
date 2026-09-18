@@ -1124,6 +1124,19 @@ func TestIterationFallbacks(t *testing.T) {
 	if got := a.currentIteration().Name; got != "S1" {
 		t.Errorf("skip empty path = %s, want S1", got)
 	}
+	// The synthetic "Unscheduled" entry never wins over a real sprint, even
+	// as a last resort (it sits last in a.iterations and has no dates, so it
+	// would otherwise always win the date-based scans above).
+	a.iterations = []model.Iteration{mk("S1", "past", -30), {Name: "Unscheduled", Path: a.ctx.Project}}
+	if got := a.currentIteration().Name; got != "S1" {
+		t.Errorf("real sprint over Unscheduled = %s, want S1", got)
+	}
+	// ...but is still picked when it is the only entry, e.g. a team with no
+	// real sprints configured.
+	a.iterations = []model.Iteration{{Name: "Unscheduled", Path: a.ctx.Project}}
+	if got := a.currentIteration().Name; got != "Unscheduled" {
+		t.Errorf("Unscheduled as sole fallback = %s, want Unscheduled", got)
+	}
 	// No iterations at all: no query is issued, the user gets a message.
 	a.iterations = nil
 	a.ctx.Iteration = model.Iteration{}
@@ -1133,6 +1146,39 @@ func TestIterationFallbacks(t *testing.T) {
 	}
 	if !strings.Contains(a.flash, "no sprints") {
 		t.Errorf("flash = %q", a.flash)
+	}
+}
+
+// Selecting "Unscheduled" from the sprint picker shows items sitting at the
+// team's backlog root instead of a specific sprint, and switching back to a
+// real sprint restores the usual scoping.
+func TestUnscheduledIteration(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+
+	if _, ok := a.sprint.tree.Get(1027); ok {
+		t.Fatal("backlog-root item should not show while a real sprint is selected")
+	}
+
+	h.keys(":")
+	h.keys("s", "p", "r", "i", "n", "t", " ", "u", "n", "s", "c", "h", "e", "d", "u", "l", "e", "d", "enter")
+	if a.ctx.Iteration.Name != "Unscheduled" {
+		t.Fatalf("iteration = %q, want Unscheduled", a.ctx.Iteration.Name)
+	}
+	if _, ok := a.sprint.tree.Get(1027); !ok {
+		t.Error("backlog-root item should show when Unscheduled is selected")
+	}
+	if _, ok := a.sprint.tree.Get(1003); ok {
+		t.Error("sprint-scoped item should not show when Unscheduled is selected")
+	}
+
+	h.keys(":")
+	h.keys("s", "p", "r", "i", "n", "t", " ", "S", "p", "r", "i", "n", "t", " ", "4", "2", "enter")
+	if a.ctx.Iteration.Name != "Sprint 42" {
+		t.Fatalf("iteration = %q, want Sprint 42", a.ctx.Iteration.Name)
+	}
+	if _, ok := a.sprint.tree.Get(1027); ok {
+		t.Error("backlog-root item should not show after switching back to a real sprint")
 	}
 }
 

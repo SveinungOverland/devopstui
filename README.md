@@ -155,6 +155,10 @@ Any change key acts on the **selection** when there is one, otherwise on the hig
 item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Epic offers
 to bring its children along.
 
+The sprint picker (`:sprint`, or `[`/`]` past either end) also offers an **Unscheduled**
+entry, for items sitting at the team's backlog root instead of any sprint — the Sprint and
+Board tabs switch to those the same way they switch to a sprint.
+
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, `ctrl+u`/
 `ctrl+d` scroll it in place when its description doesn't fit, and `tab` focuses it so the

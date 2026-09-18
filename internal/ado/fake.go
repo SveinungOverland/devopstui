@@ -102,6 +102,9 @@ func NewFake() *Fake {
 	// currently being worked on earn a lane, regardless of their children.
 	add(1025, 1002, "Product Backlog Item", "Resend invite with a fresh link", "New", "Sveinung Øverland", cur, 2, 4)
 	add(1026, 1025, "Task", "Add resend button to invite page", "To Do", "Sveinung Øverland", cur, 0, 0)
+	// A PBI parked at the backlog root, not yet pulled into a sprint, for the
+	// "Unscheduled" iteration entry to show.
+	add(1027, 1006, "Product Backlog Item", "Add workspace naming validation", "New", "", backlog, 3, 3)
 	// A sub-team owns part of the area tree.
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
@@ -348,6 +351,13 @@ func (f *Fake) SprintItems(ctx context.Context, project, team, iter string) ([]*
 	}
 	f.mu.Unlock()
 	return items, external, nil
+}
+
+// Unscheduled reuses SprintItems' exact-match filter with the project root
+// itself as the "iteration" - the fake never nests sprints under
+// sub-iterations, so it already means "not assigned to any sprint".
+func (f *Fake) Unscheduled(ctx context.Context, project, team string) ([]*model.WorkItem, []*model.WorkItem, error) {
+	return f.SprintItems(ctx, project, team, project)
 }
 
 func (f *Fake) Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error) {
