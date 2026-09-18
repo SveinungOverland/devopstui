@@ -83,7 +83,8 @@ answered.
 Do not write `@claude` anywhere in the comment: it would trigger another run.
 
 The marker line is how the workflow knows a plan was posted at all — it is what
-`agent:planned` is applied on. Ending the run without that comment is a failed
+`agent:planned` is applied on. `issue-plan.yml` matches both it and the `## Plan`
+heading, so if you change either here, change the check there too. Ending the run without that comment is a failed
 run, not a quiet one: the workflow labels the issue `agent:blocked`, says on the
 issue that nothing was produced, and fails. If you cannot produce a full plan —
 the issue is too vague, it asks for something other than planning, or you ran
