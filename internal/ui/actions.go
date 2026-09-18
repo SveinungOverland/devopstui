@@ -342,7 +342,7 @@ func (a *App) knownPeople() []model.Person {
 
 func (a *App) pickMoveTarget(targets []*model.WorkItem) tea.Cmd {
 	items := []pickItem{{Label: "Backlog", Desc: "no sprint", Value: model.Iteration{Path: a.ctx.Project, Name: "backlog"}}}
-	for _, it := range a.iterations {
+	for _, it := range a.movableIterations() {
 		items = append(items, pickItem{Label: it.Name, Desc: iterDesc(it), Value: it})
 	}
 	a.popup = newPicker("Move to", items, func(pi pickItem) tea.Cmd {

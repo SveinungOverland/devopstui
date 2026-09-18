@@ -16,6 +16,9 @@ type Client interface {
 	Projects(ctx context.Context) ([]model.Project, error)
 	Teams(ctx context.Context, project string) ([]model.Team, error)
 	Iterations(ctx context.Context, project, team string) ([]model.Iteration, error)
+	// ProjectIterations returns the project's full iteration tree, regardless
+	// of which team has selected which sprints under Sprints.
+	ProjectIterations(ctx context.Context, project string) ([]model.Iteration, error)
 	Boards(ctx context.Context, project, team string) ([]model.Board, error)
 	BacklogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error)
 	// TeamAreas returns the area paths a team owns, default first.

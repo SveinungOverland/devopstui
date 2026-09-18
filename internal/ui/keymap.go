@@ -79,7 +79,7 @@ var keys = keymap{
 	Priority:  b("priority", "P"),
 	New:       b("new child", "n"),
 
-	Move:        b("move to sprint", "m"),
+	Move:        b("move to iteration", "m"),
 	MoveNext:    b("move to next sprint", "M"),
 	MoveBacklog: b("move to backlog", "B"),
 	Parent:      b("parent", "p"),

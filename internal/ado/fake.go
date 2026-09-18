@@ -202,6 +202,24 @@ func (f *Fake) Iterations(ctx context.Context, project, team string) ([]model.It
 	return append([]model.Iteration(nil), f.iters...), f.wait(ctx)
 }
 
+// ProjectIterations returns the team's sprints plus a couple of iterations
+// outside the team's picked list, so --demo and tests can show the wider
+// project tree the move/edit pickers offer: a sprint nested under a release
+// train, and a sibling team's sprint.
+func (f *Fake) ProjectIterations(ctx context.Context, project string) ([]model.Iteration, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	monday := now.AddDate(0, 0, -int(now.Weekday())+1)
+	out := append([]model.Iteration(nil), f.iters...)
+	out = append(out,
+		model.Iteration{ID: "it-45", Name: "Sprint 45", Path: "Platform\\Release 1\\Sprint 45", Start: monday.AddDate(0, 0, 28), Finish: monday.AddDate(0, 0, 41)},
+		model.Iteration{ID: "it-green-1", Name: "Green Sprint 1", Path: "Platform\\Green\\Sprint 1", Start: monday, Finish: monday.AddDate(0, 0, 13)},
+	)
+	return out, nil
+}
+
 func (f *Fake) Boards(ctx context.Context, project, team string) ([]model.Board, error) {
 	return []model.Board{{ID: "b1", Name: "Backlog items", Columns: []model.BoardColumn{
 		{Name: "New", States: []string{"New"}},
