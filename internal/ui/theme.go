@@ -82,15 +82,28 @@ func kindStyle(k model.Kind) lipgloss.Style {
 	}
 }
 
+// isActiveState reports whether state means "currently being worked on",
+// across the process templates' differing names for that stage (Scrum's
+// task-level "In Progress" vs. its requirement-level "Committed", etc).
+func isActiveState(state string) bool {
+	switch state {
+	case "In Progress", "Active", "Committed", "Doing":
+		return true
+	default:
+		return false
+	}
+}
+
 func stateStyle(state string) lipgloss.Style {
 	switch state {
 	case "Done", "Closed", "Resolved", "Completed":
 		return lipgloss.NewStyle().Foreground(cOK)
-	case "In Progress", "Active", "Committed", "Doing":
-		return lipgloss.NewStyle().Foreground(cAccent)
 	case "Removed":
 		return lipgloss.NewStyle().Foreground(cMuted).Strikethrough(true)
 	default:
+		if isActiveState(state) {
+			return lipgloss.NewStyle().Foreground(cAccent)
+		}
 		return lipgloss.NewStyle().Foreground(cText)
 	}
 }
