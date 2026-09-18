@@ -44,7 +44,7 @@ var formFields = []formField{
 // openForm loads picker data then shows the form.
 func (a *App) openForm(it *model.WorkItem) tea.Cmd {
 	project := a.ctx.Project
-	iters := a.iterations
+	iters := a.movableIterations()
 	return func() tea.Msg {
 		ctx := context.Background()
 		states, err := a.client.States(ctx, project, it.Type)

@@ -1182,6 +1182,55 @@ func TestUnscheduledIteration(t *testing.T) {
 	}
 }
 
+func TestMoveAndEditOfferProjectIterations(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	extra := model.Iteration{Name: "Sprint 45", Path: "Platform\\Release 1\\Sprint 45"}
+	a.projectIterations = append(a.projectIterations, extra)
+
+	labels := func(p *picker) []string {
+		var out []string
+		for _, i := range p.shown {
+			out = append(out, p.items[i].Label)
+		}
+		return out
+	}
+	has := func(p *picker, label string) bool {
+		for _, l := range labels(p) {
+			if l == label {
+				return true
+			}
+		}
+		return false
+	}
+
+	a.sprint.jumpTo(1004)
+	h.keys("m")
+	mp, ok := a.popup.(*picker)
+	if !ok {
+		t.Fatalf("expected picker, got %T", a.popup)
+	}
+	if !has(mp, extra.Name) {
+		t.Errorf("move popup = %v, want %q offered", labels(mp), extra.Name)
+	}
+	h.keys("esc")
+
+	h.keys("e")
+	f, ok := a.popup.(*form)
+	if !ok {
+		t.Fatalf("expected form, got %T", a.popup)
+	}
+	f.cursor = 3 // Iteration field, see formFields
+	h.keys("l")
+	fp, ok := f.child.(*picker)
+	if !ok {
+		t.Fatalf("expected iteration picker, got %T", f.child)
+	}
+	if !has(fp, extra.Name) {
+		t.Errorf("edit form iteration picker = %v, want %q offered", labels(fp), extra.Name)
+	}
+}
+
 func TestTeamFilter(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	a := h.app

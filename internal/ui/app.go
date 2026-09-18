@@ -54,7 +54,13 @@ type App struct {
 	projects   []model.Project
 	teams      []model.Team
 	iterations []model.Iteration
-	boards     []model.Board
+	// projectIterations is the project's full iteration tree, offered
+	// alongside the team's sprints (iterations) by movableIterations, for the
+	// pickers that set a work item's iteration. Sprint navigation ([, ],
+	// :sprint, the current-sprint pick) stays on iterations, since it depends
+	// on team-only data (Timeframe, the "current" sprint).
+	projectIterations []model.Iteration
+	boards            []model.Board
 
 	w, h int
 	view viewID
@@ -295,14 +301,15 @@ func (a *App) wireLists() {
 // ------------------------------------------------------------ messages
 
 type contextLoadedMsg struct {
-	me         string
-	projects   []model.Project
-	teams      []model.Team
-	iterations []model.Iteration
-	boards     []model.Board
-	backlog    model.BacklogConfig
-	filter     []model.TeamArea // areas of the configured filter team, if any
-	err        error
+	me                string
+	projects          []model.Project
+	teams             []model.Team
+	iterations        []model.Iteration
+	projectIterations []model.Iteration
+	boards            []model.Board
+	backlog           model.BacklogConfig
+	filter            []model.TeamArea // areas of the configured filter team, if any
+	err               error
 }
 
 type createdMsg struct {
@@ -431,6 +438,9 @@ func (a *App) loadContext() tea.Cmd {
 			m.err = err
 			return m
 		}
+		// Best effort: a project-wide read can fail on permissions the team
+		// iteration read doesn't need, and must not block startup.
+		m.projectIterations, _ = a.client.ProjectIterations(ctx, project)
 		if m.boards, err = a.client.Boards(ctx, project, team); err != nil {
 			m.err = err
 			return m
@@ -772,6 +782,7 @@ func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
 	// the user can ask to see items with no sprint at all (project root is
 	// the backlog convention already used by pickMoveTarget's "Backlog").
 	a.iterations = append(append([]model.Iteration(nil), msg.iterations...), model.Iteration{Path: a.ctx.Project, Name: "Unscheduled"})
+	a.projectIterations = msg.projectIterations
 	a.boards = msg.boards
 	a.ctx.Backlog = msg.backlog
 	a.ctx.FilterAreas = msg.filter
@@ -788,6 +799,26 @@ func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
 	}
 	a.persist()
 	return a.reloadAll()
+}
+
+// movableIterations is what the move popup and the edit form's Iteration
+// field offer: the team's sprints (including the synthetic "Unscheduled"
+// entry, so the current-sprint badge and existing order survive) plus any
+// project iteration not already among them, for setting a work item's
+// iteration to something outside the team's own sprints.
+func (a *App) movableIterations() []model.Iteration {
+	out := append([]model.Iteration(nil), a.iterations...)
+	have := map[string]bool{}
+	for _, it := range out {
+		have[it.Path] = true
+	}
+	for _, it := range a.projectIterations {
+		if !have[it.Path] {
+			have[it.Path] = true
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // currentIteration picks the sprint to show: the one Azure DevOps marks

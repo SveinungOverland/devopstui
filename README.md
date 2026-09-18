@@ -15,7 +15,7 @@ devopstui  contoso › Platform › Team Blue › Sprint 42 Sep 7 – Sep 20    
 │ ●      PBI   1004 Accept invite and crea…  Approved     PN  8││State     Committed  │
 │  ▾ EPIC  1010 Observability                In Progress  PN   ││Assigned  Sveinung   │
 ╰──────────────────────────────────────────────────────────────╯╰─────────────────────╯
-l expand  space select  e edit  s state  a assign  m move to sprint  p parent  / filter
+l expand  space select  e edit  s state  a assign  m move to iteration  p parent  / filter
 ```
 
 ## Install
@@ -136,7 +136,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 
 | Navigate          |                       | Views   |                     | Change  |                 | Move |                     |
 | ----------------- | --------------------- | ------- | ------------------- | ------- | --------------- | ---- | ------------------- |
-| `j` `k`           | down / up             | `1`     | dashboard           | `e`     | edit form       | `m`  | move to sprint…     |
+| `j` `k`           | down / up             | `1`     | dashboard           | `e`     | edit form       | `m`  | move to iteration…  |
 | `g` `G`           | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
 | `l` `h`           | expand / collapse     | `3`     | board               | `d`     | description     | `B`  | move to backlog     |
 | `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
@@ -158,6 +158,11 @@ to bring its children along.
 The sprint picker (`:sprint`, or `[`/`]` past either end) also offers an **Unscheduled**
 entry, for items sitting at the team's backlog root instead of any sprint — the Sprint and
 Board tabs switch to those the same way they switch to a sprint.
+
+The `m` move popup and the Iteration field in `e`'s edit form list the whole project's
+iteration tree, not just the current team's sprints, so an item can be moved to another
+team's sprint or a nested release iteration. Sprint navigation above stays scoped to the
+current team.
 
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, `ctrl+u`/

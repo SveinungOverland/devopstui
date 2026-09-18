@@ -163,6 +163,59 @@ func (s *SDK) Iterations(ctx context.Context, project, team string) ([]model.Ite
 	return out, nil
 }
 
+// ProjectIterations walks the project's classification tree for iterations,
+// depth first, and returns every node below the project root. Paths are
+// built from each node's own Name rather than trusting the API's Path field,
+// which is prefixed with the tree's root segment ("\Platform\Iteration\...")
+// and would not match the System.IterationPath format the rest of this
+// codebase writes (e.g. "Platform\Sprint 42", see fake.go).
+func (s *SDK) ProjectIterations(ctx context.Context, project string) ([]model.Iteration, error) {
+	depth := 25
+	root, err := s.wit.GetClassificationNode(ctx, workitemtracking.GetClassificationNodeArgs{
+		Project:        &project,
+		StructureGroup: &workitemtracking.TreeStructureGroupValues.Iterations,
+		Depth:          &depth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out []model.Iteration
+	var walk func(nodes []workitemtracking.WorkItemClassificationNode, parentPath string)
+	walk = func(nodes []workitemtracking.WorkItemClassificationNode, parentPath string) {
+		for _, n := range nodes {
+			path := parentPath + "\\" + deref(n.Name)
+			m := model.Iteration{Name: deref(n.Name), Path: path}
+			if n.Identifier != nil {
+				m.ID = n.Identifier.String()
+			}
+			if n.Attributes != nil {
+				attrs := *n.Attributes
+				m.Start = attrDate(attrs["startDate"])
+				m.Finish = attrDate(attrs["finishDate"])
+			}
+			out = append(out, m)
+			if n.Children != nil {
+				walk(*n.Children, path)
+			}
+		}
+	}
+	if root.Children != nil {
+		walk(*root.Children, project)
+	}
+	return out, nil
+}
+
+// attrDate reads a date out of a classification node's loosely typed
+// Attributes map, where the API sends dates as RFC3339 strings.
+func attrDate(v any) time.Time {
+	s, _ := v.(string)
+	if s == "" {
+		return time.Time{}
+	}
+	t, _ := time.Parse(time.RFC3339, s)
+	return t
+}
+
 func (s *SDK) Boards(ctx context.Context, project, team string) ([]model.Board, error) {
 	refs, err := s.work.GetBoards(ctx, work.GetBoardsArgs{Project: &project, Team: &team})
 	if err != nil {
