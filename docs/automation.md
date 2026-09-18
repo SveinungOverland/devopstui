@@ -87,7 +87,7 @@ line of code on our side.
 
 | Workflow                   | Starts when                                    | Does                                                                |
 | -------------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
-| `issue-plan.yml`           | issue opened or reopened                       | Posts the plan comment, ensures the labels exist.                   |
+| `issue-plan.yml`           | issue opened or reopened                       | Posts the plan comment, ensures the labels exist. Fails if no plan lands. |
 | `agent-implement.yml`      | `agent:ready` added                            | Branch, draft PR, implementation, verification, hand-off to review. |
 | `agent-review.yml`         | chained from implement, or PR ready for review | The impact and security review.                                     |
 | `claude-code-review.yml`   | PR ready for review, new commits on a ready PR | Line-level inline comments.                                         |
@@ -112,6 +112,23 @@ is the point.
 `.claude/skills/ui-check/` is a skill, so it is picked up both locally and in
 Actions. It is what an agent reads when it needs to see the UI rather than
 guess at it.
+
+## A run is judged on what it produced
+
+An agent exiting without an error does not mean it did the work, so no workflow
+takes the run's own word for it. Each one checks for its artefact afterwards:
+
+- `issue-plan.yml` looks for the plan comment, which the agent marks with
+  `<!-- claude-issue-plan: <issue> -->`. Found, the issue gets `agent:planned` —
+  the label means a plan exists, so it is applied on one existing. Not found,
+  the issue gets `agent:blocked` and a comment saying nothing was produced, and
+  the run fails rather than finishing green over an empty issue.
+- `agent-implement.yml` runs `make check` against the branch, and pushes
+  anything the agent committed but did not push.
+- `agent-review.yml` looks for its own `claude-impact-review: <sha>` marker and
+  notes on the PR when a review produced nothing.
+
+So a green run means the artefact is there, and a red one is worth opening.
 
 ## The two reviews
 

@@ -32,6 +32,8 @@ Post exactly one comment on the issue with `gh issue comment`. Use this shape,
 and keep it tight — the value is in specifics, not in length:
 
 ```markdown
+<!-- claude-issue-plan: <issue number> -->
+
 ## Plan
 
 One paragraph: what is being changed and the approach, in plain language.
@@ -79,3 +81,12 @@ the comment that the issue should not be labelled `agent:ready` until it is
 answered.
 
 Do not write `@claude` anywhere in the comment: it would trigger another run.
+
+The marker line is how the workflow knows a plan was posted at all — it is what
+`agent:planned` is applied on. `issue-plan.yml` matches both it and the `## Plan`
+heading, so if you change either here, change the check there too. Ending the run without that comment is a failed
+run, not a quiet one: the workflow labels the issue `agent:blocked`, says on the
+issue that nothing was produced, and fails. If you cannot produce a full plan —
+the issue is too vague, it asks for something other than planning, or you ran
+out of room — post the comment anyway with the marker, and say under `## Plan`
+what stopped you and what you would need.
