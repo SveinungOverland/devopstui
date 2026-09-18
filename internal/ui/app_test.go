@@ -629,6 +629,54 @@ func TestChildProgress(t *testing.T) {
 	}
 }
 
+func TestItemDiscussionToggle(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	h.keys("D")
+	if a.view != viewItem || a.item == nil || a.item.item.ID != 1013 {
+		t.Fatalf("D should drill into #1013, got view=%v item=%v", a.view, a.item)
+	}
+	if a.item.showComments {
+		t.Fatal("drill-down should start on the description")
+	}
+
+	h.keys("C")
+	if !a.item.showComments {
+		t.Fatal("C should switch the left pane to the discussion")
+	}
+	v := h.app.View()
+	if !strings.Contains(v, "Discussion") {
+		t.Errorf("view should show the Discussion pane, got:\n%s", v)
+	}
+	if !strings.Contains(v, "Publisher change is in review") {
+		t.Errorf("view should show the seeded comment, got:\n%s", v)
+	}
+
+	h.keys("C")
+	if a.item.showComments {
+		t.Fatal("C should toggle back to the description")
+	}
+	if strings.Contains(h.app.View(), "Publisher change is in review") {
+		t.Error("description pane should not show the discussion text")
+	}
+}
+
+func TestBoardPreviewShowsDiscussion(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.keys("3") // board
+	h.app.board.jumpTo(1013)
+	h.run(h.app.loadBoardComments())
+	h.app.refreshDetail()
+	v := h.app.View()
+	if !strings.Contains(v, "Discussion") {
+		t.Errorf("board preview should show a Discussion section, got:\n%s", v)
+	}
+	if !strings.Contains(v, "Publisher change is in review") {
+		t.Errorf("board preview should show the seeded comment, got:\n%s", v)
+	}
+}
+
 func TestBugsAsTasksLeaveTheBoard(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.ctx.Backlog.BugsBehavior = "asTasks"

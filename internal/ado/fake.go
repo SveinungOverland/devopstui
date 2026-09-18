@@ -16,6 +16,7 @@ type Fake struct {
 	mu       sync.Mutex
 	me       string
 	items    map[int]*model.WorkItem
+	comments map[int][]model.Comment
 	iters    []model.Iteration
 	nextID   int
 	Updates  []FakeUpdate // recorded writes, for tests
@@ -109,8 +110,23 @@ func NewFake() *Fake {
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
 	}
+	f.comments = map[int][]model.Comment{
+		1003: demoComments(now, "Priya Natarajan", "Should the magic link expire after first use, or stay valid for the full 7 days?",
+			"Sveinung Øverland", "First use only — otherwise a leaked email thread keeps working forever.\n\nWorth calling out in the acceptance criteria."),
+		1013: demoComments(now, "Alex Kim", "Publisher change is in review, consumer side still needs the header read added.",
+			"Sveinung Øverland", "Picking this up now that #1015 landed."),
+	}
 	f.nextID = 2000
 	return f
+}
+
+// demoComments builds a short back-and-forth discussion, newest last, so
+// --demo and the shots have something real to show.
+func demoComments(now time.Time, a1, t1, a2, t2 string) []model.Comment {
+	return []model.Comment{
+		{ID: 1, Author: a1, CreatedDate: now.Add(-48 * time.Hour), Text: t1},
+		{ID: 2, Author: a2, CreatedDate: now.Add(-24 * time.Hour), Text: t2},
+	}
 }
 
 // demoDescription returns Markdown so the renderer has something to show.
@@ -411,6 +427,15 @@ func (f *Fake) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	}
 	c := *it
 	return &c, nil
+}
+
+func (f *Fake) Comments(ctx context.Context, project string, id int) ([]model.Comment, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]model.Comment(nil), f.comments[id]...), nil
 }
 
 func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error) {

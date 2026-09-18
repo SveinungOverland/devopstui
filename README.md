@@ -144,6 +144,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `z`               | toggle preview pane   | `T`     | team filter         | `n`     | new child item  |      |                     |
 | `ctrl+u` `ctrl+d` | scroll preview pane   |         |                     |         |                 |      |                     |
 | `D`               | item details view     |         |                     |         |                 |      |                     |
+| `C`               | discussion            |         |                     |         |                 |      |                     |
 | `/`               | filter                | `S`     | current sprint      | `E`     | effort          |      |                     |
 | `space`           | select                | `:`     | command bar         | `P`     | priority        |      |                     |
 | `v`               | visual select         | `r`     | refresh             | `o`     | open in browser |      |                     |
@@ -203,12 +204,18 @@ right, one column per state.
 | `D` `enter`     | drill into the highlighted child                                       |
 | `esc` `q`       | walk back out, one level at a time                                     |
 | `z`             | give the description the full width                                    |
+| `C`             | swap the left pane between the description and the discussion          |
 | `r`             | re-fetch the children                                                  |
 
 Every action key works here too and applies to whatever has focus: the item itself while the
 description is focused, otherwise the highlighted child. So `s` sets a child's state, `d` edits
 the item's description, `a` assigns, and so on. Children are fetched for the item you open, so
 the kanban is complete even in views that do not load tasks, such as the backlog.
+
+`C` toggles the left pane to the item's Azure DevOps comments (oldest first) and back; it is
+read-only — posting a new comment isn't supported yet. On the Board, where the preview pane
+already has the full terminal height to work with, the discussion shows underneath the
+description instead, with no toggle needed.
 
 ## Team filter
 
