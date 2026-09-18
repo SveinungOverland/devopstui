@@ -13,6 +13,13 @@
 # Needs GH_TOKEN with issues: write. REPO is passed to gh explicitly, so this
 # works even when the checkout failed and there is no git remote to infer.
 #
+# This is the body of issue-plan.yml's last step, moved here so it can be
+# tested — settle-plan.test.sh drives it against a stubbed gh and status.sh.
+# The move is otherwise behaviour-for-behaviour, with one deliberate exception:
+# the comment body goes in an mktemp file rather than a fixed /tmp/no-plan.md,
+# so two runs cannot land on the same path. Anything else that differs from the
+# old inline block is a bug.
+#
 #   ISSUE=42 REPO=owner/name OUTCOME=success RUN_URL=https://... settle-plan.sh
 set -euo pipefail
 
