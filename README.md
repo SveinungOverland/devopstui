@@ -218,9 +218,9 @@ the item's description, `a` assigns, and so on. Children are fetched for the ite
 the kanban is complete even in views that do not load tasks, such as the backlog.
 
 `C` toggles the left pane to the item's Azure DevOps comments (oldest first) and back; it is
-read-only — posting a new comment isn't supported yet. On the Board, where the preview pane
-already has the full terminal height to work with, the discussion shows underneath the
-description instead, with no toggle needed.
+read-only — posting a new comment isn't supported yet. On the Board, Sprint and Backlog views,
+where the preview pane already has the full terminal height to work with, the discussion shows
+underneath the description instead, with no toggle needed.
 
 ## Team filter
 

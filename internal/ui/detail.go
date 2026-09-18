@@ -12,8 +12,9 @@ import (
 
 // renderDetail draws the right-hand pane for one item. children are the
 // item's direct children, if known; cfg decides which of them are tasks.
-// comments is only ever populated by the Board view (see refreshDetail) and
-// appended as a Discussion section after the description.
+// comments is only ever populated by the Board, Sprint and Backlog views
+// (see refreshDetail) and appended as a Discussion section after the
+// description.
 func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.WorkItem, comments []model.Comment, width int, cfg model.BacklogConfig) string {
 	if it == nil {
 		return sMuted.Render("nothing selected")

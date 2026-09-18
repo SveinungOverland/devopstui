@@ -689,7 +689,7 @@ func TestBoardPreviewShowsDiscussion(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.keys("3") // board
 	h.app.board.jumpTo(1013)
-	h.run(h.app.loadBoardComments(false))
+	h.run(h.app.loadPreviewComments(false))
 	h.app.refreshDetail()
 	v := h.app.View()
 	if !strings.Contains(v, "Discussion") {
@@ -705,7 +705,7 @@ func TestBoardRefreshReloadsComments(t *testing.T) {
 	a := h.app
 	h.keys("3") // board
 	a.board.jumpTo(1013)
-	h.run(a.loadBoardComments(false))
+	h.run(a.loadPreviewComments(false))
 	real := append([]model.Comment(nil), a.comments[1013]...)
 	if len(real) == 0 {
 		t.Fatal("expected seeded comments for #1013")
@@ -717,6 +717,54 @@ func TestBoardRefreshReloadsComments(t *testing.T) {
 	h.keys("r") // global refresh, not the item drill-down's
 	if got := a.comments[1013]; len(got) != len(real) {
 		t.Fatalf("global refresh should have refetched the board's discussion, got %d comments, want %d", len(got), len(real))
+	}
+}
+
+func TestSprintPreviewShowsDiscussion(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.keys("2") // sprint
+	h.app.sprint.jumpTo(1013)
+	h.run(h.app.loadPreviewComments(false))
+	h.app.refreshDetail()
+	v := h.app.View()
+	if !strings.Contains(v, "Discussion") {
+		t.Errorf("sprint preview should show a Discussion section, got:\n%s", v)
+	}
+	if !strings.Contains(v, "Publisher change is in review") {
+		t.Errorf("sprint preview should show the seeded comment, got:\n%s", v)
+	}
+}
+
+func TestBacklogPreviewShowsDiscussion(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.keys("4") // backlog
+	h.app.backlog.jumpTo(1013)
+	h.run(h.app.loadPreviewComments(false))
+	h.app.refreshDetail()
+	v := h.app.View()
+	if !strings.Contains(v, "Discussion") {
+		t.Errorf("backlog preview should show a Discussion section, got:\n%s", v)
+	}
+	if !strings.Contains(v, "Publisher change is in review") {
+		t.Errorf("backlog preview should show the seeded comment, got:\n%s", v)
+	}
+}
+
+func TestSprintCursorMoveLoadsComments(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("2") // sprint
+	a.sprint.jumpTo(1012)
+	if _, cached := a.comments[1013]; cached {
+		t.Fatal("comments for #1013 should not be cached yet")
+	}
+
+	h.keys("j") // #1012's first child is #1013
+	if a.sprint.currentID() != 1013 {
+		t.Fatalf("expected cursor on #1013, got #%d", a.sprint.currentID())
+	}
+	if len(a.comments[1013]) == 0 {
+		t.Fatal("moving the cursor onto #1013 should have fetched its discussion")
 	}
 }
 
