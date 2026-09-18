@@ -168,7 +168,7 @@ func (a *App) applyTeamFilter() {
 func (a *App) refreshDashboard() {
 	inc := a.dashInclude()
 	a.dashBoard.setItems(a.currentBoard(), a.myItems, a.ctx.Backlog, inc)
-	a.dashLanes.setLanes(a.myPBIs(), a.dashChildren, nil)
+	a.dashLanes.setLanes(a.dashLaneParents(), a.dashChildren, nil)
 }
 
 // dashInclude combines the team filter with restricting to the selected
@@ -219,6 +219,22 @@ func (a *App) myPBIs() []*model.WorkItem {
 			continue
 		}
 		out = append(out, it)
+	}
+	return out
+}
+
+// dashLaneParents is myPBIs further narrowed to those currently being
+// worked on, so a "New" or "Done" PBI with a stray old task doesn't get a
+// lane of its own. loadDashLanes still fetches children for the full
+// myPBIs set (dashChildren keeps its current breadth for lookup/childItems'
+// fallback use) — only which parents render as a lane changes here.
+func (a *App) dashLaneParents() []*model.WorkItem {
+	pbis := a.myPBIs()
+	out := make([]*model.WorkItem, 0, len(pbis))
+	for _, p := range pbis {
+		if isActiveState(p.State) {
+			out = append(out, p)
+		}
 	}
 	return out
 }
@@ -609,7 +625,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.setFlash("active work: "+msg.err.Error(), true)
 		}
 		a.dashChildren = msg.children
-		a.dashLanes.setLanes(a.myPBIs(), a.dashChildren, msg.states)
+		a.dashLanes.setLanes(a.dashLaneParents(), a.dashChildren, msg.states)
 		return a, nil
 
 	case itemUpdatedMsg:

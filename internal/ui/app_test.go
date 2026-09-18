@@ -787,17 +787,23 @@ func TestDashboardKanbanAndLanes(t *testing.T) {
 	}
 
 	// The lanes are a kanban with state as columns and the parent PBI as
-	// the swimlane: a PBI with children gets a lane showing ALL of them,
-	// bucketed by state, not just the active ones. 1003 has one child
-	// (1023, In Progress); 1013 has three (1015/1017 To Do, 1016 Done).
-	// 1020's only child is a bug (1024), which lanes drop entirely (see
-	// TestDashboardLanesExcludeBugs), so it also gets no lane.
+	// the swimlane: a PBI that is itself being worked on gets a lane
+	// showing ALL of its children, bucketed by state, not just the active
+	// ones. 1003 has one child (1023, In Progress); 1013 has three
+	// (1015/1017 To Do, 1016 Done). 1020's only child is a bug (1024),
+	// which lanes drop entirely (see TestDashboardLanesExcludeBugs), so it
+	// also gets no lane. 1025 is "New" with a child task (1026) but isn't
+	// being worked on yet, so it gets no lane either, regardless of that
+	// child.
 	if len(a.dashLanes.ls) != 2 {
 		t.Fatalf("lanes = %+v, want exactly 2 (#1003 and #1013)", a.dashLanes.ls)
 	}
 	byParent := map[int]lane{}
 	for _, l := range a.dashLanes.ls {
 		byParent[l.parent.ID] = l
+	}
+	if _, ok := byParent[1025]; ok {
+		t.Error("#1025 is not in progress yet, it should not get a lane despite having a child")
 	}
 	colOf := func(state string) int {
 		for i, s := range a.dashLanes.states {

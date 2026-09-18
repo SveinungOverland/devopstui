@@ -245,9 +245,12 @@ Board tabs) — plus an optional preview pane:
   change), same as on the Board tab. On a wide enough terminal, a preview pane sits to its
   right (`z` toggles it).
 - **Bottom: a swimlane kanban** of those PBIs' children — state as the columns (shared across
-  every lane, same as any kanban), the parent PBI as the lane. A PBI shows every child, not
-  just active ones, so a lane reads as real progress: some in To Do, some In Progress, some
-  Done. When a cell holds several cards they all stack, full height, rather than collapsing
+  every lane, same as any kanban), the parent PBI as the lane. Only a PBI that is itself being
+  worked on (In Progress/Active/Committed/Doing, the same states coloured as "in progress"
+  elsewhere) gets a lane at all; one that hasn't been started or is already done gets none, even
+  if a stray child lingers. A PBI that qualifies shows every child, not just active ones, so a
+  lane reads as real progress: some in To Do, some In Progress, some Done. When a cell holds
+  several cards they all stack, full height, rather than collapsing
   behind a "+N" — this row gets the bigger share of the body height for exactly that reason.
   Bugs are left out (they carry requirement-level states, not task states, and already show as
   their own card on the kanban above when they're at that level); a PBI with nothing left after
