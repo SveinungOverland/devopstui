@@ -353,11 +353,40 @@ func (s *SDK) SprintItems(ctx context.Context, project, team, iter string) ([]*m
 	if err != nil {
 		return nil, nil, err
 	}
+	external, err := s.externalParents(ctx, project, items)
+	if err != nil {
+		return nil, nil, err
+	}
+	return items, external, nil
+}
+
+// Unscheduled returns items whose iteration is exactly the team's project
+// root - the backlog convention this codebase already uses elsewhere for
+// "no sprint" (see pickMoveTarget in internal/ui/actions.go) - rather than
+// SprintItems' UNDER match, which would also pull in every sprint nested
+// under that root.
+func (s *SDK) Unscheduled(ctx context.Context, project, team string) ([]*model.WorkItem, []*model.WorkItem, error) {
+	items, err := s.query(ctx, project, fmt.Sprintf(
+		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.IterationPath] = '%s' AND [System.State] <> 'Removed' ORDER BY [Microsoft.VSTS.Common.BacklogPriority] ASC, [System.Id] ASC",
+		escape(project)))
+	if err != nil {
+		return nil, nil, err
+	}
+	external, err := s.externalParents(ctx, project, items)
+	if err != nil {
+		return nil, nil, err
+	}
+	return items, external, nil
+}
+
+// externalParents walks the ancestry of items and returns any ancestors
+// outside that set (usually Features/Epics), for display alongside a
+// filtered item list.
+func (s *SDK) externalParents(ctx context.Context, project string, items []*model.WorkItem) ([]*model.WorkItem, error) {
 	in := map[int]bool{}
 	for _, it := range items {
 		in[it.ID] = true
 	}
-	// Walk ancestry for parents outside the sprint (usually Features/Epics).
 	var external []*model.WorkItem
 	known := map[int]*model.WorkItem{}
 	for _, it := range items {
@@ -381,7 +410,7 @@ func (s *SDK) SprintItems(ctx context.Context, project, team, iter string) ([]*m
 		}
 		parents, err := s.fetch(ctx, project, ids)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		frontier = map[int]bool{}
 		for _, p := range parents {
@@ -394,7 +423,7 @@ func (s *SDK) SprintItems(ctx context.Context, project, team, iter string) ([]*m
 			}
 		}
 	}
-	return items, external, nil
+	return external, nil
 }
 
 func (s *SDK) Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error) {

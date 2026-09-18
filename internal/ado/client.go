@@ -29,6 +29,11 @@ type Client interface {
 	// SprintItems returns the items under iterationPath plus any parents of
 	// those items that live outside it (returned in the second slice).
 	SprintItems(ctx context.Context, project, team, iterationPath string) (items, external []*model.WorkItem, err error)
+	// Unscheduled returns items sitting at the team's backlog root - not
+	// assigned to any sprint - plus any parents of those items that live
+	// outside it (returned in the second slice), the same shape as
+	// SprintItems.
+	Unscheduled(ctx context.Context, project, team string) (items, external []*model.WorkItem, err error)
 	// Backlog returns the whole requirement-and-above backlog for the team.
 	Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error)
 	// MyItems returns open items assigned to the current user in the project.

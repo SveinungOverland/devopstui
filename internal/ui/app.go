@@ -465,7 +465,11 @@ func (a *App) loadView(v viewID) tea.Cmd {
 		switch v {
 		case viewSprint, viewBoard:
 			m.view = viewSprint
-			m.items, m.external, m.err = a.client.SprintItems(ctx, c.Project, c.Team, c.Iteration.Path)
+			if c.Iteration.Path == c.Project {
+				m.items, m.external, m.err = a.client.Unscheduled(ctx, c.Project, c.Team)
+			} else {
+				m.items, m.external, m.err = a.client.SprintItems(ctx, c.Project, c.Team, c.Iteration.Path)
+			}
 			if m.err != nil {
 				m.err = fmt.Errorf("sprint %q: %w", c.Iteration.Path, m.err)
 			}
@@ -764,7 +768,10 @@ func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
 	if a.ctx.Team == "" {
 		return a.pickTeam()
 	}
-	a.iterations = msg.iterations
+	// A synthetic entry alongside the real sprints, picked the same way, so
+	// the user can ask to see items with no sprint at all (project root is
+	// the backlog convention already used by pickMoveTarget's "Backlog").
+	a.iterations = append(append([]model.Iteration(nil), msg.iterations...), model.Iteration{Path: a.ctx.Project, Name: "Unscheduled"})
 	a.boards = msg.boards
 	a.ctx.Backlog = msg.backlog
 	a.ctx.FilterAreas = msg.filter
@@ -803,10 +810,16 @@ func (a *App) currentIteration() model.Iteration {
 			return it
 		}
 	}
+	// Prefer any real sprint over the synthetic "Unscheduled" entry (no
+	// dates, so it never matched above): it sits last in a.iterations and
+	// would otherwise always win this scan.
 	for i := len(a.iterations) - 1; i >= 0; i-- {
-		if a.iterations[i].Path != "" {
-			return a.iterations[i]
+		if it := a.iterations[i]; it.Path != "" && it.Path != a.ctx.Project {
+			return it
 		}
+	}
+	if len(a.iterations) > 0 {
+		return a.iterations[len(a.iterations)-1]
 	}
 	return model.Iteration{}
 }
