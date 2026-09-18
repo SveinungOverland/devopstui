@@ -1,13 +1,21 @@
-name: PR — changes requested
+name: PR — sent back
 
-# A human requested changes on an agent's pull request: put the agent back on
-# it. The implement workflow relabels the issue `agent:in-progress` itself.
+# A human sent an agent's pull request back for another pass: put the agent
+# back on it. The implement workflow relabels the issue `agent:in-progress`
+# itself.
+#
+# Two signals, because the PR is opened with AUTOMATION_TOKEN and GitHub will
+# not let you request changes on a pull request you own. Whoever that token
+# belongs to has only one way to say "not yet": convert the PR back to draft.
+# Everyone else can still request changes, and that keeps working.
 #
 # Reviews from bots are ignored on purpose. The impact review and the inline
 # code review both comment on these PRs, and letting a bot's review restart the
 # implementation would close a loop with nobody in it.
 
 on:
+  pull_request:
+    types: [converted_to_draft]
   pull_request_review:
     types: [submitted]
 
@@ -23,9 +31,15 @@ permissions:
 jobs:
   route:
     if: >-
-      github.event.review.state == 'changes_requested' &&
-      github.event.review.user.type != 'Bot' &&
-      startsWith(github.event.pull_request.head.ref, 'claude/issue-')
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'claude/issue-') &&
+      (
+        github.event_name == 'pull_request' ||
+        (
+          github.event.review.state == 'changes_requested' &&
+          github.event.review.user.type != 'Bot'
+        )
+      )
     runs-on: ubuntu-latest
     outputs:
       issue: ${{ steps.issue.outputs.number }}
@@ -33,7 +47,11 @@ jobs:
       - name: Read the issue number off the branch
         id: issue
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.event.sender.login }}
         run: |
           set -euo pipefail
           # claude/issue-42 or claude/issue-42-20260917-1830 — an @claude run
@@ -43,11 +61,36 @@ jobs:
           else
             echo "::error::Cannot read an issue number from '$BRANCH'"; exit 1
           fi
+
+          # A revise run drafts the PR itself, in start-work.sh, and with
+          # AUTOMATION_TOKEN set that raises `converted_to_draft` exactly like a
+          # human's click would. Without this check the workflow would answer
+          # its own echo and queue a second pass forever.
+          #
+          # The label tells the two apart: a human sends work back from
+          # `agent:in-review`, so an issue an agent already holds is the
+          # pipeline drafting its own pull request. This is the one place that
+          # reads the label with gh rather than status.sh — the job has no
+          # checkout, and adding one to read a single label is not worth it.
+          if [ "$EVENT" = "pull_request" ] &&
+            gh issue view "$number" --repo "$REPO" --json labels --jq '.labels[].name' |
+            grep -qxF 'agent:in-progress'; then
+            echo "::notice::#$number is already agent:in-progress — ignoring this draft." \
+              "If a previous run left the label behind, remove it and add agent:ready."
+            exit 0
+          fi
+
           echo "number=$number" >> "$GITHUB_OUTPUT"
-          echo "Changes requested on #$number by ${{ github.event.review.user.login }}."
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "PR for #$number put back to draft by $ACTOR."
+          else
+            echo "Changes requested on #$number by $ACTOR."
+          fi
 
   revise:
     needs: route
+    # Empty when route recognised its own echo rather than a human.
+    if: needs.route.outputs.issue != ''
     uses: ./.github/workflows/agent-implement.yml
     with:
       issue: ${{ needs.route.outputs.issue }}

@@ -81,7 +81,8 @@ if [ -z "$pr" ]; then
 
 			🤖 Opened automatically when #$ISSUE was labelled \`agent:ready\`.
 			An agent is implementing it now; this description is rewritten when the
-			work lands. Request changes on this PR to send it back for another pass.
+			work lands. Convert this pull request back to a draft — or request
+			changes on it — to send it back for another pass.
 		EOF
 	)
 	# gh pr create prints the new PR's URL and has no --json, so the number
@@ -97,7 +98,10 @@ else
 	printf '%s\n' "start-work: reusing PR #$pr"
 	if [ "$MODE" = "revise" ]; then
 		# Back to draft while the agent works, which also stops the review
-		# workflows from running against a half-finished branch.
+		# workflows from running against a half-finished branch. Usually a
+		# no-op now, since converting to draft is itself one of the signals
+		# that starts a revise run; when it does change the state, the issue is
+		# already `agent:in-progress` and pr-feedback.yml ignores the event.
 		gh pr ready "$pr" --undo >/dev/null 2>&1 || true
 	fi
 fi

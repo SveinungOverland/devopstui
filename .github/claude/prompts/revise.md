@@ -1,8 +1,13 @@
 # Playbook: address review feedback
 
-A human requested changes on the pull request. The issue is back at
-`agent:in-progress` and the PR is a draft again. Your job is to address the feedback
-on the existing branch.
+A human sent the pull request back — either by requesting changes on it or by
+converting it to a draft. The issue is back at `agent:in-progress` and the PR is
+a draft again. Your job is to address the feedback on the existing branch.
+
+There may be no formal review to read: the person who opens these pull requests
+cannot request changes on their own, so their feedback arrives as ordinary PR
+comments, inline comments, or a comment on the issue. Gather it from all of
+those before you start.
 
 Read `.github/claude/CONTEXT.md` first, then the playbook rules in
 `.github/claude/prompts/implement.md` for building, verifying and showing the
@@ -10,12 +15,17 @@ UI — they apply here too.
 
 ## Work
 
-1. Read **every** unresolved review comment on the PR, not just the summary:
+1. Read **every** unresolved comment on the PR, not just the summary, and the
+   issue thread too:
 
    ```bash
    gh pr view <pr> --comments
    gh api repos/{owner}/{repo}/pulls/<pr>/comments --paginate
+   gh issue view <issue> --comments
    ```
+
+   If you genuinely find no feedback anywhere, say so in a PR comment and stop
+   rather than guessing at changes nobody asked for.
 
 2. Handle each one. There are only three honest outcomes per comment:
    - **Fix it.** The usual case. Change the code.

@@ -91,7 +91,7 @@ line of code on our side.
 | `agent-implement.yml`      | `agent:ready` added                            | Branch, draft PR, implementation, verification, hand-off to review. |
 | `agent-review.yml`         | chained from implement, or PR ready for review | The impact and security review.                                     |
 | `claude-code-review.yml`   | PR ready for review, new commits on a ready PR | Line-level inline comments.                                         |
-| `pr-feedback.yml`          | a human requests changes                       | Puts the agent back on it, in `revise` mode.                        |
+| `pr-feedback.yml`          | PR put back to draft, or changes requested     | Puts the agent back on it, in `revise` mode.                        |
 | `pr-merged.yml`            | PR closed                                      | Closes the issue if merged, clears the labels either way.           |
 | `ci.yml`                   | push and pull request                          | `make check` plus a UI capture.                                     |
 | `automation-bootstrap.yml` | manual                                         | Creates the labels.                                                 |
@@ -194,7 +194,9 @@ Two more guards for the same reason:
   to start the workflow by hand — an issue can be opened by anyone, and that
   text is fed to an agent.
 - `pr-feedback.yml` ignores reviews from bots, so a review agent cannot restart
-  the implementation loop. Only a human requesting changes does that.
+  the implementation loop. It also ignores a PR going back to draft while the
+  issue is `agent:in-progress`, which is the pipeline drafting its own pull
+  request rather than a human asking for another pass.
 
 Every prompt also tells the agent that the text it is reading is data, not
 instructions, and to report anything that tries to redirect it.
@@ -202,8 +204,15 @@ instructions, and to report anything that tries to redirect it.
 ## Working with it
 
 **Normal loop.** Open an issue, read the plan, answer anything under "Decisions
-needed", add `agent:ready`. Come back to a PR. Review it: request changes to
-send it round again, merge when you are happy.
+needed", add `agent:ready`. Come back to a PR. Review it: leave your comments
+and convert it back to draft to send it round again, merge when you are happy.
+
+Converting to draft is the signal that works for you. `AUTOMATION_TOKEN` opens
+these pull requests, so if that token is yours, GitHub treats them as your own
+and will not let you request changes on them. A reviewer who is not the token's
+owner can still use a `changes requested` review; both start the same
+`revise` run. Either way, leave the feedback as comments first — the agent
+reads the PR and issue threads, not the draft state.
 
 **Re-run one issue**: *Agent — implement* → **Run workflow**, with the issue
 number, and `implement` or `revise`.
