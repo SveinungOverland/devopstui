@@ -629,6 +629,97 @@ func TestChildProgress(t *testing.T) {
 	}
 }
 
+func TestItemDiscussionToggle(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	h.keys("D")
+	if a.view != viewItem || a.item == nil || a.item.item.ID != 1013 {
+		t.Fatalf("D should drill into #1013, got view=%v item=%v", a.view, a.item)
+	}
+	if a.item.showComments {
+		t.Fatal("drill-down should start on the description")
+	}
+
+	h.keys("C")
+	if !a.item.showComments {
+		t.Fatal("C should switch the left pane to the discussion")
+	}
+	v := h.app.View()
+	if !strings.Contains(v, "Discussion") {
+		t.Errorf("view should show the Discussion pane, got:\n%s", v)
+	}
+	if !strings.Contains(v, "Publisher change is in review") {
+		t.Errorf("view should show the seeded comment, got:\n%s", v)
+	}
+
+	h.keys("C")
+	if a.item.showComments {
+		t.Fatal("C should toggle back to the description")
+	}
+	if strings.Contains(h.app.View(), "Publisher change is in review") {
+		t.Error("description pane should not show the discussion text")
+	}
+}
+
+func TestItemRefreshReloadsComments(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	h.keys("D")
+	real := append([]model.Comment(nil), a.comments[1013]...)
+	if len(real) == 0 {
+		t.Fatal("expected seeded comments for #1013")
+	}
+
+	// Simulate a stale cache: the fetch that populated it predates a comment
+	// that has since landed server-side.
+	a.comments[1013] = append(append([]model.Comment(nil), real...), model.Comment{ID: 999, Author: "Someone", Text: "late arrival"})
+
+	h.keys("r")
+	if got := a.comments[1013]; len(got) != len(real) {
+		t.Fatalf("r should have refetched the discussion, got %d comments, want %d", len(got), len(real))
+	}
+	if a.item.commentsLoading {
+		t.Fatal("refresh should have finished loading the discussion")
+	}
+}
+
+func TestBoardPreviewShowsDiscussion(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.keys("3") // board
+	h.app.board.jumpTo(1013)
+	h.run(h.app.loadBoardComments(false))
+	h.app.refreshDetail()
+	v := h.app.View()
+	if !strings.Contains(v, "Discussion") {
+		t.Errorf("board preview should show a Discussion section, got:\n%s", v)
+	}
+	if !strings.Contains(v, "Publisher change is in review") {
+		t.Errorf("board preview should show the seeded comment, got:\n%s", v)
+	}
+}
+
+func TestBoardRefreshReloadsComments(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("3") // board
+	a.board.jumpTo(1013)
+	h.run(a.loadBoardComments(false))
+	real := append([]model.Comment(nil), a.comments[1013]...)
+	if len(real) == 0 {
+		t.Fatal("expected seeded comments for #1013")
+	}
+
+	// Simulate a stale cache the way TestItemRefreshReloadsComments does.
+	a.comments[1013] = append(append([]model.Comment(nil), real...), model.Comment{ID: 999, Author: "Someone", Text: "late arrival"})
+
+	h.keys("r") // global refresh, not the item drill-down's
+	if got := a.comments[1013]; len(got) != len(real) {
+		t.Fatalf("global refresh should have refetched the board's discussion, got %d comments, want %d", len(got), len(real))
+	}
+}
+
 func TestBugsAsTasksLeaveTheBoard(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.ctx.Backlog.BugsBehavior = "asTasks"

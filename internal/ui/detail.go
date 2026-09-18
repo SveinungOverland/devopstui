@@ -12,7 +12,9 @@ import (
 
 // renderDetail draws the right-hand pane for one item. children are the
 // item's direct children, if known; cfg decides which of them are tasks.
-func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.WorkItem, width int, cfg model.BacklogConfig) string {
+// comments is only ever populated by the Board view (see refreshDetail) and
+// appended as a Discussion section after the description.
+func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.WorkItem, comments []model.Comment, width int, cfg model.BacklogConfig) string {
 	if it == nil {
 		return sMuted.Render("nothing selected")
 	}
@@ -85,6 +87,12 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 	if it.Description != "" {
 		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", min(width, 40))) + "\n")
 		b.WriteString(markdown.Render(it.Description, width))
+	}
+
+	if len(comments) > 0 {
+		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", min(width, 40))) + "\n")
+		b.WriteString(sMuted.Render(fmt.Sprintf("Discussion (%d)", len(comments))) + "\n\n")
+		b.WriteString(markdown.Render(formatComments(comments), width))
 	}
 	return b.String()
 }

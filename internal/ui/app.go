@@ -94,6 +94,13 @@ type App struct {
 	previewList  bool // detail pane beside list views
 	previewBoard bool // detail pane beside the board
 
+	// comments caches each item's discussion by id, fetched on demand (the
+	// drill-down's C toggle, and the Board's preview pane which has the
+	// vertical room to show it alongside the description). commentsLoading
+	// tracks in-flight fetches so a fast cursor doesn't refire them.
+	comments        map[int][]model.Comment
+	commentsLoading map[int]bool
+
 	popup     popup
 	cmd       cmdbar
 	cmdActive bool
@@ -130,6 +137,9 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		loading:   map[viewID]bool{},
 		cmd:       newCmdbar(),
 		view:      viewSprint,
+
+		comments:        map[int][]model.Comment{},
+		commentsLoading: map[int]bool{},
 
 		previewList:  true,
 		previewBoard: true,
@@ -629,7 +639,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.refreshDetail()
-		return a, cmd
+		// Items were just refetched (explicit refresh, the auto-refresh
+		// tick, or after a write); the Board's discussion preview should
+		// not be left showing a stale cache from before the reload.
+		return a, tea.Batch(cmd, a.loadBoardComments(true))
 
 	case dashLanesLoadedMsg:
 		if msg.req != a.dashLanesReq { // superseded by a newer fetch
@@ -686,6 +699,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.item.setChildren(msg.children, msg.states)
 		if len(msg.children) == 0 {
 			a.item.focusKan = false
+		}
+		return a, nil
+
+	case commentsLoadedMsg:
+		delete(a.commentsLoading, msg.id)
+		if msg.err == nil {
+			a.comments[msg.id] = msg.comments
+		}
+		if a.item != nil && a.item.item.ID == msg.id {
+			if msg.err != nil {
+				a.item.commentsLoading = false
+				return a, a.setFlash("discussion: "+msg.err.Error(), true)
+			}
+			a.item.setComments(msg.comments)
+		}
+		if a.view == viewBoard && a.board.currentID() == msg.id {
+			a.refreshDetail()
 		}
 		return a, nil
 
@@ -1220,7 +1250,7 @@ func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 		return a.onActionKey(msg)
 	}
 	a.refreshDetail()
-	return nil
+	return a.loadBoardComments(false)
 }
 
 func (a *App) onCmdKey(msg tea.KeyMsg) tea.Cmd {
@@ -1319,7 +1349,7 @@ func (a *App) switchView(v viewID) tea.Cmd {
 	if a.needsLoad(v) {
 		return a.loadView(v)
 	}
-	return nil
+	return a.loadBoardComments(false)
 }
 
 func (a *App) needsLoad(v viewID) bool {
@@ -1630,9 +1660,16 @@ func (a *App) refreshDetail() {
 	it := a.currentItem()
 	var parent *model.WorkItem
 	var children []*model.WorkItem
+	var comments []model.Comment
 	if it != nil {
 		parent = a.lookup(it.ParentID)
 		children = a.childItems(it.ID)
+		// Only the Board preview shows the discussion: it is the one preview
+		// pane tall enough (full terminal height) to fit it alongside the
+		// children and description without the rest becoming unreadable.
+		if a.view == viewBoard {
+			comments = a.comments[it.ID]
+		}
 	}
 	w := a.detailWidth()
 	if w == 0 {
@@ -1645,8 +1682,21 @@ func (a *App) refreshDetail() {
 	}
 	a.detail.Width = w
 	a.detail.Height = height
-	a.detail.SetContent(renderDetail(it, parent, children, w, a.ctx.Backlog))
+	a.detail.SetContent(renderDetail(it, parent, children, comments, w, a.ctx.Backlog))
 	a.detail.GotoTop()
+}
+
+// loadBoardComments fetches the discussion for the Board's currently
+// selected card, for the preview pane. A no-op off the Board view. force
+// bypasses the cache, for an explicit refresh.
+func (a *App) loadBoardComments(force bool) tea.Cmd {
+	if a.view != viewBoard {
+		return nil
+	}
+	if it := a.board.current(); it != nil {
+		return a.loadComments(it.ID, force)
+	}
+	return nil
 }
 
 func (a *App) openBrowser() tea.Cmd {
@@ -1699,7 +1749,7 @@ func (a *App) showItem(id int) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, 70, a.ctx.Backlog), "\n")}}
+		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, nil, 70, a.ctx.Backlog), "\n")}}
 	}
 }
 
@@ -1735,8 +1785,11 @@ func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 	v.parent = a.lookup(it.ParentID)
 	v.focusKan = len(a.childItems(it.ID)) > 0
 	v.setChildren(a.childItems(it.ID), nil)
+	if c, ok := a.comments[it.ID]; ok {
+		v.setComments(c)
+	}
 	a.item = v
-	return a.loadItemChildren(it)
+	return tea.Batch(a.loadItemChildren(it), a.loadComments(it.ID, false))
 }
 
 func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
@@ -1763,6 +1816,35 @@ func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
 			states, _ = a.client.States(ctx, project, typ)
 		}
 		return itemLoadedMsg{id: id, children: children, states: states}
+	}
+}
+
+type commentsLoadedMsg struct {
+	id       int
+	comments []model.Comment
+	err      error
+}
+
+// loadComments fetches an item's discussion, caching by id so a repeat
+// visit (or a fast cursor across Board cards) doesn't refetch or pile up
+// duplicate in-flight requests. force bypasses the cache, for an explicit
+// refresh.
+func (a *App) loadComments(id int, force bool) tea.Cmd {
+	if !force {
+		if _, ok := a.comments[id]; ok {
+			return nil
+		}
+	}
+	if a.commentsLoading[id] {
+		return nil
+	}
+	a.commentsLoading[id] = true
+	project := a.ctx.Project
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		comments, err := a.client.Comments(ctx, project, id)
+		return commentsLoadedMsg{id: id, comments: comments, err: err}
 	}
 }
 
@@ -1851,9 +1933,13 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 			v.focusKan = false // the kanban is gone; focus follows
 		}
 		return nil, true
+	case key.Matches(msg, keys.Comments):
+		v.showComments = !v.showComments
+		return nil, true
 	case key.Matches(msg, keys.Refresh):
 		v.loading = true
-		return a.loadItemChildren(v.item), true
+		v.commentsLoading = true
+		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item.ID, true)), true
 	case key.Matches(msg, keys.Details), msg.String() == "enter":
 		if c := v.currentChild(); v.focusKan && c != nil {
 			return a.openItem(c), true

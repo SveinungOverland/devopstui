@@ -27,13 +27,25 @@ type itemView struct {
 	descOnly bool // z: hide the kanban and use the full width
 	loading  bool
 
+	// comments backs the C-toggled discussion pane, shown in the same slot
+	// as the description (showComments picks which).
+	comments        []model.Comment
+	commentsLoading bool
+	showComments    bool
+
 	cfg      model.BacklogConfig
 	lastDesc string
 	lastW    int
 }
 
 func newItemView(it *model.WorkItem, cfg model.BacklogConfig) *itemView {
-	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true}
+	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true, commentsLoading: true}
+}
+
+// setComments swaps in a loaded discussion.
+func (v *itemView) setComments(comments []model.Comment) {
+	v.comments = comments
+	v.commentsLoading = false
 }
 
 // apply swaps in an updated copy of the item or one of its children.
@@ -179,14 +191,22 @@ func (v *itemView) view(w, h int, spin string) string {
 	}
 
 	if v.descOnly {
-		return head + "\n" + v.renderDesc(descW, paneH)
+		return head + "\n" + v.renderLeft(descW, paneH)
 	}
 	if stacked {
 		dh := max(paneH*3/5, 5)
-		return head + "\n" + v.renderDesc(w, dh) + "\n" + v.renderKanban(w, paneH-dh, spin)
+		return head + "\n" + v.renderLeft(w, dh) + "\n" + v.renderKanban(w, paneH-dh, spin)
 	}
 	return head + "\n" + lipgloss.JoinHorizontal(lipgloss.Top,
-		v.renderDesc(descW, paneH), v.renderKanban(kanW, paneH, spin))
+		v.renderLeft(descW, paneH), v.renderKanban(kanW, paneH, spin))
+}
+
+// renderLeft is the left-hand pane: the description, or (C) the discussion.
+func (v *itemView) renderLeft(w, h int) string {
+	if v.showComments {
+		return v.renderDiscussion(w, h)
+	}
+	return v.renderDesc(w, h)
 }
 
 func (v *itemView) renderHead(w int) string {
@@ -261,6 +281,48 @@ func (v *itemView) renderDesc(w, h int) string {
 		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
 	}
 	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
+}
+
+func (v *itemView) renderDiscussion(w, h int) string {
+	style := sPanel
+	if !v.focusKan {
+		style = sPanelFocus
+	}
+	inner := max(w-4, 20)
+	switch {
+	case v.commentsLoading:
+		v.desc.SetContent(sMuted.Render("loading discussion…"))
+		v.lastDesc, v.lastW = "", inner
+	case len(v.comments) == 0:
+		v.desc.SetContent(sMuted.Render("no comments yet"))
+		v.lastDesc, v.lastW = "", inner
+	default:
+		if body := formatComments(v.comments); body != v.lastDesc || inner != v.lastW {
+			v.lastDesc, v.lastW = body, inner
+			v.desc.SetContent(markdown.Render(body, inner))
+			v.desc.GotoTop()
+		}
+	}
+	v.desc.Width = inner
+	v.desc.Height = max(h-3, 1)
+	title := sMuted.Render(fmt.Sprintf("Discussion (%d)", len(v.comments)))
+	if v.desc.TotalLineCount() > v.desc.Height {
+		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
+	}
+	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
+}
+
+// formatComments renders a discussion as one Markdown document, oldest
+// first, separated by rules.
+func formatComments(comments []model.Comment) string {
+	var b strings.Builder
+	for i, c := range comments {
+		if i > 0 {
+			b.WriteString("\n\n---\n\n")
+		}
+		fmt.Fprintf(&b, "**%s** · %s\n\n%s", c.Author, ago(c.CreatedDate), c.Text)
+	}
+	return b.String()
 }
 
 func (v *itemView) renderKanban(w, h int, spin string) string {

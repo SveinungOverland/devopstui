@@ -50,6 +50,8 @@ type Client interface {
 	ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error)
 
 	Get(ctx context.Context, id int) (*model.WorkItem, error)
+	// Comments returns a work item's discussion, oldest first.
+	Comments(ctx context.Context, project string, id int) ([]model.Comment, error)
 	// Update applies field patches with an optimistic concurrency check on rev.
 	Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error)
 	// SetParent re-parents id under parentID (0 removes the parent).

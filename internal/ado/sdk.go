@@ -531,6 +531,35 @@ func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	return s.convert(wi, ""), nil
 }
 
+func (s *SDK) Comments(ctx context.Context, project string, id int) ([]model.Comment, error) {
+	top := 200
+	order := workitemtracking.CommentSortOrderValues.Asc
+	res, err := s.wit.GetComments(ctx, workitemtracking.GetCommentsArgs{Project: &project, WorkItemId: &id, Order: &order, Top: &top})
+	if err != nil {
+		return nil, err
+	}
+	var out []model.Comment
+	if res.Comments != nil {
+		for _, c := range *res.Comments {
+			out = append(out, convertComment(c))
+		}
+	}
+	return out, nil
+}
+
+// convertComment maps a raw SDK comment to model.Comment, running its HTML
+// body through the same HTML→Markdown conversion Description gets on read.
+func convertComment(c workitemtracking.Comment) model.Comment {
+	m := model.Comment{ID: deref(c.Id), Text: markdown.FromHTML(deref(c.Text))}
+	if c.CreatedBy != nil {
+		m.Author = deref(c.CreatedBy.DisplayName)
+	}
+	if c.CreatedDate != nil {
+		m.CreatedDate = c.CreatedDate.Time
+	}
+	return m
+}
+
 func (s *SDK) Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error) {
 	doc := []webapi.JsonPatchOperation{{Op: &webapi.OperationValues.Test, Path: ptr("/rev"), Value: rev}}
 	for _, p := range patches {
