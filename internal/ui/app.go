@@ -640,9 +640,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.refreshDetail()
 		// Items were just refetched (explicit refresh, the auto-refresh
-		// tick, or after a write); the Board's discussion preview should
-		// not be left showing a stale cache from before the reload.
-		return a, tea.Batch(cmd, a.loadBoardComments(true))
+		// tick, or after a write); the discussion preview should not be
+		// left showing a stale cache from before the reload.
+		return a, tea.Batch(cmd, a.loadPreviewComments(true))
 
 	case dashLanesLoadedMsg:
 		if msg.req != a.dashLanesReq { // superseded by a newer fetch
@@ -714,7 +714,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.item.setComments(msg.comments)
 		}
-		if a.view == viewBoard && a.board.currentID() == msg.id {
+		if it := a.currentItem(); it != nil && it.ID == msg.id &&
+			(a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog) {
 			a.refreshDetail()
 		}
 		return a, nil
@@ -1212,7 +1213,7 @@ func (a *App) onListKey(msg tea.KeyMsg, l *list) tea.Cmd {
 		return a.onActionKey(msg)
 	}
 	a.refreshDetail()
-	return nil
+	return a.loadPreviewComments(false)
 }
 
 func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
@@ -1250,7 +1251,7 @@ func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 		return a.onActionKey(msg)
 	}
 	a.refreshDetail()
-	return a.loadBoardComments(false)
+	return a.loadPreviewComments(false)
 }
 
 func (a *App) onCmdKey(msg tea.KeyMsg) tea.Cmd {
@@ -1349,7 +1350,7 @@ func (a *App) switchView(v viewID) tea.Cmd {
 	if a.needsLoad(v) {
 		return a.loadView(v)
 	}
-	return a.loadBoardComments(false)
+	return a.loadPreviewComments(false)
 }
 
 func (a *App) needsLoad(v viewID) bool {
@@ -1664,10 +1665,11 @@ func (a *App) refreshDetail() {
 	if it != nil {
 		parent = a.lookup(it.ParentID)
 		children = a.childItems(it.ID)
-		// Only the Board preview shows the discussion: it is the one preview
-		// pane tall enough (full terminal height) to fit it alongside the
-		// children and description without the rest becoming unreadable.
-		if a.view == viewBoard {
+		// Only the Board, Sprint and Backlog previews show the discussion:
+		// they are the panes tall enough (full terminal height) to fit it
+		// alongside the children and description without the rest becoming
+		// unreadable.
+		if a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog {
 			comments = a.comments[it.ID]
 		}
 	}
@@ -1686,14 +1688,14 @@ func (a *App) refreshDetail() {
 	a.detail.GotoTop()
 }
 
-// loadBoardComments fetches the discussion for the Board's currently
-// selected card, for the preview pane. A no-op off the Board view. force
-// bypasses the cache, for an explicit refresh.
-func (a *App) loadBoardComments(force bool) tea.Cmd {
-	if a.view != viewBoard {
+// loadPreviewComments fetches the discussion for the currently selected
+// item on the Board, Sprint or Backlog, for the preview pane. A no-op on
+// other views. force bypasses the cache, for an explicit refresh.
+func (a *App) loadPreviewComments(force bool) tea.Cmd {
+	if a.view != viewBoard && a.view != viewSprint && a.view != viewBacklog {
 		return nil
 	}
-	if it := a.board.current(); it != nil {
+	if it := a.currentItem(); it != nil {
 		return a.loadComments(it.ID, force)
 	}
 	return nil
