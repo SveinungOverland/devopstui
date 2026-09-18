@@ -662,11 +662,34 @@ func TestItemDiscussionToggle(t *testing.T) {
 	}
 }
 
+func TestItemRefreshReloadsComments(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	h.keys("D")
+	real := append([]model.Comment(nil), a.comments[1013]...)
+	if len(real) == 0 {
+		t.Fatal("expected seeded comments for #1013")
+	}
+
+	// Simulate a stale cache: the fetch that populated it predates a comment
+	// that has since landed server-side.
+	a.comments[1013] = append(append([]model.Comment(nil), real...), model.Comment{ID: 999, Author: "Someone", Text: "late arrival"})
+
+	h.keys("r")
+	if got := a.comments[1013]; len(got) != len(real) {
+		t.Fatalf("r should have refetched the discussion, got %d comments, want %d", len(got), len(real))
+	}
+	if a.item.commentsLoading {
+		t.Fatal("refresh should have finished loading the discussion")
+	}
+}
+
 func TestBoardPreviewShowsDiscussion(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.keys("3") // board
 	h.app.board.jumpTo(1013)
-	h.run(h.app.loadBoardComments())
+	h.run(h.app.loadBoardComments(false))
 	h.app.refreshDetail()
 	v := h.app.View()
 	if !strings.Contains(v, "Discussion") {
@@ -674,6 +697,26 @@ func TestBoardPreviewShowsDiscussion(t *testing.T) {
 	}
 	if !strings.Contains(v, "Publisher change is in review") {
 		t.Errorf("board preview should show the seeded comment, got:\n%s", v)
+	}
+}
+
+func TestBoardRefreshReloadsComments(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("3") // board
+	a.board.jumpTo(1013)
+	h.run(a.loadBoardComments(false))
+	real := append([]model.Comment(nil), a.comments[1013]...)
+	if len(real) == 0 {
+		t.Fatal("expected seeded comments for #1013")
+	}
+
+	// Simulate a stale cache the way TestItemRefreshReloadsComments does.
+	a.comments[1013] = append(append([]model.Comment(nil), real...), model.Comment{ID: 999, Author: "Someone", Text: "late arrival"})
+
+	h.keys("r") // global refresh, not the item drill-down's
+	if got := a.comments[1013]; len(got) != len(real) {
+		t.Fatalf("global refresh should have refetched the board's discussion, got %d comments, want %d", len(got), len(real))
 	}
 }
 

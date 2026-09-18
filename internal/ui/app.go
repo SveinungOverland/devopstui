@@ -629,7 +629,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.refreshDetail()
-		return a, tea.Batch(cmd, a.loadBoardComments())
+		// Items were just refetched (explicit refresh, the auto-refresh
+		// tick, or after a write); the Board's discussion preview should
+		// not be left showing a stale cache from before the reload.
+		return a, tea.Batch(cmd, a.loadBoardComments(true))
 
 	case dashLanesLoadedMsg:
 		if msg.req != a.dashLanesReq { // superseded by a newer fetch
@@ -1216,7 +1219,7 @@ func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 		return a.onActionKey(msg)
 	}
 	a.refreshDetail()
-	return a.loadBoardComments()
+	return a.loadBoardComments(false)
 }
 
 func (a *App) onCmdKey(msg tea.KeyMsg) tea.Cmd {
@@ -1315,7 +1318,7 @@ func (a *App) switchView(v viewID) tea.Cmd {
 	if a.needsLoad(v) {
 		return a.loadView(v)
 	}
-	return a.loadBoardComments()
+	return a.loadBoardComments(false)
 }
 
 func (a *App) needsLoad(v viewID) bool {
@@ -1653,13 +1656,14 @@ func (a *App) refreshDetail() {
 }
 
 // loadBoardComments fetches the discussion for the Board's currently
-// selected card, for the preview pane. A no-op off the Board view.
-func (a *App) loadBoardComments() tea.Cmd {
+// selected card, for the preview pane. A no-op off the Board view. force
+// bypasses the cache, for an explicit refresh.
+func (a *App) loadBoardComments(force bool) tea.Cmd {
 	if a.view != viewBoard {
 		return nil
 	}
 	if it := a.board.current(); it != nil {
-		return a.loadComments(it.ID)
+		return a.loadComments(it.ID, force)
 	}
 	return nil
 }
@@ -1754,7 +1758,7 @@ func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 		v.setComments(c)
 	}
 	a.item = v
-	return tea.Batch(a.loadItemChildren(it), a.loadComments(it.ID))
+	return tea.Batch(a.loadItemChildren(it), a.loadComments(it.ID, false))
 }
 
 func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
@@ -1792,10 +1796,13 @@ type commentsLoadedMsg struct {
 
 // loadComments fetches an item's discussion, caching by id so a repeat
 // visit (or a fast cursor across Board cards) doesn't refetch or pile up
-// duplicate in-flight requests.
-func (a *App) loadComments(id int) tea.Cmd {
-	if _, ok := a.comments[id]; ok {
-		return nil
+// duplicate in-flight requests. force bypasses the cache, for an explicit
+// refresh.
+func (a *App) loadComments(id int, force bool) tea.Cmd {
+	if !force {
+		if _, ok := a.comments[id]; ok {
+			return nil
+		}
 	}
 	if a.commentsLoading[id] {
 		return nil
@@ -1900,7 +1907,8 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case key.Matches(msg, keys.Refresh):
 		v.loading = true
-		return a.loadItemChildren(v.item), true
+		v.commentsLoading = true
+		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item.ID, true)), true
 	case key.Matches(msg, keys.Details), msg.String() == "enter":
 		if c := v.currentChild(); v.focusKan && c != nil {
 			return a.openItem(c), true
