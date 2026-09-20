@@ -22,6 +22,7 @@ type keymap struct {
 	Select, Visual, SelectAll, ClearSel key.Binding
 	// actions
 	Edit, Title, Desc, State, Assign, Iteration, Effort, Priority, New key.Binding
+	NewBug                                                             key.Binding
 	Move, MoveNext, MoveBacklog, Parent                                key.Binding
 	Open, Yank, Flat, Closed                                           key.Binding
 	// board
@@ -81,6 +82,7 @@ var keys = keymap{
 	Effort:    b("effort", "E"),
 	Priority:  b("priority", "P"),
 	New:       b("new child", "n"),
+	NewBug:    b("new bug", "N"),
 
 	Move:        b("move to iteration", "m"),
 	MoveNext:    b("move to next sprint", "M"),
@@ -103,12 +105,12 @@ var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Details, keys.Comments, keys.Comment},
 	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
-	{keys.New, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
+	{keys.New, keys.NewBug, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
 	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Help, keys.Quit},
 }
 
-var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.PreviewUp, keys.PreviewDown, keys.Help}
+var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.NewBug, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.PreviewUp, keys.PreviewDown, keys.Help}
 var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 // footerDashKanban and footerDashLanes are the two focus modes of the
@@ -118,5 +120,5 @@ var footerDashLanes = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, k
 
 // footerItemDesc and footerItemKanban are the two focus modes of the
 // drill-down view.
-var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.Comments, keys.Comment, keys.New, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Back, keys.Help}
-var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.New, keys.Details, keys.Edit, keys.State, keys.Focus, keys.Comments, keys.Comment, keys.Back}
+var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.Comments, keys.Comment, keys.New, keys.NewBug, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Back, keys.Help}
+var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.New, keys.NewBug, keys.Details, keys.Edit, keys.State, keys.Focus, keys.Comments, keys.Comment, keys.Back}

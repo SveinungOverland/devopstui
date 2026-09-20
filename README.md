@@ -142,7 +142,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
 | `tab`             | focus detail pane     | `[` `]` | prev / next sprint  | `a`     | assign          |      |                     |
 | `z`               | toggle preview pane   | `T`     | team filter         | `n`     | new child item  |      |                     |
-| `ctrl+u` `ctrl+d` | scroll preview pane   |         |                     |         |                 |      |                     |
+| `ctrl+u` `ctrl+d` | scroll preview pane   |         |                     | `N`     | new bug         |      |                     |
 | `D`               | item details view     |         |                     |         |                 |      |                     |
 | `C`               | discussion            |         |                     |         |                 |      |                     |
 | `c`               | add comment           |         |                     |         |                 |      |                     |
@@ -253,6 +253,12 @@ choice is saved as `filter_team` in the config.
 - **A new task inherits the assignee of the PBI above it**, since that is nearly always who
   will do it. The prompt shows who it will go to, and `a` changes it afterwards. Nothing is
   inherited above the task level: a Feature does not pick up its Epic's assignee.
+- **`N` creates a bug** at whichever level the team's bug behaviour puts it: a requirement-level
+  Bug under a Feature when bugs are tracked as requirements, a task-level Bug under a PBI (or a
+  sibling of a highlighted task) when they are tracked as tasks. It follows the same
+  parent-resolution rules as `n`. Pressing it where the highlighted level doesn't match the
+  team's bug behaviour, or where bugs are switched off entirely, is a no-op with a flash
+  explaining why.
 
 ## Dashboard
 
