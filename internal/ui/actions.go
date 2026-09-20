@@ -87,6 +87,18 @@ func (a *App) nextIteration() (model.Iteration, bool) {
 // requirement. On a task, the sibling's parent is used. With nothing
 // highlighted a requirement is created in the current sprint.
 func (a *App) createChild() tea.Cmd {
+	return a.newItem(false)
+}
+
+// createBug prompts for a title and creates a Bug wherever the team's
+// BugsBehavior says bugs live: at the requirement level, the task level, or
+// nowhere at all. It otherwise follows the same parent-resolution rules as
+// createChild.
+func (a *App) createBug() tea.Cmd {
+	return a.newItem(true)
+}
+
+func (a *App) newItem(forceBug bool) tea.Cmd {
 	cfg := a.ctx.Backlog
 	parent := a.currentItem()
 	if parent != nil && cfg.TaskLevel(parent) {
@@ -95,6 +107,15 @@ func (a *App) createChild() tea.Cmd {
 	typ := cfg.ChildType(parent)
 	if typ == "" {
 		return a.setFlash(fmt.Sprintf("%s cannot have children", parent.Type), true)
+	}
+	if forceBug {
+		if !cfg.BugChildOf(parent) {
+			if cfg.BugsBehavior == "off" {
+				return a.setFlash("bugs are off for this process", true)
+			}
+			return a.setFlash("can't add a bug here", true)
+		}
+		typ = "Bug"
 	}
 	area := a.ctx.Project
 	if fa := model.DefaultArea(a.ctx.FilterAreas); fa != "" {

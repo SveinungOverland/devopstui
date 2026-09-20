@@ -830,6 +830,78 @@ func TestCreateChild(t *testing.T) {
 	h.keys("esc")
 }
 
+func TestCreateBug(t *testing.T) {
+	h := newHarness(t, 160, 45)
+
+	// Default demo config is asRequirements: N on a Feature creates a
+	// requirement-level Bug under it.
+	h.app.sprint.jumpTo(1012)
+	h.keys("N")
+	p, ok := h.app.popup.(*prompt)
+	if !ok {
+		t.Fatalf("expected title prompt, got %T", h.app.popup)
+	}
+	if !strings.HasPrefix(p.title, "New Bug under #1012") {
+		t.Errorf("prompt title = %q", p.title)
+	}
+	h.keys("F", "l", "a", "k", "y", " ", "t", "e", "s", "t", "enter")
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].Parent != 1012 {
+		t.Fatalf("create not recorded: %+v", h.fake.Updates)
+	}
+	if it := h.app.lookup(h.fake.Updates[0].ID); it == nil || it.Type != "Bug" {
+		t.Fatalf("created item = %+v, want a Bug", it)
+	}
+
+	// asRequirements: N is rejected on a Requirement, since a bug there
+	// would stand in for a Task, not the requirement level.
+	h.app.sprint.jumpTo(1013)
+	h.keys("N")
+	if h.app.popup != nil {
+		t.Fatalf("expected no prompt, got %T", h.app.popup)
+	}
+	if !h.app.flashErr || !strings.Contains(h.app.flash, "can't add a bug here") {
+		t.Errorf("flash = %q, flashErr = %v", h.app.flash, h.app.flashErr)
+	}
+
+	// asTasks: N on the same Requirement now creates a task-level Bug.
+	h.app.ctx.Backlog.BugsBehavior = "asTasks"
+	h.keys("N")
+	p, ok = h.app.popup.(*prompt)
+	if !ok {
+		t.Fatalf("expected title prompt, got %T", h.app.popup)
+	}
+	if !strings.HasPrefix(p.title, "New Bug under #1013") {
+		t.Errorf("prompt title = %q", p.title)
+	}
+	h.keys("esc")
+
+	// asTasks: N on a Task creates a sibling Bug under the same Requirement.
+	h.app.sprint.jumpTo(1015) // Task under 1013
+	h.keys("N")
+	if p, ok := h.app.popup.(*prompt); !ok || !strings.Contains(p.title, "under #1013") {
+		t.Errorf("sibling prompt = %+v", h.app.popup)
+	}
+	h.keys("esc")
+
+	// asTasks: N on the Feature is now rejected, since a bug there would
+	// stand in for a requirement, not the task level.
+	h.app.sprint.jumpTo(1012)
+	h.keys("N")
+	if h.app.popup != nil {
+		t.Fatalf("expected no prompt, got %T", h.app.popup)
+	}
+	if !h.app.flashErr || !strings.Contains(h.app.flash, "can't add a bug here") {
+		t.Errorf("flash = %q, flashErr = %v", h.app.flash, h.app.flashErr)
+	}
+
+	// off: N is rejected everywhere with a dedicated flash.
+	h.app.ctx.Backlog.BugsBehavior = "off"
+	h.keys("N")
+	if !h.app.flashErr || !strings.Contains(h.app.flash, "bugs are off for this process") {
+		t.Errorf("flash = %q, flashErr = %v", h.app.flash, h.app.flashErr)
+	}
+}
+
 func TestNewTaskInheritsParentAssignee(t *testing.T) {
 	h := newHarness(t, 160, 45)
 
