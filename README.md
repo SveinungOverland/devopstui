@@ -221,10 +221,11 @@ the kanban is complete even in views that do not load tasks, such as the backlog
 
 `C` toggles the left pane to the item's Azure DevOps comments (oldest first) and back. `c` opens
 the same Markdown composer used for `d` — the built-in editor, or `$EDITOR` when configured — to
-post a new comment, whether or not the discussion is currently showing; it switches the pane to
-the discussion once the comment lands. On the Board, Sprint and Backlog views, where the preview
-pane already has the full terminal height to work with, the discussion shows underneath the
-description instead, read-only, with no toggle needed.
+post a new comment on whatever has focus (the composer title names the target), whether or not
+the discussion is currently showing; it switches the pane to the discussion once the comment
+lands. On the Board, Sprint and Backlog views, where the preview pane already has the full
+terminal height to work with, the discussion shows underneath the description instead, read-only,
+with no toggle needed.
 
 ## Team filter
 
