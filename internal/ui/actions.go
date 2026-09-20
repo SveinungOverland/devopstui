@@ -171,6 +171,26 @@ func (a *App) update(it *model.WorkItem, patches ...model.Patch) tea.Cmd {
 	}
 }
 
+// ------------------------------------------------------------ comments
+
+// addComment opens the Markdown composer for a new comment on it.
+func (a *App) addComment(it *model.WorkItem) tea.Cmd {
+	return a.editComment(it, func(text string) tea.Cmd {
+		return a.postComment(it.ID, text)
+	})
+}
+
+func (a *App) postComment(id int, text string) tea.Cmd {
+	a.busy = fmt.Sprintf("commenting on #%d", id)
+	project := a.ctx.Project
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		c, err := a.client.AddComment(ctx, project, id, text)
+		return commentAddedMsg{id: id, comment: c, err: err}
+	}
+}
+
 // ------------------------------------------------------------ bulk
 
 type bulkResult struct {

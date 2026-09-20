@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -682,6 +683,132 @@ func TestItemRefreshReloadsComments(t *testing.T) {
 	}
 	if a.item.commentsLoading {
 		t.Fatal("refresh should have finished loading the discussion")
+	}
+}
+
+// TestPostCommentSurvivesRacingFetch drives the exact race the review found:
+// a discussion fetch dispatched before a post is still in flight when the
+// post lands, then resolves with a snapshot that predates the new comment.
+// Applying it would silently drop the posted comment from the cache and the
+// discussion pane, even though the flash said the post succeeded.
+func TestPostCommentSurvivesRacingFetch(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	h.keys("D")
+	staleSnapshot := append([]model.Comment(nil), a.comments[1013]...)
+	if len(staleSnapshot) == 0 {
+		t.Fatal("expected seeded comments for #1013")
+	}
+
+	// The fetch is dispatched (capturing gen 0)…
+	fetch := commentsLoadedMsg{id: 1013, comments: staleSnapshot, since: a.commentsGen[1013]}
+	// …then a comment is posted and lands first, bumping the generation.
+	h.send(commentAddedMsg{id: 1013, comment: model.Comment{ID: 999, Author: "Someone", Text: "just posted"}})
+	// The stale fetch result arrives last.
+	h.send(fetch)
+	if !a.item.showComments {
+		t.Fatal("posting a comment should switch the left pane to the discussion")
+	}
+
+	got := a.comments[1013]
+	if len(got) != len(staleSnapshot)+1 {
+		t.Fatalf("comments = %d, want %d (the racing fetch should not have clobbered the post)", len(got), len(staleSnapshot)+1)
+	}
+	if got[len(got)-1].Text != "just posted" {
+		t.Fatalf("posted comment text = %q", got[len(got)-1].Text)
+	}
+	if !strings.Contains(h.app.View(), "just posted") {
+		t.Error("discussion pane should still show the posted comment after the stale fetch lands")
+	}
+}
+
+func TestAddComment(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	// tab: unfocus the kanban, so c targets #1013 itself rather than
+	// whichever child the kanban starts focused on.
+	h.keys("D", "tab", "C", "c")
+	ed, ok := a.popup.(*mdEditor)
+	if !ok {
+		t.Fatalf("expected the comment composer, got %T", a.popup)
+	}
+	if ed.noun != "comment" {
+		t.Fatalf("noun = %q, want %q", ed.noun, "comment")
+	}
+	before := len(a.comments[1013])
+	h.keys("i", "L", "o", "o", "k", "s", " ", "g", "o", "o", "d", "esc", "ctrl+s")
+	if a.popup != nil {
+		t.Fatalf("ctrl+s should close the composer, got %T", a.popup)
+	}
+	got := a.comments[1013]
+	if len(got) != before+1 {
+		t.Fatalf("comments = %d, want %d", len(got), before+1)
+	}
+	if got[len(got)-1].Text != "Looks good" {
+		t.Fatalf("posted comment text = %q", got[len(got)-1].Text)
+	}
+	if !a.item.showComments {
+		t.Fatal("posting a comment should switch the left pane to the discussion")
+	}
+	if a.flash != "commented on #1013" || a.flashErr {
+		t.Fatalf("flash = %q err=%v", a.flash, a.flashErr)
+	}
+}
+
+// TestAddCommentTargetsFocusedChild locks in that c follows the same
+// target-resolution rule as s/a/d (see v.current()): the highlighted child
+// when the kanban has focus, not always the drilled-into item.
+func TestAddCommentTargetsFocusedChild(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // has children #1015-1017, seeded via ado.NewFake
+	h.keys("D")
+	if !a.item.focusKan {
+		t.Fatal("drill-down should start with the kanban focused when the item has children")
+	}
+	child := a.item.currentChild()
+	if child == nil {
+		t.Fatal("expected a highlighted child")
+	}
+	parentBefore := len(a.comments[1013])
+
+	h.keys("c", "i", "y", "e", "p", "esc", "ctrl+s")
+
+	if got := a.comments[child.ID]; len(got) != 1 || got[0].Text != "yep" {
+		t.Fatalf("comment should have landed on the focused child #%d, got %+v", child.ID, got)
+	}
+	if len(a.comments[1013]) != parentBefore {
+		t.Fatalf("parent #1013 should not have received the comment, got %+v", a.comments[1013])
+	}
+	if a.flash != fmt.Sprintf("commented on #%d", child.ID) || a.flashErr {
+		t.Fatalf("flash = %q err=%v", a.flash, a.flashErr)
+	}
+}
+
+func TestAddCommentOnEmptyDiscussion(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1004) // no seeded comments
+	h.keys("D")
+	if len(a.comments[1004]) != 0 {
+		t.Fatalf("expected no seeded comments for #1004, got %+v", a.comments[1004])
+	}
+	if a.item.showComments {
+		t.Fatal("drill-down should start on the description")
+	}
+	h.keys("c")
+	if _, ok := a.popup.(*mdEditor); !ok {
+		t.Fatalf("expected the comment composer, got %T", a.popup)
+	}
+	h.keys("i", "F", "i", "r", "s", "t", "!", "esc", "ctrl+s")
+	got := a.comments[1004]
+	if len(got) != 1 || got[0].Text != "First!" {
+		t.Fatalf("comments = %+v", got)
+	}
+	if !a.item.showComments {
+		t.Fatal("posting the first comment should switch the left pane to the discussion")
 	}
 }
 

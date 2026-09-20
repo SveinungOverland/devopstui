@@ -100,6 +100,11 @@ type App struct {
 	// tracks in-flight fetches so a fast cursor doesn't refire them.
 	comments        map[int][]model.Comment
 	commentsLoading map[int]bool
+	// commentsGen is bumped every time a comment is posted for an id, so a
+	// discussion fetch dispatched before the post (and still in flight when
+	// it lands) can tell its snapshot predates the post and skip clobbering
+	// the cache with it.
+	commentsGen map[int]int
 
 	popup     popup
 	cmd       cmdbar
@@ -140,6 +145,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 
 		comments:        map[int][]model.Comment{},
 		commentsLoading: map[int]bool{},
+		commentsGen:     map[int]int{},
 
 		previewList:  true,
 		previewBoard: true,
@@ -338,6 +344,12 @@ type itemsLoadedMsg struct {
 type itemUpdatedMsg struct {
 	item *model.WorkItem
 	err  error
+}
+
+type commentAddedMsg struct {
+	id      int
+	comment model.Comment
+	err     error
 }
 
 // dashLanesLoadedMsg carries the bulk ChildrenOf fetch for the Dashboard's
@@ -664,6 +676,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.applyUpdate(msg.item)
 		return a, a.setFlash(fmt.Sprintf("saved #%d", msg.item.ID), false)
 
+	case commentAddedMsg:
+		a.busy = ""
+		a.reportSave(msg.err)
+		if msg.err != nil {
+			return a, a.setFlash(msg.err.Error(), true)
+		}
+		a.comments[msg.id] = append(a.comments[msg.id], msg.comment)
+		a.commentsGen[msg.id]++
+		if a.item != nil && a.item.item.ID == msg.id {
+			a.item.setComments(a.comments[msg.id])
+			a.item.showComments = true
+		}
+		return a, a.setFlash(fmt.Sprintf("commented on #%d", msg.id), false)
+
 	case createdMsg:
 		a.busy = ""
 		if msg.err != nil {
@@ -704,7 +730,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commentsLoadedMsg:
 		delete(a.commentsLoading, msg.id)
-		if msg.err == nil {
+		// A comment posted after this fetch started means the fetch's
+		// snapshot predates it; applying it now would silently drop the
+		// posted comment from the cache and the discussion pane.
+		stale := msg.since != a.commentsGen[msg.id]
+		if msg.err == nil && !stale {
 			a.comments[msg.id] = msg.comments
 		}
 		if a.item != nil && a.item.item.ID == msg.id {
@@ -712,7 +742,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.item.commentsLoading = false
 				return a, a.setFlash("discussion: "+msg.err.Error(), true)
 			}
-			a.item.setComments(msg.comments)
+			if !stale {
+				a.item.setComments(msg.comments)
+			}
 		}
 		if it := a.currentItem(); it != nil && it.ID == msg.id &&
 			(a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog) {
@@ -737,7 +769,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.setFlash("editor: "+msg.err.Error(), true)
 		}
 		if !msg.changed {
-			return a, a.setFlash("description unchanged", false)
+			return a, a.setFlash(msg.noun+" unchanged", false)
 		}
 		return a, msg.apply(msg.text)
 
@@ -1827,6 +1859,7 @@ func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
 type commentsLoadedMsg struct {
 	id       int
 	comments []model.Comment
+	since    int // a.commentsGen[id] when the fetch was dispatched
 	err      error
 }
 
@@ -1844,12 +1877,12 @@ func (a *App) loadComments(id int, force bool) tea.Cmd {
 		return nil
 	}
 	a.commentsLoading[id] = true
-	project := a.ctx.Project
+	project, since := a.ctx.Project, a.commentsGen[id]
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		comments, err := a.client.Comments(ctx, project, id)
-		return commentsLoadedMsg{id: id, comments: comments, err: err}
+		return commentsLoadedMsg{id: id, comments: comments, since: since, err: err}
 	}
 }
 
@@ -1941,6 +1974,8 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, keys.Comments):
 		v.showComments = !v.showComments
 		return nil, true
+	case key.Matches(msg, keys.Comment):
+		return a.addComment(v.current()), true
 	case key.Matches(msg, keys.Refresh):
 		v.loading = true
 		v.commentsLoading = true

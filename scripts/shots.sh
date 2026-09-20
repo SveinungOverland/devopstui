@@ -41,7 +41,9 @@ shot 05-details "j,D"
 shot 06-state-popup "j,s"
 shot 07-filter "/,type:trace,Enter"
 shot 08-description "j,j,d"
-shot 09-help "?"
+shot 09-discussion "j,D,C"
+shot 10-comment-composer "j,D,C,c,i,type:Looks good to me,esc,ctrl+s"
+shot 11-help "?"
 
 if [ "$failed" = 1 ]; then
 	printf '%s\n' "shots: at least one scene failed — see above" >&2

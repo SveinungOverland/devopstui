@@ -547,6 +547,30 @@ func (s *SDK) Comments(ctx context.Context, project string, id int) ([]model.Com
 	return out, nil
 }
 
+// AddComment posts a new comment, writing Markdown or HTML per WriteHTML the
+// same way fieldOps does for the description.
+func (s *SDK) AddComment(ctx context.Context, project string, id int, text string) (model.Comment, error) {
+	body := s.commentBody(text)
+	c, err := s.wit.AddComment(ctx, workitemtracking.AddCommentArgs{
+		Project:    &project,
+		WorkItemId: &id,
+		Request:    &workitemtracking.CommentCreate{Text: &body},
+	})
+	if err != nil {
+		return model.Comment{}, err
+	}
+	return convertComment(*c), nil
+}
+
+// commentBody converts a comment's Markdown to HTML when WriteHTML is set,
+// mirroring fieldOps' handling of the description.
+func (s *SDK) commentBody(text string) string {
+	if s.WriteHTML {
+		return markdown.ToHTML(text)
+	}
+	return text
+}
+
 // convertComment maps a raw SDK comment to model.Comment, running its HTML
 // body through the same HTML→Markdown conversion Description gets on read.
 func convertComment(c workitemtracking.Comment) model.Comment {
