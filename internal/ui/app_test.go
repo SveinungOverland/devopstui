@@ -685,6 +685,63 @@ func TestItemRefreshReloadsComments(t *testing.T) {
 	}
 }
 
+func TestAddComment(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
+	h.keys("D", "C", "c")
+	ed, ok := a.popup.(*mdEditor)
+	if !ok {
+		t.Fatalf("expected the comment composer, got %T", a.popup)
+	}
+	if ed.noun != "comment" {
+		t.Fatalf("noun = %q, want %q", ed.noun, "comment")
+	}
+	before := len(a.comments[1013])
+	h.keys("i", "L", "o", "o", "k", "s", " ", "g", "o", "o", "d", "esc", "ctrl+s")
+	if a.popup != nil {
+		t.Fatalf("ctrl+s should close the composer, got %T", a.popup)
+	}
+	got := a.comments[1013]
+	if len(got) != before+1 {
+		t.Fatalf("comments = %d, want %d", len(got), before+1)
+	}
+	if got[len(got)-1].Text != "Looks good" {
+		t.Fatalf("posted comment text = %q", got[len(got)-1].Text)
+	}
+	if !a.item.showComments {
+		t.Fatal("posting a comment should switch the left pane to the discussion")
+	}
+	if a.flash != "commented on #1013" || a.flashErr {
+		t.Fatalf("flash = %q err=%v", a.flash, a.flashErr)
+	}
+}
+
+func TestAddCommentOnEmptyDiscussion(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1004) // no seeded comments
+	h.keys("D")
+	if len(a.comments[1004]) != 0 {
+		t.Fatalf("expected no seeded comments for #1004, got %+v", a.comments[1004])
+	}
+	if a.item.showComments {
+		t.Fatal("drill-down should start on the description")
+	}
+	h.keys("c")
+	if _, ok := a.popup.(*mdEditor); !ok {
+		t.Fatalf("expected the comment composer, got %T", a.popup)
+	}
+	h.keys("i", "F", "i", "r", "s", "t", "!", "esc", "ctrl+s")
+	got := a.comments[1004]
+	if len(got) != 1 || got[0].Text != "First!" {
+		t.Fatalf("comments = %+v", got)
+	}
+	if !a.item.showComments {
+		t.Fatal("posting the first comment should switch the left pane to the discussion")
+	}
+}
+
 func TestBoardPreviewShowsDiscussion(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.keys("3") // board

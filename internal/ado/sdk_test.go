@@ -42,6 +42,20 @@ func TestFieldOps_OtherFieldsUntouched(t *testing.T) {
 	}
 }
 
+func TestCommentBody_MarkdownDefault(t *testing.T) {
+	s := &SDK{}
+	if got := s.commentBody("**bold**"); got != "**bold**" {
+		t.Errorf("commentBody = %q, want markdown sent verbatim", got)
+	}
+}
+
+func TestCommentBody_HTMLMode(t *testing.T) {
+	s := &SDK{WriteHTML: true}
+	if got := s.commentBody("**bold**"); !strings.Contains(got, "<strong>") {
+		t.Errorf("commentBody = %q, want HTML", got)
+	}
+}
+
 func TestConvertComment(t *testing.T) {
 	when := azuredevops.Time{Time: time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)}
 	c := workitemtracking.Comment{

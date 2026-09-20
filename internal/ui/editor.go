@@ -20,29 +20,45 @@ import (
 // editorDoneMsg carries text back from an external editor.
 type editorDoneMsg struct {
 	text    string
+	noun    string // "description" or "comment", for the "X unchanged" flash
 	changed bool
 	apply   func(string) tea.Cmd
 	err     error
 }
 
 // editDescription opens the item's description (Markdown) for editing.
-// With an external editor configured the program is suspended while the
-// editor runs on a temp file; otherwise the built-in editor popup opens.
 // apply receives the new text when it differs from the original.
 func (a *App) editDescription(it *model.WorkItem, apply func(string) tea.Cmd) tea.Cmd {
-	initial := it.Description
 	title := fmt.Sprintf("Description of #%d %s", it.ID, trunc(it.Title, 40))
+	header := fmt.Sprintf("<!-- #%d %s — save and quit to apply, leave unchanged to cancel -->\n\n", it.ID, it.Title)
+	return a.editMarkdown(it.ID, "description", title, it.Description, header, apply)
+}
+
+// editComment opens an empty Markdown composer for a new comment on it.
+// apply receives the text when the composer is submitted non-empty.
+func (a *App) editComment(it *model.WorkItem, apply func(string) tea.Cmd) tea.Cmd {
+	title := fmt.Sprintf("Comment on #%d %s", it.ID, trunc(it.Title, 40))
+	header := fmt.Sprintf("<!-- comment on #%d %s — save and quit to post, leave empty to cancel -->\n\n", it.ID, it.Title)
+	return a.editMarkdown(it.ID, "comment", title, "", header, apply)
+}
+
+// editMarkdown opens a Markdown composer for item-scoped text — the
+// description, or (with an empty initial) a new comment. With an external
+// editor configured the program is suspended while the editor runs on a temp
+// file; otherwise the built-in editor popup opens. apply receives the new
+// text when it differs from initial. noun names the unsaved text for the
+// built-in editor's flashes ("description unchanged", "comment unchanged").
+func (a *App) editMarkdown(id int, noun, title, initial, header string, apply func(string) tea.Cmd) tea.Cmd {
 	editor := a.cfg.EditorCommand()
 	if editor == "" {
 		// The editor keeps its own baseline (ctrl+w saves without closing),
 		// so it decides what counts as a change.
-		a.popup = newMDEditor(title, initial, apply)
+		a.popup = newMDEditor(title, initial, noun, apply)
 		return nil
 	}
 
 	dir := os.TempDir()
-	path := filepath.Join(dir, fmt.Sprintf("devopstui-%d.md", it.ID))
-	header := fmt.Sprintf("<!-- #%d %s — save and quit to apply, leave unchanged to cancel -->\n\n", it.ID, it.Title)
+	path := filepath.Join(dir, fmt.Sprintf("devopstui-%d.md", id))
 	if err := os.WriteFile(path, []byte(header+initial+"\n"), 0o600); err != nil {
 		return a.setFlash("temp file: "+err.Error(), true)
 	}
@@ -59,7 +75,7 @@ func (a *App) editDescription(it *model.WorkItem, apply func(string) tea.Cmd) te
 		}
 		text := strings.TrimSpace(strings.TrimPrefix(string(b), header))
 		text = stripHeaderComment(text)
-		return editorDoneMsg{text: text, changed: text != strings.TrimSpace(initial), apply: apply}
+		return editorDoneMsg{text: text, noun: noun, changed: text != strings.TrimSpace(initial), apply: apply}
 	})
 }
 
@@ -85,7 +101,10 @@ func stripHeaderComment(s string) string {
 // closes, q closes.
 // Insert mode: type; esc returns to normal mode.
 type mdEditor struct {
-	title    string
+	title string
+	// noun names the text being edited, for the "X unchanged" flash — either
+	// "description" or "comment".
+	noun     string
 	area     textarea.Model
 	preview  viewport.Model
 	showPrev bool
@@ -103,7 +122,7 @@ type mdEditor struct {
 	lastSrc  string
 }
 
-func newMDEditor(title, initial string, onSubmit func(string) tea.Cmd) *mdEditor {
+func newMDEditor(title, initial, noun string, onSubmit func(string) tea.Cmd) *mdEditor {
 	ta := textarea.New()
 	ta.SetValue(initial)
 	ta.ShowLineNumbers = true
@@ -112,7 +131,7 @@ func newMDEditor(title, initial string, onSubmit func(string) tea.Cmd) *mdEditor
 	ta.MaxHeight = 0
 	ta.Placeholder = "Markdown… press i to type"
 	ta.Focus()
-	e := &mdEditor{title: title, area: ta, showPrev: true, initial: initial, onSubmit: onSubmit, preview: viewport.New(40, 10)}
+	e := &mdEditor{title: title, noun: noun, area: ta, showPrev: true, initial: initial, onSubmit: onSubmit, preview: viewport.New(40, 10)}
 	e.gotoTop()
 	return e
 }
@@ -244,7 +263,7 @@ func (e *mdEditor) changed() bool {
 // saveDone), so a failed save still counts as unsaved changes.
 func (e *mdEditor) write() tea.Cmd {
 	if !e.changed() {
-		return flash("description unchanged")
+		return flash(e.noun + " unchanged")
 	}
 	text := e.area.Value()
 	cmd := e.onSubmit(text)
@@ -289,7 +308,7 @@ func (e *mdEditor) Update(msg tea.Msg) (popup, tea.Cmd) {
 	switch km.String() {
 	case "ctrl+s":
 		if !e.changed() {
-			return nil, flash("description unchanged")
+			return nil, flash(e.noun + " unchanged")
 		}
 		return nil, e.onSubmit(e.area.Value())
 	case "ctrl+p":

@@ -340,6 +340,12 @@ type itemUpdatedMsg struct {
 	err  error
 }
 
+type commentAddedMsg struct {
+	id      int
+	comment model.Comment
+	err     error
+}
+
 // dashLanesLoadedMsg carries the bulk ChildrenOf fetch for the Dashboard's
 // lanes, issued after MyItems lands (it needs "my PBI" ids first). req ties
 // it to the request that produced it: only the response matching the
@@ -664,6 +670,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.applyUpdate(msg.item)
 		return a, a.setFlash(fmt.Sprintf("saved #%d", msg.item.ID), false)
 
+	case commentAddedMsg:
+		a.busy = ""
+		a.reportSave(msg.err)
+		if msg.err != nil {
+			return a, a.setFlash(msg.err.Error(), true)
+		}
+		a.comments[msg.id] = append(a.comments[msg.id], msg.comment)
+		if a.item != nil && a.item.item.ID == msg.id {
+			a.item.setComments(a.comments[msg.id])
+			a.item.showComments = true
+		}
+		return a, a.setFlash(fmt.Sprintf("commented on #%d", msg.id), false)
+
 	case createdMsg:
 		a.busy = ""
 		if msg.err != nil {
@@ -737,7 +756,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.setFlash("editor: "+msg.err.Error(), true)
 		}
 		if !msg.changed {
-			return a, a.setFlash("description unchanged", false)
+			return a, a.setFlash(msg.noun+" unchanged", false)
 		}
 		return a, msg.apply(msg.text)
 
@@ -1938,6 +1957,8 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, keys.Comments):
 		v.showComments = !v.showComments
 		return nil, true
+	case key.Matches(msg, keys.Comment):
+		return a.addComment(v.item), true
 	case key.Matches(msg, keys.Refresh):
 		v.loading = true
 		v.commentsLoading = true

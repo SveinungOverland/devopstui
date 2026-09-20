@@ -456,6 +456,20 @@ func (f *Fake) Comments(ctx context.Context, project string, id int) ([]model.Co
 	return append([]model.Comment(nil), f.comments[id]...), nil
 }
 
+func (f *Fake) AddComment(ctx context.Context, project string, id int, text string) (model.Comment, error) {
+	if err := f.wait(ctx); err != nil {
+		return model.Comment{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.items[id]; !ok {
+		return model.Comment{}, fmt.Errorf("work item %d not found", id)
+	}
+	c := model.Comment{ID: len(f.comments[id]) + 1, Author: f.me, CreatedDate: time.Now(), Text: text}
+	f.comments[id] = append(f.comments[id], c)
+	return c, nil
+}
+
 func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (*model.WorkItem, error) {
 	if err := f.wait(ctx); err != nil {
 		return nil, err
