@@ -1123,6 +1123,9 @@ func TestDashboardKanbanAndLanes(t *testing.T) {
 			t.Errorf("kanban should not show #%d (Epic/Feature/Task)", unwanted)
 		}
 	}
+	if got[1028] {
+		t.Error("kanban should not show Done #1028 by default")
+	}
 
 	// The lanes are a kanban with state as columns and the parent PBI as
 	// the swimlane: a PBI that is itself being worked on gets a lane
@@ -1183,6 +1186,37 @@ func TestDashboardKanbanAndLanes(t *testing.T) {
 	}
 	if strings.Contains(v, "+1") || strings.Contains(v, "+2") {
 		t.Error("lanes should not collapse extra cards behind a +N badge")
+	}
+}
+
+// TestDashboardShowDoneToggle covers the 'c' key on the Dashboard's top
+// kanban: Done items are hidden by default and 'c' reveals/hides them
+// again, the same behaviour the sprint/backlog lists already have.
+func TestDashboardShowDoneToggle(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	hasDone := func() bool {
+		for _, col := range a.dashBoard.cols {
+			for _, it := range col {
+				if it.ID == 1028 {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if hasDone() {
+		t.Fatal("Done PBI #1028 should be hidden before pressing c")
+	}
+	h.keys("c")
+	if !hasDone() {
+		t.Error("Done PBI #1028 should appear after pressing c")
+	}
+	h.keys("c")
+	if hasDone() {
+		t.Error("Done PBI #1028 should hide again after pressing c a second time")
 	}
 }
 

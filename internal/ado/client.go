@@ -39,7 +39,8 @@ type Client interface {
 	Unscheduled(ctx context.Context, project, team string) (items, external []*model.WorkItem, err error)
 	// Backlog returns the whole requirement-and-above backlog for the team.
 	Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error)
-	// MyItems returns open items assigned to the current user in the project.
+	// MyItems returns items assigned to the current user in the project,
+	// excluding only Removed ones; the UI hides Done/Closed by default.
 	MyItems(ctx context.Context, project string) ([]*model.WorkItem, error)
 	// Parents returns candidate parents (Epics and Features) in the project.
 	Parents(ctx context.Context, project string) ([]*model.WorkItem, error)
