@@ -25,8 +25,8 @@ func TestExampleConfigLoads(t *testing.T) {
 	if c.PAT != "" {
 		t.Error("template must not ship a PAT")
 	}
-	if c.Confirm() || c.RefreshSeconds != 0 || c.EditorCommand() != "" || c.WriteHTML() || c.HideDone {
-		t.Errorf("defaults: confirm=%v refresh=%d editor=%q html=%v hidedone=%v", c.Confirm(), c.RefreshSeconds, c.EditorCommand(), c.WriteHTML(), c.HideDone)
+	if c.Confirm() || c.RefreshSeconds != 0 || c.EditorCommand() != "" || c.WriteHTML() || c.HideDone || c.DashShowDone {
+		t.Errorf("defaults: confirm=%v refresh=%d editor=%q html=%v hidedone=%v dashShowDone=%v", c.Confirm(), c.RefreshSeconds, c.EditorCommand(), c.WriteHTML(), c.HideDone, c.DashShowDone)
 	}
 }
 

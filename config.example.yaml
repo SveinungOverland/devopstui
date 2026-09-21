@@ -51,6 +51,10 @@ refresh_seconds: 0
 # choice back here.
 hide_done: false
 
+# Show Done/Closed items on the Dashboard's kanban. Toggle at runtime
+# with c — the value is written back here.
+dash_show_done: false
+
 # Editor for descriptions. Leave empty to use $VISUAL, then $EDITOR,
 # then the built-in vim-style editor. Set "inline" to always use the
 # built-in editor. A command with arguments is fine: "code --wait".

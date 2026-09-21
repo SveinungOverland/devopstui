@@ -81,6 +81,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `confirm_writes`     | `false`    | Ask before single-item edits too (bulk and re-parent always ask)     |
 | `refresh_seconds`    | `0`        | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets)         |
 | `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
+| `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 

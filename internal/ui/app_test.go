@@ -30,14 +30,21 @@ type harness struct {
 
 func newHarness(t *testing.T, w, h int) *harness {
 	t.Helper()
+	cfg := config.Config{Org: "https://dev.azure.com/demo", Project: "Platform", Team: "Team Blue"}
+	return newHarnessWithConfig(t, w, h, cfg, os.DevNull)
+}
+
+// newHarnessWithConfig is newHarness with a caller-chosen config and
+// cfgPath, for tests that need to observe what gets written back to disk.
+func newHarnessWithConfig(t *testing.T, w, h int, cfg config.Config, cfgPath string) *harness {
+	t.Helper()
 	lipgloss.SetColorProfile(termenv.Ascii) // no escape codes in dumps
 	markdown.Style = "ascii"
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	f := ado.NewFake()
 	f.Latency = 0
-	cfg := config.Config{Org: "https://dev.azure.com/demo", Project: "Platform", Team: "Team Blue"}
-	a := New(f, cfg, os.DevNull, false)
+	a := New(f, cfg, cfgPath, false)
 	hs := &harness{t: t, app: a, fake: f}
 	hs.send(tea.WindowSizeMsg{Width: w, Height: h})
 	hs.run(a.loadContext())
@@ -1269,6 +1276,35 @@ func TestDashboardShowDoneToggle(t *testing.T) {
 	if hasDone() {
 		t.Error("Done PBI #1028 should hide again after pressing c a second time")
 	}
+}
+
+// TestDashboardShowDonePersists covers that toggling 'c' on the Dashboard
+// writes dash_show_done to the config file, and that it's honoured again
+// when the app starts back up.
+func TestDashboardShowDonePersists(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.Config{Org: "https://dev.azure.com/demo", Project: "Platform", Team: "Team Blue"}
+	h := newHarnessWithConfig(t, 160, 45, cfg, cfgPath)
+	h.keys("1", "c")
+
+	saved, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !saved.DashShowDone {
+		t.Error("dash_show_done should be written back as true after pressing c")
+	}
+
+	h2 := newHarnessWithConfig(t, 160, 45, saved, cfgPath)
+	h2.keys("1")
+	for _, col := range h2.app.dashBoard.cols {
+		for _, it := range col {
+			if it.ID == 1028 {
+				return
+			}
+		}
+	}
+	t.Error("Dashboard should open with Done items visible when dash_show_done is true")
 }
 
 func TestDashboardFocusAndActions(t *testing.T) {
