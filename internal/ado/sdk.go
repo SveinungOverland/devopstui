@@ -486,7 +486,7 @@ func (s *SDK) Backlog(ctx context.Context, project, team string) ([]*model.WorkI
 
 func (s *SDK) MyItems(ctx context.Context, project string) ([]*model.WorkItem, error) {
 	return s.query(ctx, project,
-		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me AND [System.State] NOT IN ('Removed','Closed','Done') ORDER BY [System.ChangedDate] DESC")
+		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me AND [System.State] <> 'Removed' ORDER BY [System.ChangedDate] DESC")
 }
 
 func (s *SDK) Parents(ctx context.Context, project string) ([]*model.WorkItem, error) {

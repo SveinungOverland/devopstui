@@ -106,6 +106,9 @@ func NewFake() *Fake {
 	// A PBI parked at the backlog root, not yet pulled into a sprint, for the
 	// "Unscheduled" iteration entry to show.
 	add(1027, 1006, "Product Backlog Item", "Add workspace naming validation", "New", "", backlog, 3, 3)
+	// A Done PBI of mine, for the Dashboard's "show closed" toggle: hidden
+	// from the top kanban by default, shown once 'c' is pressed.
+	add(1028, 1002, "Product Backlog Item", "Add SSO login button to sign-in page", "Done", "Sveinung Øverland", cur, 3, 2)
 	// A sub-team owns part of the area tree.
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
@@ -406,7 +409,7 @@ func (f *Fake) MyItems(ctx context.Context, project string) ([]*model.WorkItem, 
 		return nil, err
 	}
 	return f.snapshot(func(w *model.WorkItem) bool {
-		return w.AssignedTo == f.me && w.State != "Done" && w.State != "Removed"
+		return w.AssignedTo == f.me && w.State != "Removed"
 	}), nil
 }
 

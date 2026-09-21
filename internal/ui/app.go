@@ -83,6 +83,7 @@ type App struct {
 	dashLanes      *lanes
 	dashFocusLanes bool // false = kanban focused, true = lanes focused
 	previewDash    bool // side preview pane beside the Dashboard's kanban
+	dashShowDone   bool // show Done/Closed items on the top kanban
 
 	// item is the drill-down view; itemStack keeps the trail so esc walks
 	// back out, and itemReturn is the tab to land on at the bottom.
@@ -189,7 +190,17 @@ func (a *App) applyTeamFilter() {
 // children.
 func (a *App) refreshDashboard() {
 	inc := a.dashInclude()
-	a.dashBoard.setItems(a.currentBoard(), a.myItems, a.ctx.Backlog, inc)
+	items := a.myItems
+	if !a.dashShowDone {
+		var kept []*model.WorkItem
+		for _, it := range items {
+			if !isDone(it.State) {
+				kept = append(kept, it)
+			}
+		}
+		items = kept
+	}
+	a.dashBoard.setItems(a.currentBoard(), items, a.ctx.Backlog, inc)
 	a.dashLanes.setLanes(a.dashLaneParents(), a.dashChildren, nil)
 }
 
@@ -1148,6 +1159,9 @@ func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
 			return a.moveLaneColumn(-1)
 		case key.Matches(msg, keys.ColRight):
 			return a.moveLaneColumn(1)
+		case key.Matches(msg, keys.Closed):
+			a.dashShowDone = !a.dashShowDone
+			a.refreshDashboard()
 		default:
 			return a.onActionKey(msg)
 		}
@@ -1184,6 +1198,9 @@ func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
 		return a.moveColumn(-1)
 	case key.Matches(msg, keys.ColRight):
 		return a.moveColumn(1)
+	case key.Matches(msg, keys.Closed):
+		a.dashShowDone = !a.dashShowDone
+		a.refreshDashboard()
 	default:
 		return a.onActionKey(msg)
 	}
@@ -2255,7 +2272,12 @@ func (a *App) renderDash(w, h int) string {
 }
 
 func (a *App) dashSummary(width int) string {
-	pbis := len(a.myPBIs())
+	pbis := 0
+	for _, it := range a.myPBIs() {
+		if a.dashShowDone || !isDone(it.State) {
+			pbis++
+		}
+	}
 	children := 0
 	for _, l := range a.dashLanes.ls {
 		for _, col := range l.cols {

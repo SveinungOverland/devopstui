@@ -270,7 +270,8 @@ Board tabs) — plus an optional preview pane:
   requirements), in the columns of the team's board — the same look as the Board tab, just
   filtered to your work. `H`/`L` move the highlighted PBI to the neighbouring column (a state
   change), same as on the Board tab. On a wide enough terminal, a preview pane sits to its
-  right (`z` toggles it).
+  right (`z` toggles it). Done/Closed items are hidden by default, same as the Sprint tree;
+  `c` toggles them.
 - **Bottom: a swimlane kanban** of those PBIs' children — state as the columns (shared across
   every lane, same as any kanban), the parent PBI as the lane. Only a PBI that is itself being
   worked on (In Progress/Active/Committed/Doing, the same states coloured as "in progress"
