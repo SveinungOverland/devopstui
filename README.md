@@ -80,6 +80,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `filter_team`        |            | Show only this team's area paths in every view (`T` at runtime)      |
 | `confirm_writes`     | `false`    | Ask before single-item edits too (bulk and re-parent always ask)     |
 | `refresh_seconds`    | `0`        | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets)         |
+| `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
@@ -151,7 +152,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `v`               | visual select         | `r`     | refresh             | `o`     | open in browser |      |                     |
 | `ctrl+a`          | select all            | `R`     | auto refresh on/off | `y`     | yank id         |      |                     |
 |                   |                       | `f`     | flat / tree         |         |                 |      |                     |
-| `esc`             | clear selection       | `c`     | show closed         | `?` `q` | help / quit     |      |                     |
+| `esc`             | clear selection       | `c`     | hide done           | `?` `q` | help / quit     |      |                     |
 
 Any change key acts on the **selection** when there is one, otherwise on the highlighted
 item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Epic offers
