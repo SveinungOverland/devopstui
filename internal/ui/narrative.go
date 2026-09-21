@@ -45,6 +45,29 @@ func narrativeKey(sections []narrativeSection) string {
 	return b.String()
 }
 
+// narrativeTitle is the panel heading for a set of sections: the single
+// section's own heading when there's exactly one, the headings joined when
+// there's more than one, and — when there's none yet — whichever noun the
+// item would use once written (Bugs write Repro Steps first, everything
+// else writes a Description).
+func narrativeTitle(it *model.WorkItem, sections []narrativeSection) string {
+	switch len(sections) {
+	case 0:
+		if it.Kind == model.KindBug {
+			return "Repro steps"
+		}
+		return "Description"
+	case 1:
+		return sections[0].heading
+	default:
+		headings := make([]string, len(sections))
+		for i, s := range sections {
+			headings[i] = s.heading
+		}
+		return strings.Join(headings, " & ")
+	}
+}
+
 // renderNarrative renders a set of sections as one block. Each section gets
 // its own muted heading only when more than one is present, so an item with
 // just a Description renders exactly as it always has.

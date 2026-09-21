@@ -277,7 +277,7 @@ func (v *itemView) renderDesc(w, h int) string {
 	}
 	v.desc.Width = inner
 	v.desc.Height = max(h-3, 1)
-	title := sMuted.Render("Description")
+	title := sMuted.Render(narrativeTitle(v.item, sections))
 	if v.desc.TotalLineCount() > v.desc.Height {
 		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
 	}

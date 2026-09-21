@@ -57,6 +57,20 @@ func TestItemViewOpensWithDescriptionAndKanban(t *testing.T) {
 	}
 }
 
+func TestItemViewBugPanelTitleMatchesNarrative(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1022) // Bug with Repro Steps and Acceptance Criteria, no Description
+	h.keys("D")
+
+	out := h.app.View()
+	if !strings.Contains(out, "Repro steps & Acceptance criteria") {
+		t.Errorf("item view panel title should name both narrative sections, got:\n%s", out)
+	}
+	if strings.Contains(out, "Description") {
+		t.Errorf("item view panel should not say Description for a Bug with no Description:\n%s", out)
+	}
+}
+
 func TestItemViewFocusAndNavigation(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.sprint.jumpTo(1013)
