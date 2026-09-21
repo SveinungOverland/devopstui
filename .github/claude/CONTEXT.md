@@ -104,6 +104,10 @@ Three more labels are independent of the status: `agent:planned` (a plan
 comment exists), `agent:needs-decision` (the plan is waiting on an answer) and
 `agent:blocked` (a run failed).
 
+One label goes on a pull request rather than an issue: `agent:merge-main`, which
+merges the default branch into that PR's branch and puts an agent on the
+conflicts. Like `agent:ready`, it belongs to the human — never add it yourself.
+
 Never add `agent:ready` yourself — that one belongs to the human, and only
 someone with write access can apply it, which is what makes it a safe trigger.
 The rest are set by the workflows in `.github/workflows/` through

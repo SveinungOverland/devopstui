@@ -23,7 +23,7 @@ workflows.
    `secrets.CLAUDE_CODE_OAUTH_TOKEN`. Run `/install-github-app` from Claude
    Code if it is not already set up.
 
-2. **Run *Automation bootstrap*** from the Actions tab. It creates the six
+2. **Run *Automation bootstrap*** from the Actions tab. It creates the
    `agent:` labels so `agent:ready` is there to pick from the label menu.
 
 3. **Merge to the default branch.** `claude-code-action` refuses to run from a
@@ -92,14 +92,15 @@ line of code on our side.
 | `agent-review.yml`         | chained from implement, or PR ready for review | The impact and security review.                                     |
 | `claude-code-review.yml`   | PR ready for review, new commits on a ready PR | Line-level inline comments.                                         |
 | `pr-feedback.yml`          | PR put back to draft, or changes requested     | Puts the agent back on it, in `revise` mode.                        |
+| `pr-merge-main.yml`        | `agent:merge-main` added to a PR               | Merges the default branch in; an agent resolves the conflicts.      |
 | `pr-merged.yml`            | PR closed                                      | Closes the issue if merged, clears the labels either way.           |
 | `ci.yml`                   | push and pull request                          | `make check` plus a UI capture.                                     |
 | `automation-bootstrap.yml` | manual                                         | Creates the labels.                                                 |
 | `claude.yml`               | `@claude` in a comment                         | The manual escape hatch, outside the pipeline.                      |
 
 The agents' instructions are in `.github/claude/prompts/` — `plan.md`,
-`implement.md`, `revise.md`, `review.md` — with shared project context in
-`.github/claude/CONTEXT.md`. Edit those to change how the agents behave; they
+`implement.md`, `revise.md`, `review.md` and `merge-main.md` — with shared
+project context in `.github/claude/CONTEXT.md`. Edit those to change how the agents behave; they
 are read at run time from the checked-out branch, so a change takes effect on
 the next run.
 
@@ -173,6 +174,30 @@ The implement workflow marks the PR ready at the end of a clean run; the
 feedback workflow puts it back to draft before another pass. This is what keeps
 reviews off half-finished branches without extra bookkeeping.
 
+## Bringing a branch up to date
+
+Add `agent:merge-main` to a pull request and `pr-merge-main.yml` merges the
+default branch into its head branch. It tries the plain merge first and only
+starts an agent when git leaves conflicts, so a branch that is merely behind
+costs a minute of Actions time and no Claude usage at all. Either way the merged
+tree has to pass `make check` before anything is pushed — a clean merge is not
+the same as a correct one, and two branches that never touched the same line can
+still disagree about a function signature.
+
+The label is the request, so it is removed when the request has been answered,
+success or failure; adding it again is how you ask for another go. Nothing is
+pushed on a failed run, which leaves the branch exactly as it was.
+
+The agent resolving the conflicts is told to produce one merge commit and
+nothing else — no cleanups, no rebasing, no amending work that was already on
+the branch — and to post a comment saying how it resolved each conflict. Read
+that comment and the merge commit before you merge the pull request: a conflict
+resolution is a real change, and it is the one an agent writes with the least
+context about what you meant.
+
+Pull requests from forks are refused rather than merged, because their head
+branch is not this repository's to push to.
+
 ## Tokens
 
 | Token                      | Used for                                                       |
@@ -235,8 +260,16 @@ next time it runs.
 | `agent:needs-decision` | The plan is blocked on an answer. Do not add `agent:ready` yet. |
 | `agent:blocked`        | A run failed. The comment on the issue links the log.         |
 
-`.github/scripts/status.sh` is the only thing that writes them, and it keeps
-exactly one status label on an issue at a time.
+One more goes on a **pull request** rather than an issue:
+
+| Label              | Means                                                            |
+| ------------------ | ---------------------------------------------------------------- |
+| `agent:merge-main` | **You add this.** Merge the default branch into the PR's branch. |
+
+`.github/scripts/status.sh` is the only thing that writes the issue labels, and
+it keeps exactly one status label on an issue at a time. It cannot write
+`agent:merge-main`, because `gh issue edit` does not reach a pull request's
+labels — `pr-merge-main.yml` removes that one itself with `gh pr edit`.
 
 ## When something goes wrong
 

@@ -4,7 +4,7 @@ name: Automation bootstrap
 # the automation so `agent:ready` is there to pick from the label menu.
 #
 # The workflows create the labels they need as they go, so this is really a
-# convenience: it puts all six in the picker with their colours and
+# convenience: it puts them all in the picker with their colours and
 # descriptions before anyone needs them.
 
 on:
@@ -48,6 +48,10 @@ jobs:
           | `agent:in-progress` | An agent is working. The PR is a draft. |
           | `agent:in-review` | Implementation finished, the PR is ready. |
           | closed | Done, by a merged PR. |
+
+          `agent:merge-main` is the one label that goes on a **pull request**:
+          adding it merges the default branch into that PR's branch and puts an
+          agent on the conflicts.
 
           ### Still yours to check
 
