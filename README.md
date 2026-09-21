@@ -352,6 +352,7 @@ Work is driven from labels on issues. Opening an issue gets it a written impleme
 adding `agent:ready` gets it a branch, a pull request and an agent that builds it, screenshots
 the result and hands it back for review.
 
+
 ```
 issue ──▶ backlog ──▶ agent:ready ──▶ agent:in-progress ──▶ agent:in-review ──▶ closed
             plan         ^ you           branch + PR            reviews          merged
