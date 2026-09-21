@@ -132,6 +132,11 @@ Press `d` on an item to edit its description:
 The Description field in the `e` edit form uses the same editor. There `ctrl+w` hands the text
 to the form as a pending change; the form's own `ctrl+s` writes it with the other fields.
 
+Bugs are the exception: Azure DevOps' Agile/Scrum templates give a Bug Repro Steps and
+Acceptance Criteria instead of a Description. The detail pane renders whichever of the three
+the item has, `d` edits Repro Steps, and the `e` form swaps in Repro Steps and Acceptance
+Criteria rows in place of Description.
+
 ## Keys
 
 Keys are vim-style mnemonics: the letter is the first letter of the action.

@@ -42,6 +42,48 @@ func TestFieldOps_OtherFieldsUntouched(t *testing.T) {
 	}
 }
 
+func TestFieldOps_ReproStepsAndAcceptanceCriteria(t *testing.T) {
+	s := &SDK{}
+	for _, field := range []string{model.FieldReproSteps, model.FieldAcceptanceCriteria} {
+		ops := s.fieldOps(field, "steps")
+		if len(ops) != 2 {
+			t.Fatalf("%s: want 2 ops, got %d", field, len(ops))
+		}
+		if *ops[0].Path != "/fields/"+field || ops[0].Value != "steps" {
+			t.Errorf("%s: field op = %+v", field, ops[0])
+		}
+		if *ops[1].Path != "/multilineFieldsFormat/"+field || ops[1].Value != "Markdown" {
+			t.Errorf("%s: format op = %+v", field, ops[1])
+		}
+	}
+}
+
+// TestConvert_BugNarrativeFields covers Azure DevOps' Bug field layout: the
+// narrative lives in Repro Steps / Acceptance Criteria, not Description
+// (see issue #36), so a Bug with those fields set but no Description must
+// convert into a WorkItem with ReproSteps/AcceptanceCriteria populated and
+// Description empty.
+func TestConvert_BugNarrativeFields(t *testing.T) {
+	s := &SDK{orgURL: "https://dev.azure.com/contoso"}
+	fields := map[string]any{
+		model.FieldWorkItemType:       "Bug",
+		model.FieldTitle:              "Login page flickers",
+		model.FieldReproSteps:         "<p>Open the login page</p>",
+		model.FieldAcceptanceCriteria: "<p>No more flicker</p>",
+	}
+	wi := &workitemtracking.WorkItem{Id: ptr(42), Rev: ptr(1), Fields: &fields}
+	got := s.convert(wi, "Platform")
+	if got.Description != "" {
+		t.Errorf("Description = %q, want empty for a Bug with no System.Description", got.Description)
+	}
+	if got.ReproSteps != "Open the login page" {
+		t.Errorf("ReproSteps = %q", got.ReproSteps)
+	}
+	if got.AcceptanceCriteria != "No more flicker" {
+		t.Errorf("AcceptanceCriteria = %q", got.AcceptanceCriteria)
+	}
+}
+
 func TestCommentBody_MarkdownDefault(t *testing.T) {
 	s := &SDK{}
 	if got := s.commentBody("**bold**"); got != "**bold**" {

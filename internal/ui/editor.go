@@ -29,9 +29,23 @@ type editorDoneMsg struct {
 // editDescription opens the item's description (Markdown) for editing.
 // apply receives the new text when it differs from the original.
 func (a *App) editDescription(it *model.WorkItem, apply func(string) tea.Cmd) tea.Cmd {
-	title := fmt.Sprintf("Description of #%d %s", it.ID, trunc(it.Title, 40))
+	return a.editItemText(it, "description", "Description", it.Description, apply)
+}
+
+// editReproSteps opens a Bug's repro steps (Markdown) for editing.
+// apply receives the new text when it differs from the original.
+func (a *App) editReproSteps(it *model.WorkItem, apply func(string) tea.Cmd) tea.Cmd {
+	return a.editItemText(it, "repro steps", "Repro Steps", it.ReproSteps, apply)
+}
+
+// editItemText opens a Markdown composer for one of an item's narrative
+// fields, given its current value. apply receives the new text when it
+// differs from value. noun names the field for the built-in editor's
+// flashes ("description unchanged", "repro steps unchanged").
+func (a *App) editItemText(it *model.WorkItem, noun, label, value string, apply func(string) tea.Cmd) tea.Cmd {
+	title := fmt.Sprintf("%s of #%d %s", label, it.ID, trunc(it.Title, 40))
 	header := fmt.Sprintf("<!-- #%d %s — save and quit to apply, leave unchanged to cancel -->\n\n", it.ID, it.Title)
-	return a.editMarkdown(it.ID, "description", title, it.Description, header, apply)
+	return a.editMarkdown(it.ID, noun, title, value, header, apply)
 }
 
 // editComment opens an empty Markdown composer for a new comment on it.

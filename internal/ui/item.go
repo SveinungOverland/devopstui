@@ -262,17 +262,18 @@ func (v *itemView) renderDesc(w, h int) string {
 		style = sPanelFocus
 	}
 	inner := max(w-4, 20)
-	body := v.item.Description
-	if body == "" {
-		body = sMuted.Render("no description — press " + sKey.Render("d") + sMuted.Render(" to write one"))
-	} else if body != v.lastDesc || inner != v.lastW {
-		v.lastDesc, v.lastW = body, inner
-		v.desc.SetContent(markdown.Render(body, inner))
-		v.desc.GotoTop()
-	}
-	if v.item.Description == "" {
-		v.desc.SetContent(body)
+	sections := narrativeSections(v.item)
+	if len(sections) == 0 {
+		noun := "description"
+		if v.item.Kind == model.KindBug {
+			noun = "repro steps"
+		}
+		v.desc.SetContent(sMuted.Render("no " + noun + " — press " + sKey.Render("d") + sMuted.Render(" to write one")))
 		v.lastDesc, v.lastW = "", inner
+	} else if key := narrativeKey(sections); key != v.lastDesc || inner != v.lastW {
+		v.lastDesc, v.lastW = key, inner
+		v.desc.SetContent(renderNarrative(sections, inner))
+		v.desc.GotoTop()
 	}
 	v.desc.Width = inner
 	v.desc.Height = max(h-3, 1)
