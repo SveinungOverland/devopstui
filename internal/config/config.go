@@ -24,6 +24,8 @@ type Config struct {
 	ConfirmWrites *bool `yaml:"confirm_writes,omitempty"`
 	// RefreshSeconds enables auto refresh when > 0.
 	RefreshSeconds int `yaml:"refresh_seconds,omitempty"`
+	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
+	DashShowDone bool `yaml:"dash_show_done,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
 	// then the built-in editor. "inline" forces the built-in one.
 	Editor string `yaml:"editor,omitempty"`

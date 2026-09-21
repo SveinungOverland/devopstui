@@ -158,6 +158,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	a.ctx.Team = cfg.Team
 	a.ctx.FilterTeam = cfg.FilterTeam
 	a.refreshEvery = cfg.RefreshSeconds
+	a.dashShowDone = cfg.DashShowDone
 	return a
 }
 
@@ -1161,6 +1162,8 @@ func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
 			return a.moveLaneColumn(1)
 		case key.Matches(msg, keys.Closed):
 			a.dashShowDone = !a.dashShowDone
+			a.cfg.DashShowDone = a.dashShowDone
+			a.persist()
 			a.refreshDashboard()
 		default:
 			return a.onActionKey(msg)
@@ -1200,6 +1203,8 @@ func (a *App) onDashKey(msg tea.KeyMsg) tea.Cmd {
 		return a.moveColumn(1)
 	case key.Matches(msg, keys.Closed):
 		a.dashShowDone = !a.dashShowDone
+		a.cfg.DashShowDone = a.dashShowDone
+		a.persist()
 		a.refreshDashboard()
 	default:
 		return a.onActionKey(msg)
