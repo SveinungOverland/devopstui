@@ -24,6 +24,9 @@ type Config struct {
 	ConfirmWrites *bool `yaml:"confirm_writes,omitempty"`
 	// RefreshSeconds enables auto refresh when > 0.
 	RefreshSeconds int `yaml:"refresh_seconds,omitempty"`
+	// HideDone hides Done/Closed/Removed/Resolved/Completed items in the
+	// Sprint view. Default false: they show, and `c` toggles them away.
+	HideDone bool `yaml:"hide_done,omitempty"`
 	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
 	DashShowDone bool `yaml:"dash_show_done,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,

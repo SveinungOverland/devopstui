@@ -3,6 +3,15 @@ description: >
   Everything an agent needs to work on devopstui: the Go toolchain from go.mod,
   a module cache, tmux for driving the TUI in a real pty, and the binary built.
 
+inputs:
+  build:
+    description: >
+      Download modules and build the binary as part of the setup. Turn this off
+      when the checkout is not expected to compile yet — a conflicted merge, for
+      instance, where failing here would be the setup reporting the very thing
+      the run exists to fix.
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -22,6 +31,7 @@ runs:
         tmux -V
 
     - name: Download modules and build
+      if: inputs.build == 'true'
       shell: bash
       # Doing this up front means the agent's first `make test` is not also
       # paying for the module download, and a broken base branch fails here

@@ -28,6 +28,11 @@ command -v jq >/dev/null 2>&1 || die "jq is not installed"
 # description. Statuses are mutually exclusive; flags are independent.
 STATUSES="ready in-progress in-review"
 FLAGS="planned needs-decision blocked"
+# Labels that live on a pull request rather than an issue. `set` and `flag` go
+# through `gh issue edit`, which cannot touch a pull request, so nothing here
+# writes them — pr-merge-main.yml removes its own with `gh pr edit`.
+# ensure-labels creates them so they are in the picker with the rest.
+PR_LABELS="merge-main"
 
 label_colour() {
 	case "$1" in
@@ -37,6 +42,7 @@ label_colour() {
 	planned) printf 'c5def5' ;;        # pale blue — informational
 	needs-decision) printf 'fbca04' ;; # yellow — waiting on an answer
 	blocked) printf 'b60205' ;;        # red — something failed
+	merge-main) printf 'd4c5f9' ;;     # pale purple — on a pull request
 	*) printf 'ededed' ;;
 	esac
 }
@@ -49,6 +55,7 @@ label_description() {
 	planned) printf 'An implementation plan has been posted.' ;;
 	needs-decision) printf 'The plan is waiting on a human decision.' ;;
 	blocked) printf 'An automated run failed and needs a look.' ;;
+	merge-main) printf 'On a PR: merge the default branch in, resolving conflicts.' ;;
 	*) printf '' ;;
 	esac
 }
@@ -139,7 +146,7 @@ flag)
 	cmd_flag "$2" "$3" "$4"
 	;;
 ensure-labels)
-	for l in $STATUSES $FLAGS; do
+	for l in $STATUSES $FLAGS $PR_LABELS; do
 		ensure_label "$l"
 		printf '%s\n' "$PREFIX$l"
 	done

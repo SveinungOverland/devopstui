@@ -15,6 +15,9 @@ test:
 vet:
 	go vet ./...
 
+install:
+	go install ./cmd/devopstui
+
 dumps:
 	mkdir -p dumps && DUMP_DIR=$(CURDIR)/dumps go test ./internal/ui/ -run . >/dev/null && ls dumps
 

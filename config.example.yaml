@@ -46,6 +46,11 @@ confirm_writes: false
 # the value is written back here.
 refresh_seconds: 0
 
+# Hide Done/Closed/Removed/Resolved/Completed items in the Sprint view.
+# Default false: they show, and `c` hides them. Toggling `c` writes the
+# choice back here.
+hide_done: false
+
 # Show Done/Closed items on the Dashboard's kanban. Toggle at runtime
 # with c — the value is written back here.
 dash_show_done: false

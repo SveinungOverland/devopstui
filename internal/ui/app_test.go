@@ -130,6 +130,28 @@ func TestSprintTreeRenders(t *testing.T) {
 	}
 }
 
+func TestSprintFlatViewHidesTasks(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	h.keys("f")
+	v := h.app.View()
+	h.dump("sprint-flat")
+	for _, want := range []string{"1015 Add trace header", "1017 Load test", "1023 Wire up magic link", "1026 Add resend button"} {
+		if strings.Contains(v, want) {
+			t.Errorf("flat view should hide tasks, found %q", want)
+		}
+	}
+	for _, want := range []string{"1013 Propagate trace id", "1/3"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("flat view missing %q", want)
+		}
+	}
+	h.keys("f")
+	v = h.app.View()
+	if !strings.Contains(v, "1015 Add trace header") {
+		t.Error("tree view should show tasks again after toggling flat off")
+	}
+}
+
 func TestNavigationAndSelection(t *testing.T) {
 	h := newHarness(t, 140, 40)
 	h.keys("j", "j", "space", "space")
@@ -624,7 +646,7 @@ func TestChildProgress(t *testing.T) {
 	if !strings.Contains(v, "h remaining") {
 		t.Error("detail should sum remaining work")
 	}
-	// Hidden done tasks still count: toggle closed off (default) and check badge unchanged.
+	// Hidden done tasks still count: hide done items with 'c' and check badge unchanged.
 	h.keys("c")
 	if !strings.Contains(h.app.View(), "1/3") {
 		t.Error("badge must count hidden done tasks")
@@ -634,6 +656,35 @@ func TestChildProgress(t *testing.T) {
 	h.app.board.jumpTo(1013)
 	if !strings.Contains(h.app.View(), "1013 1/3") {
 		t.Errorf("board card missing progress badge")
+	}
+}
+
+func TestSprintDoneShownByDefault(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	if !h.app.sprint.showDone {
+		t.Fatal("sprint should show done items by default")
+	}
+	if !strings.Contains(h.app.View(), "Read trace header in consumer") {
+		t.Error("Done task #1016 should be visible without pressing anything")
+	}
+
+	h.keys("c")
+	if h.app.sprint.showDone {
+		t.Error("'c' should hide done items")
+	}
+	if !h.app.cfg.HideDone {
+		t.Error("'c' should persist HideDone = true")
+	}
+	if strings.Contains(h.app.View(), "Read trace header in consumer") {
+		t.Error("Done task #1016 should be hidden after 'c'")
+	}
+
+	h.keys("c")
+	if !h.app.sprint.showDone {
+		t.Error("'c' again should show done items")
+	}
+	if h.app.cfg.HideDone {
+		t.Error("'c' again should clear HideDone")
 	}
 }
 
