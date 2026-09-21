@@ -123,6 +123,28 @@ func TestSprintTreeRenders(t *testing.T) {
 	}
 }
 
+func TestSprintFlatViewHidesTasks(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	h.keys("f")
+	v := h.app.View()
+	h.dump("sprint-flat")
+	for _, want := range []string{"1015 Add trace header", "1017 Load test", "1023 Wire up magic link", "1026 Add resend button"} {
+		if strings.Contains(v, want) {
+			t.Errorf("flat view should hide tasks, found %q", want)
+		}
+	}
+	for _, want := range []string{"1013 Propagate trace id", "1/3"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("flat view missing %q", want)
+		}
+	}
+	h.keys("f")
+	v = h.app.View()
+	if !strings.Contains(v, "1015 Add trace header") {
+		t.Error("tree view should show tasks again after toggling flat off")
+	}
+}
+
 func TestNavigationAndSelection(t *testing.T) {
 	h := newHarness(t, 140, 40)
 	h.keys("j", "j", "space", "space")
