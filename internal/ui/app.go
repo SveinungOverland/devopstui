@@ -2177,7 +2177,7 @@ func (a *App) renderHeader() string {
 			trail = append(trail, sMuted.Render(fmt.Sprintf("#%d", it.ID)))
 		}
 		tabs = append(tabs, sCrumbSep.Render("▸ ")+strings.Join(trail, sCrumbSep.Render(" ▸ ")))
-		focus := "description"
+		focus := strings.ToLower(narrativeTitle(a.item.item, narrativeSections(a.item.item)))
 		if a.item.focusKan {
 			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
 		}
