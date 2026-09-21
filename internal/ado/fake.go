@@ -60,14 +60,22 @@ func NewFake() *Fake {
 			remaining = float64(2 + id%5)
 		}
 		_, unique := resolvePerson(who)
-		f.items[id] = &model.WorkItem{
+		it := &model.WorkItem{
 			RemainingWork: remaining, AssignedToUnique: unique,
 			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
-			Description: demoDescription(id, title),
-			URL:         fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
 		}
+		// Real Azure DevOps Bugs carry Repro Steps/Acceptance Criteria instead
+		// of a Description, so the demo mirrors that split.
+		if KindOf(typ) == model.KindBug {
+			it.ReproSteps = demoReproSteps(id, title)
+			it.AcceptanceCriteria = demoAcceptanceCriteria(title)
+		} else {
+			it.Description = demoDescription(id, title)
+		}
+		f.items[id] = it
 	}
 	add(1001, 0, "Epic", "Self-service onboarding", "In Progress", "Alex Kim", backlog, 0, 1)
 	add(1002, 1001, "Feature", "Invite flow", "In Progress", "Sveinung Øverland", cur, 0, 1)
@@ -169,6 +177,27 @@ level=error msg="token expired" id=%d
 	default:
 		return fmt.Sprintf("%s.\n\nSmall change, no acceptance criteria beyond `go test ./...` passing.", title)
 	}
+}
+
+// demoReproSteps returns Markdown for a Bug's Repro Steps field.
+func demoReproSteps(id int, title string) string {
+	return fmt.Sprintf(`%s.
+
+1. Open the affected page
+2. Reproduce the steps below
+3. Observe the failure
+
+`+"```"+`
+level=error msg="unexpected state" id=%d
+`+"```", title, id)
+}
+
+// demoAcceptanceCriteria returns Markdown for a Bug's Acceptance Criteria
+// field.
+func demoAcceptanceCriteria(title string) string {
+	return fmt.Sprintf(`- [ ] %s no longer reproduces
+- [ ] Regression test added
+- [ ] Verified in the affected environment`, title)
 }
 
 // KindOf maps a work item type name to a Kind.
@@ -500,6 +529,10 @@ func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (
 			it.IterationPath = p.Value.(string)
 		case model.FieldDescription:
 			it.Description = p.Value.(string)
+		case model.FieldReproSteps:
+			it.ReproSteps = p.Value.(string)
+		case model.FieldAcceptanceCriteria:
+			it.AcceptanceCriteria = p.Value.(string)
 		case model.FieldEffort, model.FieldStoryPoints:
 			it.Effort = p.Value.(float64)
 		case model.FieldRemainingWork:

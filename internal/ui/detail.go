@@ -85,9 +85,9 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 		}
 	}
 
-	if it.Description != "" {
+	if sections := narrativeSections(it); len(sections) > 0 {
 		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", min(width, 40))) + "\n")
-		b.WriteString(markdown.Render(it.Description, width))
+		b.WriteString(renderNarrative(sections, width))
 	}
 
 	if len(comments) > 0 {

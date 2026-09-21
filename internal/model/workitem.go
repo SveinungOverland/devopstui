@@ -39,26 +39,28 @@ func (k Kind) Tag() string {
 
 // WorkItem is the subset of an Azure DevOps work item the TUI cares about.
 type WorkItem struct {
-	ID               int
-	Rev              int
-	Type             string // raw System.WorkItemType
-	Kind             Kind
-	Title            string
-	State            string
-	AssignedTo       string // display name, "" when unassigned
-	AssignedToUnique string // sign-in address of the assignee, when known
-	IterationPath    string
-	AreaPath         string
-	BoardColumn      string
-	Effort           float64 // Effort / Story Points, 0 when unset
-	RemainingWork    float64 // hours, tasks only
-	Priority         int     // 0 when unset
-	Tags             []string
-	Description      string // plain text
-	ParentID         int    // 0 when no parent
-	ChangedDate      time.Time
-	ChangedBy        string
-	URL              string // browser URL
+	ID                 int
+	Rev                int
+	Type               string // raw System.WorkItemType
+	Kind               Kind
+	Title              string
+	State              string
+	AssignedTo         string // display name, "" when unassigned
+	AssignedToUnique   string // sign-in address of the assignee, when known
+	IterationPath      string
+	AreaPath           string
+	BoardColumn        string
+	Effort             float64 // Effort / Story Points, 0 when unset
+	RemainingWork      float64 // hours, tasks only
+	Priority           int     // 0 when unset
+	Tags               []string
+	Description        string // plain text
+	ReproSteps         string // plain text, Bugs only
+	AcceptanceCriteria string // plain text
+	ParentID           int    // 0 when no parent
+	ChangedDate        time.Time
+	ChangedBy          string
+	URL                string // browser URL
 }
 
 // Assignee returns a display value for the assignee column.
@@ -289,21 +291,23 @@ type Patch struct {
 
 // Well-known field reference names.
 const (
-	FieldTitle         = "System.Title"
-	FieldState         = "System.State"
-	FieldAssignedTo    = "System.AssignedTo"
-	FieldIterationPath = "System.IterationPath"
-	FieldAreaPath      = "System.AreaPath"
-	FieldBoardColumn   = "System.BoardColumn"
-	FieldDescription   = "System.Description"
-	FieldTags          = "System.Tags"
-	FieldWorkItemType  = "System.WorkItemType"
-	FieldChangedDate   = "System.ChangedDate"
-	FieldChangedBy     = "System.ChangedBy"
-	FieldPriority      = "Microsoft.VSTS.Common.Priority"
-	FieldEffort        = "Microsoft.VSTS.Scheduling.Effort"
-	FieldStoryPoints   = "Microsoft.VSTS.Scheduling.StoryPoints"
-	FieldRemainingWork = "Microsoft.VSTS.Scheduling.RemainingWork"
+	FieldTitle              = "System.Title"
+	FieldState              = "System.State"
+	FieldAssignedTo         = "System.AssignedTo"
+	FieldIterationPath      = "System.IterationPath"
+	FieldAreaPath           = "System.AreaPath"
+	FieldBoardColumn        = "System.BoardColumn"
+	FieldDescription        = "System.Description"
+	FieldReproSteps         = "Microsoft.VSTS.TCM.ReproSteps"
+	FieldAcceptanceCriteria = "Microsoft.VSTS.Common.AcceptanceCriteria"
+	FieldTags               = "System.Tags"
+	FieldWorkItemType       = "System.WorkItemType"
+	FieldChangedDate        = "System.ChangedDate"
+	FieldChangedBy          = "System.ChangedBy"
+	FieldPriority           = "Microsoft.VSTS.Common.Priority"
+	FieldEffort             = "Microsoft.VSTS.Scheduling.Effort"
+	FieldStoryPoints        = "Microsoft.VSTS.Scheduling.StoryPoints"
+	FieldRemainingWork      = "Microsoft.VSTS.Scheduling.RemainingWork"
 )
 
 // NewItem describes a work item to create.

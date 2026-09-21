@@ -65,7 +65,7 @@ var fields = []string{
 	"System.Id", "System.Rev", model.FieldWorkItemType, model.FieldTitle, model.FieldState, model.FieldAssignedTo,
 	model.FieldIterationPath, model.FieldAreaPath, model.FieldBoardColumn, model.FieldTags, model.FieldPriority,
 	model.FieldEffort, model.FieldStoryPoints, model.FieldRemainingWork, model.FieldChangedDate, model.FieldChangedBy, "System.Parent",
-	model.FieldDescription,
+	model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria,
 }
 
 func (s *SDK) Me(ctx context.Context) (string, error) {
@@ -601,7 +601,9 @@ func (s *SDK) Update(ctx context.Context, id, rev int, patches []model.Patch) (*
 // the multilineFieldsFormat operation, unless WriteHTML is set.
 func (s *SDK) fieldOps(field string, value any) []webapi.JsonPatchOperation {
 	add := &webapi.OperationValues.Add
-	if field != model.FieldDescription {
+	switch field {
+	case model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria:
+	default:
 		return []webapi.JsonPatchOperation{{Op: add, Path: ptr("/fields/" + field), Value: value}}
 	}
 	text, _ := value.(string)
@@ -677,6 +679,8 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 		}
 	}
 	m.Description = markdown.FromHTML(str(f[model.FieldDescription]))
+	m.ReproSteps = markdown.FromHTML(str(f[model.FieldReproSteps]))
+	m.AcceptanceCriteria = markdown.FromHTML(str(f[model.FieldAcceptanceCriteria]))
 	proj := project
 	if proj == "" {
 		proj = str(f["System.TeamProject"])

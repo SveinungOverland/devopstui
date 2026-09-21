@@ -31,6 +31,10 @@ type formField struct {
 	ref   string
 }
 
+// formLabel is sLabel widened to fit "Acceptance Criteria", the longest
+// label the form shows — sLabel's fixed width would otherwise wrap it.
+var formLabel = sLabel.Width(20)
+
 var formFields = []formField{
 	{"Title", model.FieldTitle},
 	{"State", model.FieldState},
@@ -39,6 +43,24 @@ var formFields = []formField{
 	{"Effort", model.FieldEffort},
 	{"Priority", model.FieldPriority},
 	{"Description", model.FieldDescription},
+}
+
+// fieldsFor returns the form's fields for one work item kind. Bugs swap the
+// Description row for Repro Steps and gain Acceptance Criteria, matching
+// Azure DevOps' Bug field layout; every other kind keeps the base list.
+func fieldsFor(kind model.Kind) []formField {
+	if kind != model.KindBug {
+		return formFields
+	}
+	fields := make([]formField, 0, len(formFields)+1)
+	for _, f := range formFields {
+		if f.ref == model.FieldDescription {
+			fields = append(fields, formField{"Repro Steps", model.FieldReproSteps})
+			continue
+		}
+		fields = append(fields, f)
+	}
+	return append(fields, formField{"Acceptance Criteria", model.FieldAcceptanceCriteria})
 }
 
 // openForm loads picker data then shows the form.
@@ -51,7 +73,7 @@ func (a *App) openForm(it *model.WorkItem) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		f := &form{app: a, item: it, fields: formFields, values: map[string]any{}, states: states, iters: iters}
+		f := &form{app: a, item: it, fields: fieldsFor(it.Kind), values: map[string]any{}, states: states, iters: iters}
 		f.onSave = func(patches []model.Patch) tea.Cmd {
 			if len(patches) == 0 {
 				return a.setFlash("no changes", false)
@@ -85,6 +107,10 @@ func (f *form) currentValue(ref string) string {
 		return strconv.Itoa(it.Priority)
 	case model.FieldDescription:
 		return it.Description
+	case model.FieldReproSteps:
+		return it.ReproSteps
+	case model.FieldAcceptanceCriteria:
+		return it.AcceptanceCriteria
 	}
 	return ""
 }
@@ -171,14 +197,12 @@ func (f *form) openEditor() (cmd tea.Cmd) {
 			}
 			return set(fld.ref, n)
 		})
-	case model.FieldDescription:
+	case model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria:
 		// Uses the same path as the `d` key: external editor when configured,
 		// built-in editor otherwise. The result lands in the pending values.
-		item := *f.item
-		item.Description = cur
-		cmd = f.app.editDescription(&item, func(v string) tea.Cmd { return set(fld.ref, v) })
+		cmd = f.app.editItemText(f.item, strings.ToLower(fld.label), fld.label, cur, func(v string) tea.Cmd { return set(fld.ref, v) })
 		if p := f.app.popup; p != f {
-			// editDescription opened the built-in editor as the top-level
+			// editItemText opened the built-in editor as the top-level
 			// popup; re-home it as our child so the form stays visible.
 			f.app.popup = f
 			f.child = p
@@ -189,27 +213,29 @@ func (f *form) openEditor() (cmd tea.Cmd) {
 
 func (f *form) View(w, h int) string {
 	width := min(max(w-10, 40), 90)
+	labelW := lipgloss.Width(formLabel.Render(""))
 	var b strings.Builder
 	b.WriteString(kindStyle(f.item.Kind).Render(f.item.Type) + sMuted.Render(fmt.Sprintf("  #%d", f.item.ID)) + "\n\n")
 	for i, fld := range f.fields {
 		val := f.currentValue(fld.ref)
-		if fld.ref == model.FieldDescription {
+		switch fld.ref {
+		case model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria:
 			lines := strings.Count(val, "\n") + 1
 			val = strings.ReplaceAll(val, "\n", " ")
 			if val != "" {
-				val = fmt.Sprintf("%s  %s", trunc(val, width-28), sMuted.Render(fmt.Sprintf("(%d lines)", lines)))
+				val = fmt.Sprintf("%s  %s", trunc(val, width-labelW-17), sMuted.Render(fmt.Sprintf("(%d lines)", lines)))
 			}
 		}
 		cur := i == f.cursor
 		st := rowStyler(cur)
 		plain := st(lipgloss.NewStyle())
-		val = trunc(val, width-16)
+		val = trunc(val, width-labelW-5)
 		valStyle := plain
 		if _, changed := f.values[fld.ref]; changed {
 			val += " *"
 			valStyle = st(sSelected)
 		}
-		line := st(sLabel).Render(fld.label) + valStyle.Render(val)
+		line := st(formLabel).Render(fld.label) + valStyle.Render(val)
 		line += fill(plain, width-4-lipgloss.Width(line))
 		if cur {
 			line = st(sKey).Render(cursorMark+" ") + line

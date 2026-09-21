@@ -57,6 +57,35 @@ func TestItemViewOpensWithDescriptionAndKanban(t *testing.T) {
 	}
 }
 
+func TestItemViewHeaderFocusMatchesNarrativeForBug(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1022) // Bug with Repro Steps and Acceptance Criteria, no Description
+	h.keys("D")
+
+	lines := strings.Split(h.app.View(), "\n")
+	tabBar := lines[1] // "1 Dashboard ... ▸ #1022 <focus summary>"
+	if !strings.Contains(tabBar, "repro steps & acceptance criteria") {
+		t.Errorf("tab bar should name both narrative sections for a Bug, got:\n%s", tabBar)
+	}
+	if strings.Contains(tabBar, "description") {
+		t.Errorf("tab bar should not say description for a Bug with no Description, got:\n%s", tabBar)
+	}
+}
+
+func TestItemViewBugPanelTitleMatchesNarrative(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1022) // Bug with Repro Steps and Acceptance Criteria, no Description
+	h.keys("D")
+
+	out := h.app.View()
+	if !strings.Contains(out, "Repro steps & Acceptance criteria") {
+		t.Errorf("item view panel title should name both narrative sections, got:\n%s", out)
+	}
+	if strings.Contains(out, "Description") {
+		t.Errorf("item view panel should not say Description for a Bug with no Description:\n%s", out)
+	}
+}
+
 func TestItemViewFocusAndNavigation(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	h.app.sprint.jumpTo(1013)

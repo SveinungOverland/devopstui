@@ -42,6 +42,14 @@ func (a *App) onActionKey(msg tea.KeyMsg) tea.Cmd {
 		if len(targets) > 1 {
 			return a.setFlash("description works on one item", true)
 		}
+		if cur.Kind == model.KindBug {
+			return a.editReproSteps(cur, func(v string) tea.Cmd {
+				// The editor stays open on ctrl+w, so this can run more
+				// than once: re-resolve to carry the revision the last
+				// write made.
+				return a.update(a.fresh(cur), model.Patch{Field: model.FieldReproSteps, Value: v})
+			})
+		}
 		return a.editDescription(cur, func(v string) tea.Cmd {
 			// The editor stays open on ctrl+w, so this can run more than
 			// once: re-resolve to carry the revision the last write made.
