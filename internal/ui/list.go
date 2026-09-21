@@ -24,12 +24,13 @@ type list struct {
 	selected  map[int]bool
 	visual    int // anchor row for v-mode, -1 when off
 
-	filter    textinput.Model
-	filtering bool
-	flat      bool
-	showDone  bool
-	showIter  bool // show iteration column (dashboard)
-	empty     string
+	filter        textinput.Model
+	filtering     bool
+	flat          bool
+	hideTasksFlat bool // drop task-level items from the flat view (sprint)
+	showDone      bool
+	showIter      bool // show iteration column (dashboard)
+	empty         string
 
 	// taskLevel tells which items count as tasks for progress badges; set
 	// by the App from the team's backlog configuration.
@@ -105,6 +106,9 @@ func (l *list) rebuild() {
 		if q != "" {
 			ext = nil
 		}
+	}
+	if l.flat && l.hideTasksFlat && l.taskLevel != nil {
+		items = dropTaskLevel(items, l.taskLevel)
 	}
 	if l.flat || q != "" {
 		flat := make([]*model.WorkItem, len(items))
@@ -193,6 +197,18 @@ func filterItems(items []*model.WorkItem, q string, showDone bool) []*model.Work
 			continue
 		}
 		out = append(out, it)
+	}
+	return out
+}
+
+// dropTaskLevel removes task-level items, used to hide tasks from the flat
+// sprint view since they're already shown in the PBI's detail preview.
+func dropTaskLevel(items []*model.WorkItem, taskLevel func(*model.WorkItem) bool) []*model.WorkItem {
+	var out []*model.WorkItem
+	for _, it := range items {
+		if !taskLevel(it) {
+			out = append(out, it)
+		}
 	}
 	return out
 }

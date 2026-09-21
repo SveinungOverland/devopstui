@@ -324,6 +324,10 @@ func (a *App) wireLists() {
 			return ""
 		}
 	}
+	// Tasks already show in the PBI's detail preview and progress badge, so
+	// the flat sprint view drops them. Backlog's query never returns
+	// task-level items in the first place, flat or not.
+	a.sprint.hideTasksFlat = true
 }
 
 // ------------------------------------------------------------ messages
