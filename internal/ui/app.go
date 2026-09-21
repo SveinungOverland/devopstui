@@ -152,6 +152,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		previewDash:  true,
 	}
 	a.wireLists()
+	a.sprint.showDone = !cfg.HideDone
 	a.ctx.Org = cfg.Org
 	a.ctx.Project = cfg.Project
 	a.ctx.Team = cfg.Team
@@ -1244,6 +1245,10 @@ func (a *App) onListKey(msg tea.KeyMsg, l *list) tea.Cmd {
 	case key.Matches(msg, keys.Closed):
 		l.showDone = !l.showDone
 		l.rebuild()
+		if l == a.sprint {
+			a.cfg.HideDone = !l.showDone
+			a.persist()
+		}
 	default:
 		return a.onActionKey(msg)
 	}
@@ -1442,6 +1447,7 @@ func (a *App) pickProject() tea.Cmd {
 		a.dashBoard, a.dashLanes = newBoard(), newLanes()
 		a.myItems, a.dashChildren = nil, nil
 		a.wireLists()
+		a.sprint.showDone = !a.cfg.HideDone
 		return a.loadContext()
 	})
 	return nil

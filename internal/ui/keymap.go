@@ -92,7 +92,7 @@ var keys = keymap{
 	Open:   b("open in browser", "o"),
 	Yank:   b("yank id", "y"),
 	Flat:   b("flat/tree", "f"),
-	Closed: b("show closed", "c"),
+	Closed: b("hide done", "c"),
 
 	Left:     b("left", "h", "left"),
 	Right:    b("right", "l", "right"),
