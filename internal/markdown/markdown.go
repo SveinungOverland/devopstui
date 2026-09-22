@@ -70,10 +70,20 @@ func ToHTML(src string) string {
 var (
 	mu        sync.Mutex
 	renderers = map[int]*glamour.TermRenderer{}
+	rendered  = map[renderKey]string{}
 )
 
+type renderKey struct {
+	src   string
+	width int
+}
+
+// maxRendered bounds the output cache; it is simply cleared when full.
+const maxRendered = 256
+
 // Render draws Markdown for a terminal of the given width. Renderers are
-// cached per width because building one is expensive.
+// cached per width because building one is expensive, and output is cached
+// too since the preview pane re-renders the same text on every cursor move.
 func Render(src string, width int) string {
 	src = strings.TrimSpace(src)
 	if src == "" {
@@ -82,7 +92,12 @@ func Render(src string, width int) string {
 	if width < 20 {
 		width = 20
 	}
+	key := renderKey{src, width}
 	mu.Lock()
+	if out, ok := rendered[key]; ok {
+		mu.Unlock()
+		return out
+	}
 	r, ok := renderers[width]
 	if !ok {
 		opts := []glamour.TermRendererOption{glamour.WithWordWrap(width), glamour.WithEmoji()}
@@ -106,5 +121,12 @@ func Render(src string, width int) string {
 	}
 	// Glamour pads every line with a leading margin and adds blank lines
 	// around the document; trim the vertical slack, keep the margin.
-	return strings.Trim(out, "\n")
+	out = strings.Trim(out, "\n")
+	mu.Lock()
+	if len(rendered) >= maxRendered {
+		clear(rendered)
+	}
+	rendered[key] = out
+	mu.Unlock()
+	return out
 }

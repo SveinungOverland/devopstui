@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sveinungoverland/devopstui/internal/ado"
 	"github.com/sveinungoverland/devopstui/internal/config"
@@ -449,44 +450,29 @@ func (a *App) loadContext() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// The calls are independent, so run them side by side; startup
+		// otherwise waits on each round trip in turn. Any error discards
+		// the whole result (see onContextLoaded).
 		var m contextLoadedMsg
-		if project != "" && filterTeam != "" {
-			// Best effort: a bad filter team must not block startup.
-			m.filter, _ = a.client.TeamAreas(ctx, project, filterTeam)
+		g, gctx := errgroup.WithContext(ctx)
+		g.Go(func() (err error) { m.me, err = a.client.Me(gctx); return })
+		g.Go(func() (err error) { m.projects, err = a.client.Projects(gctx); return })
+		if project != "" {
+			g.Go(func() (err error) { m.teams, err = a.client.Teams(gctx, project); return })
+			if filterTeam != "" {
+				// Best effort: a bad filter team must not block startup.
+				g.Go(func() error { m.filter, _ = a.client.TeamAreas(gctx, project, filterTeam); return nil })
+			}
 		}
-		var err error
-		if m.me, err = a.client.Me(ctx); err != nil {
-			m.err = err
-			return m
+		if project != "" && team != "" {
+			g.Go(func() (err error) { m.iterations, err = a.client.Iterations(gctx, project, team); return })
+			// Best effort: a project-wide read can fail on permissions the team
+			// iteration read doesn't need, and must not block startup.
+			g.Go(func() error { m.projectIterations, _ = a.client.ProjectIterations(gctx, project); return nil })
+			g.Go(func() (err error) { m.boards, err = a.client.Boards(gctx, project, team); return })
+			g.Go(func() (err error) { m.backlog, err = a.client.BacklogConfig(gctx, project, team); return })
 		}
-		if m.projects, err = a.client.Projects(ctx); err != nil {
-			m.err = err
-			return m
-		}
-		if project == "" {
-			return m
-		}
-		if m.teams, err = a.client.Teams(ctx, project); err != nil {
-			m.err = err
-			return m
-		}
-		if team == "" {
-			return m
-		}
-		if m.iterations, err = a.client.Iterations(ctx, project, team); err != nil {
-			m.err = err
-			return m
-		}
-		// Best effort: a project-wide read can fail on permissions the team
-		// iteration read doesn't need, and must not block startup.
-		m.projectIterations, _ = a.client.ProjectIterations(ctx, project)
-		if m.boards, err = a.client.Boards(ctx, project, team); err != nil {
-			m.err = err
-			return m
-		}
-		if m.backlog, err = a.client.BacklogConfig(ctx, project, team); err != nil {
-			m.err = err
-		}
+		m.err = g.Wait()
 		return m
 	}
 }
