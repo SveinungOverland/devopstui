@@ -19,6 +19,7 @@ type board struct {
 	cols     [][]*model.WorkItem
 	col, row int
 	offsetC  int
+	visible  int // columns on screen at the last render
 	selected map[int]bool
 	progress map[int]progress
 }
@@ -191,20 +192,52 @@ func (b *board) view(width, height int, focused bool) string {
 	// never leaves the rest of the row blank.
 	colW := max(width/len(b.cols), boardColMinW)
 	visible := max(width/colW, 1)
+	b.visible = visible
 	if b.col < b.offsetC {
 		b.offsetC = b.col
 	}
 	if b.col >= b.offsetC+visible {
 		b.offsetC = b.col - visible + 1
 	}
+	end := min(b.offsetC+visible, len(b.cols))
+	// Once scrolling, the visible columns share the whole width between
+	// them, the first few taking a cell each of what doesn't divide evenly,
+	// so the row always reaches the preview pane.
+	n := end - b.offsetC
+	colW, extra := width/max(n, 1), width%max(n, 1)
+	// Titles get a second line when every visible column's cards still
+	// fit at that height, so a roomy board shows whole titles while a busy
+	// one keeps its cards compact. Deciding once for the row keeps cards
+	// level across columns.
+	lines := 2
+	for ci := b.offsetC; ci < end; ci++ {
+		if len(b.cols[ci])*(2+lines) > max(height-2, 3)-2 {
+			lines = 1
+			break
+		}
+	}
 	var rendered []string
-	for ci := b.offsetC; ci < len(b.cols) && ci < b.offsetC+visible; ci++ {
-		rendered = append(rendered, b.renderColumn(ci, colW, height, focused))
+	for ci := b.offsetC; ci < end; ci++ {
+		w := colW
+		if ci-b.offsetC < extra {
+			w++
+		}
+		rendered = append(rendered, b.renderColumn(ci, w, height, focused, lines))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-func (b *board) renderColumn(ci, colW, height int, focused bool) string {
+// scrollHint describes which board columns are on screen when they don't
+// all fit, e.g. "columns 1-3 of 5"; "" when every column shows.
+func (b *board) scrollHint() string {
+	if b.visible == 0 || b.visible >= len(b.cols) {
+		return ""
+	}
+	end := min(b.offsetC+b.visible, len(b.cols))
+	return fmt.Sprintf("columns %d-%d of %d", b.offsetC+1, end, len(b.cols))
+}
+
+func (b *board) renderColumn(ci, colW, height int, focused bool, titleLines int) string {
 	col := b.def.Columns[ci]
 	items := b.cols[ci]
 	var effort float64
@@ -222,7 +255,7 @@ func (b *board) renderColumn(ci, colW, height int, focused bool) string {
 	lines := []string{pad(trunc(head, colW-2), colW-2), sMuted.Render(strings.Repeat("─", colW-2))}
 	// height includes the panel's own border, like every other panel.
 	innerH := max(height-2, 3)
-	cardH := 3
+	cardH := 2 + titleLines
 	maxCards := max((innerH-2)/cardH, 1)
 	start := 0
 	if ci == b.col && b.row >= maxCards {
@@ -231,7 +264,7 @@ func (b *board) renderColumn(ci, colW, height int, focused bool) string {
 	for ri := start; ri < len(items) && ri < start+maxCards; ri++ {
 		it := items[ri]
 		cur := ci == b.col && ri == b.row
-		lines = append(lines, b.renderCard(it, colW-2, cur && focused)...)
+		lines = append(lines, b.renderCard(it, colW-2, cur && focused, titleLines)...)
 	}
 	for len(lines) < innerH {
 		lines = append(lines, "")
@@ -243,7 +276,7 @@ func (b *board) renderColumn(ci, colW, height int, focused bool) string {
 	return style.Width(colW - 2).Height(innerH).Render(strings.Join(lines[:min(len(lines), innerH)], "\n"))
 }
 
-func (b *board) renderCard(it *model.WorkItem, w int, cur bool) []string {
+func (b *board) renderCard(it *model.WorkItem, w int, cur bool, lines int) []string {
 	st := rowStyler(cur)
 	plain := st(lipgloss.NewStyle())
 	muted := st(sMuted)
@@ -268,7 +301,10 @@ func (b *board) renderCard(it *model.WorkItem, w int, cur bool) []string {
 		right = append(right, muted.Render(who))
 	}
 	l1 = spread(plain, l1, w, right...)
-	l2 := plain.Render(" " + trunc(it.Title, w-1))
-	l2 += fill(plain, w-lipgloss.Width(l2))
-	return []string{l1, l2, ""}
+	out := []string{l1}
+	for _, t := range titleLines(it.Title, w-1, lines) {
+		l := plain.Render(" " + t)
+		out = append(out, l+fill(plain, w-lipgloss.Width(l)))
+	}
+	return append(out, "")
 }

@@ -423,8 +423,12 @@ func (ln *lanes) renderCellRow(li, ci, r, w int, cur bool) string {
 	if r >= len(cell) {
 		return pad("", w)
 	}
-	return pad(ln.renderCard(cell[r], w, cur), w)
+	// A card stops growing at laneCardMaxW so the initials stay near the
+	// title on a wide screen instead of at the far edge of the cell.
+	return pad(ln.renderCard(cell[r], min(w, laneCardMaxW), cur), w)
 }
+
+const laneCardMaxW = 64
 
 func (ln *lanes) renderCard(it *model.WorkItem, w int, cur bool) string {
 	st := rowStyler(cur)

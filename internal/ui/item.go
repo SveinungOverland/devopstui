@@ -184,8 +184,11 @@ func (v *itemView) view(w, h int, spin string) string {
 	case v.descOnly:
 		descW = w
 	case w >= 110:
-		descW = w * 11 / 20
-		kanW = w - descW
+		// The kanban wants about 22 cells per state column; give it that
+		// when the screen allows, never less than 9/20 of the width, and
+		// always leave the description at least 80 to read in.
+		kanW = max(w*9/20, min(len(v.states)*22+4, w-80))
+		descW = w - kanW
 	default:
 		stacked = true
 	}
@@ -348,13 +351,23 @@ func (v *itemView) renderKanban(w, h int, spin string) string {
 
 	colW := max(inner/max(len(v.cols), 1), 14)
 	visible := max(inner/colW, 1)
+	colW = max(inner/min(visible, max(len(v.cols), 1)), colW) // share leftover width when scrolling
 	start := 0
 	if v.col >= visible {
 		start = v.col - visible + 1
 	}
+	// Two title lines per card when every visible column still fits,
+	// same rule as the Board.
+	lines := 2
+	for i := start; i < len(v.cols) && i < start+visible; i++ {
+		if len(v.cols[i])*(2+lines) > h-5 {
+			lines = 1
+			break
+		}
+	}
 	var cols []string
 	for i := start; i < len(v.cols) && i < start+visible; i++ {
-		cols = append(cols, v.renderColumn(i, colW, h-3))
+		cols = append(cols, v.renderColumn(i, colW, h-3, lines))
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	if start > 0 || start+visible < len(v.cols) {
@@ -363,7 +376,7 @@ func (v *itemView) renderKanban(w, h int, spin string) string {
 	return style.Width(w - 2).Height(h - 2).Render(head + "\n" + body)
 }
 
-func (v *itemView) renderColumn(ci, colW, h int) string {
+func (v *itemView) renderColumn(ci, colW, h, titleLines int) string {
 	name := v.states[ci]
 	items := v.cols[ci]
 	title := trunc(name, colW-4)
@@ -375,7 +388,10 @@ func (v *itemView) renderColumn(ci, colW, h int) string {
 	lines := []string{title + sMuted.Render(fmt.Sprintf(" %d", len(items))),
 		sMuted.Render(strings.Repeat("─", colW-2))}
 
-	perCard := 2
+	perCard := 1 + titleLines
+	if titleLines > 1 {
+		perCard++ // a blank line keeps taller cards apart
+	}
 	maxCards := max((h-2)/perCard, 1)
 	start := 0
 	if ci == v.col && v.row >= maxCards {
@@ -383,7 +399,7 @@ func (v *itemView) renderColumn(ci, colW, h int) string {
 	}
 	for ri := start; ri < len(items) && ri < start+maxCards; ri++ {
 		cur := v.focusKan && ci == v.col && ri == v.row
-		lines = append(lines, v.renderCard(items[ri], colW-2, cur)...)
+		lines = append(lines, v.renderCard(items[ri], colW-2, cur, titleLines)...)
 	}
 	for len(lines) < h {
 		lines = append(lines, "")
@@ -391,7 +407,7 @@ func (v *itemView) renderColumn(ci, colW, h int) string {
 	return lipgloss.NewStyle().Width(colW).MaxHeight(h).Render(strings.Join(lines[:min(len(lines), h)], "\n"))
 }
 
-func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool) []string {
+func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool, lines int) []string {
 	st := rowStyler(cur)
 	plain := st(lipgloss.NewStyle())
 	muted := st(sMuted)
@@ -410,7 +426,13 @@ func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool) []string {
 	}
 	l1 := mark + st(kindStyle(it.Kind)).Render(it.Kind.Tag()) + plain.Render(" ") + muted.Render(fmt.Sprintf("%d", it.ID))
 	l1 = spread(plain, l1, w, right...)
-	l2 := plain.Render(" " + trunc(it.Title, w-1))
-	l2 += fill(plain, w-lipgloss.Width(l2))
-	return []string{l1, l2}
+	out := []string{l1}
+	for _, t := range titleLines(it.Title, w-1, lines) {
+		l := plain.Render(" " + t)
+		out = append(out, l+fill(plain, w-lipgloss.Width(l)))
+	}
+	if lines > 1 {
+		out = append(out, "")
+	}
+	return out
 }

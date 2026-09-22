@@ -2087,6 +2087,11 @@ func (a *App) moveChildState(dc int) tea.Cmd {
 // the one footer line are taken.
 func (a *App) bodyHeight() int { return max(a.h-3, 1) }
 
+// previewMaxW caps the Board and Dashboard preview pane. It used to be 60,
+// which on a full-screen terminal wrapped descriptions at ~56 characters next
+// to columns with nothing in them.
+const previewMaxW = 100
+
 // detailWidth is the width of the side preview pane, 0 when hidden (toggled
 // off with z, or the terminal is too narrow).
 func (a *App) detailWidth() int {
@@ -2097,13 +2102,13 @@ func (a *App) detailWidth() int {
 		if !a.previewBoard {
 			return 0
 		}
-		return min(a.w/3, 60)
+		return min(a.w/3, previewMaxW)
 	}
 	if a.view == viewDash {
 		if !a.previewDash {
 			return 0
 		}
-		return min(a.w/3, 60)
+		return min(a.w/3, previewMaxW)
 	}
 	if !a.previewList {
 		return 0
@@ -2185,7 +2190,11 @@ func (a *App) renderHeader() string {
 		}
 		summary = sMuted.Render(focus)
 	case a.view == viewBoard:
-		summary = sMuted.Render(a.currentBoard().Name)
+		name := a.currentBoard().Name
+		if h := a.board.scrollHint(); h != "" {
+			name += " · " + h
+		}
+		summary = sMuted.Render(name)
 	case a.view == viewDash:
 		focus := "kanban"
 		if a.dashFocusLanes {

@@ -409,6 +409,16 @@ func (l *list) remove(ids []int) {
 }
 
 // view renders the list into a box of the given inner size.
+// Past listWideW a list row shows the assignee's name instead of initials;
+// past listWiderW it also shows priority and last change. listTitleMaxW caps
+// the title column (indent included) so wide screens don't push the state
+// and assignee off to the far edge.
+const (
+	listWideW     = 120
+	listWiderW    = 150
+	listTitleMaxW = 80
+)
+
 func (l *list) view(width, height int) string {
 	if len(l.rows) == 0 {
 		msg := l.empty
@@ -428,6 +438,18 @@ func (l *list) view(width, height int) string {
 	iterW := 0
 	if l.showIter {
 		iterW = 12
+	}
+	// A wide list spends its room on more columns rather than on an ever
+	// wider gap between a title and its state: first the assignee's name
+	// instead of initials, then priority and when it last changed. Past
+	// that the title stops growing, so the columns stay next to it.
+	fullWho := width >= listWideW
+	if fullWho {
+		whoW = 18
+	}
+	prioW, changedW := 0, 0
+	if width >= listWiderW {
+		prioW, changedW = 3, 10
 	}
 	var b strings.Builder
 	for i := l.offset; i < len(l.rows) && i < l.offset+height; i++ {
@@ -459,6 +481,10 @@ func (l *list) view(width, height int) string {
 		tag := st(kindStyle(it.Kind)).Render(pad(it.Kind.Tag(), 4))
 		id := muted.Render(fmt.Sprintf("%5d", it.ID))
 		titleW := width - 2 - len(indent) - 2 - 5 - 6 - stateW - whoW - effW - iterW - 4
+		if prioW > 0 {
+			titleW -= prioW + changedW + 2
+		}
+		titleW = min(titleW, listTitleMaxW-len(indent))
 		badge := ""
 		if p, ok := l.progress[it.ID]; ok {
 			badge = " " + st(p.style()).Render(p.text())
@@ -478,6 +504,9 @@ func (l *list) view(width, height int) string {
 		title += fill(plain, titleW-lipgloss.Width(title))
 		state := st(stateStyle(it.State)).Render(pad(trunc(it.State, stateW), stateW))
 		who := muted.Render(initials(it.AssignedTo))
+		if fullWho {
+			who = muted.Render(pad(trunc(it.AssignedTo, whoW), whoW))
+		}
 		effS := fmtEffort(it.Effort)
 		if l.taskLevel != nil && l.taskLevel(it) {
 			effS = ""
@@ -492,6 +521,13 @@ func (l *list) view(width, height int) string {
 		}
 		sp := plain.Render(" ")
 		line := marker + plain.Render(indent+arrow) + tag + sp + id + sp + title + sp + state + sp + who + sp + eff + iter
+		if prioW > 0 {
+			prio := ""
+			if it.Priority > 0 {
+				prio = fmt.Sprintf("P%d", it.Priority)
+			}
+			line += sp + muted.Render(padLeft(prio, prioW)) + sp + muted.Render(padLeft(ago(it.ChangedDate), changedW))
+		}
 		line += fill(plain, width-lipgloss.Width(line))
 		b.WriteString(line)
 		if i < l.offset+height-1 && i < len(l.rows)-1 {
