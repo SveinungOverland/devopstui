@@ -64,6 +64,22 @@ func fill(st lipgloss.Style, n int) string {
 	return st.Render(strings.Repeat(" ", n))
 }
 
+// spread lays out a card's first line: left flush left, the right pieces
+// flush right, separated by at least one space. When that doesn't fit in w,
+// right pieces are dropped from the front (lowest priority first) rather
+// than letting them run into left — "PBI 1005" and an effort of 3 must
+// never read as "PBI 10053".
+func spread(plain lipgloss.Style, left string, w int, right ...string) string {
+	for len(right) > 0 {
+		r := strings.Join(right, plain.Render(" "))
+		if gap := w - lipgloss.Width(left) - lipgloss.Width(r); gap >= 1 {
+			return left + fill(plain, gap) + r
+		}
+		right = right[1:]
+	}
+	return left + fill(plain, w-lipgloss.Width(left))
+}
+
 // cursorMark is the left-edge marker of the highlighted row.
 const cursorMark = "▌"
 

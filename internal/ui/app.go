@@ -228,9 +228,9 @@ func (a *App) dashInclude() func(*model.WorkItem) bool {
 
 // dashLayout splits the Dashboard's body height between the kanban (top)
 // and the lanes (bottom); topH also sizes the side preview pane when shown.
-// 5 = 1 summary line + 2 border rows for each of the two bordered rows.
+// Both heights include their panels' borders; the 1 is the summary line.
 func (a *App) dashLayout() (topH, botH int) {
-	budget := max(a.bodyHeight()-5, 6)
+	budget := max(a.bodyHeight()-1, 11)
 	// The lanes show every child (no more "+N" collapsing), so they get
 	// the bigger share of the body.
 	topH = max(budget*2/5, 5)
@@ -2083,7 +2083,9 @@ func (a *App) moveChildState(dc int) tea.Cmd {
 	return a.applyPatch([]*model.WorkItem{c}, "Move to "+state, model.Patch{Field: model.FieldState, Value: state})
 }
 
-func (a *App) bodyHeight() int { return max(a.h-5, 1) }
+// bodyHeight is the rows left for the panels once the two header lines and
+// the one footer line are taken.
+func (a *App) bodyHeight() int { return max(a.h-3, 1) }
 
 // detailWidth is the width of the side preview pane, 0 when hidden (toggled
 // off with z, or the terminal is too narrow).

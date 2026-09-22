@@ -220,8 +220,10 @@ func (b *board) renderColumn(ci, colW, height int, focused bool) string {
 		head = sHeader.Render(col.Name) + strings.TrimPrefix(head, col.Name)
 	}
 	lines := []string{pad(trunc(head, colW-2), colW-2), sMuted.Render(strings.Repeat("─", colW-2))}
+	// height includes the panel's own border, like every other panel.
+	innerH := max(height-2, 3)
 	cardH := 3
-	maxCards := max((height-2)/cardH, 1)
+	maxCards := max((innerH-2)/cardH, 1)
 	start := 0
 	if ci == b.col && b.row >= maxCards {
 		start = b.row - maxCards + 1
@@ -231,14 +233,14 @@ func (b *board) renderColumn(ci, colW, height int, focused bool) string {
 		cur := ci == b.col && ri == b.row
 		lines = append(lines, b.renderCard(it, colW-2, cur && focused)...)
 	}
-	for len(lines) < height {
+	for len(lines) < innerH {
 		lines = append(lines, "")
 	}
 	style := sPanel
 	if ci == b.col && focused {
 		style = sPanelFocus
 	}
-	return style.Width(colW - 2).Height(height).Render(strings.Join(lines[:min(len(lines), height)], "\n"))
+	return style.Width(colW - 2).Height(innerH).Render(strings.Join(lines[:min(len(lines), innerH)], "\n"))
 }
 
 func (b *board) renderCard(it *model.WorkItem, w int, cur bool) []string {
@@ -258,11 +260,14 @@ func (b *board) renderCard(it *model.WorkItem, w int, cur bool) []string {
 	if p, ok := b.progress[it.ID]; ok {
 		l1 += plain.Render(" ") + st(p.style()).Render(p.text())
 	}
-	right := muted.Render(initials(it.AssignedTo))
+	var right []string
 	if it.Effort > 0 {
-		right = muted.Render(fmtEffort(it.Effort)+" ") + right
+		right = append(right, muted.Render(fmtEffort(it.Effort)))
 	}
-	l1 += fill(plain, w-lipgloss.Width(l1)-lipgloss.Width(right)) + right
+	if who := initials(it.AssignedTo); who != "" {
+		right = append(right, muted.Render(who))
+	}
+	l1 = spread(plain, l1, w, right...)
 	l2 := plain.Render(" " + trunc(it.Title, w-1))
 	l2 += fill(plain, w-lipgloss.Width(l2))
 	return []string{l1, l2, ""}

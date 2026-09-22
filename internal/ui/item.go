@@ -399,14 +399,17 @@ func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool) []string {
 	if cur {
 		mark = st(sKey).Render(cursorMark)
 	}
-	right := muted.Render(initials(it.AssignedTo))
+	var right []string
 	if v.cfg.TaskLevel(it) && it.RemainingWork > 0 && !isDone(it.State) {
-		right = muted.Render(fmtEffort(it.RemainingWork)+"h ") + right
+		right = append(right, muted.Render(fmtEffort(it.RemainingWork)+"h"))
 	} else if it.Effort > 0 {
-		right = muted.Render(fmtEffort(it.Effort)+" ") + right
+		right = append(right, muted.Render(fmtEffort(it.Effort)))
+	}
+	if who := initials(it.AssignedTo); who != "" {
+		right = append(right, muted.Render(who))
 	}
 	l1 := mark + st(kindStyle(it.Kind)).Render(it.Kind.Tag()) + plain.Render(" ") + muted.Render(fmt.Sprintf("%d", it.ID))
-	l1 += fill(plain, w-lipgloss.Width(l1)-lipgloss.Width(right)) + right
+	l1 = spread(plain, l1, w, right...)
 	l2 := plain.Render(" " + trunc(it.Title, w-1))
 	l2 += fill(plain, w-lipgloss.Width(l2))
 	return []string{l1, l2}
