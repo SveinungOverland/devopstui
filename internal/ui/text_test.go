@@ -2,9 +2,11 @@ package ui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSpreadDropsRightPiecesBeforeTouching(t *testing.T) {
@@ -41,6 +43,31 @@ func TestTitleLines(t *testing.T) {
 	for _, c := range cases {
 		if got := titleLines(c.s, c.w, c.n); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("titleLines(%q, %d, %d) = %q, want %q", c.s, c.w, c.n, got, c.want)
+		}
+	}
+}
+
+func TestPlural(t *testing.T) {
+	for n, want := range map[int]string{0: "0 lanes", 1: "1 lane", 2: "2 lanes"} {
+		if got := plural(n, "lane"); got != want {
+			t.Errorf("plural(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
+func TestFooterHintsKeepsWholeHints(t *testing.T) {
+	bindings := footerTree
+	all := footerHints(bindings, 1000)
+	if strings.Contains(all, "more") {
+		t.Fatalf("everything fits, got %q", all)
+	}
+	for _, w := range []int{40, 80, 120} {
+		got := ansi.Strip(footerHints(bindings, w))
+		if lipgloss.Width(got) > w {
+			t.Errorf("w=%d: %d wide: %q", w, lipgloss.Width(got), got)
+		}
+		if !strings.HasSuffix(got, "? more") || strings.Contains(got, "…") {
+			t.Errorf("w=%d: want whole hints ending in \"? more\", got %q", w, got)
 		}
 	}
 }

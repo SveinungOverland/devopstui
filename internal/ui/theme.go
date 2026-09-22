@@ -10,7 +10,7 @@ import (
 
 var (
 	cAccent  = lipgloss.AdaptiveColor{Light: "#005f87", Dark: "#5fafff"}
-	cMuted   = lipgloss.AdaptiveColor{Light: "#8a8a8a", Dark: "#6c6c6c"}
+	cMuted   = lipgloss.AdaptiveColor{Light: "#6c6c6c", Dark: "#8a8a8a"} // readable on the cursor row too
 	cText    = lipgloss.AdaptiveColor{Light: "#303030", Dark: "#d0d0d0"}
 	cBorder  = lipgloss.AdaptiveColor{Light: "#c6c6c6", Dark: "#444444"}
 	cFocus   = cAccent
@@ -20,7 +20,7 @@ var (
 	cOK      = lipgloss.AdaptiveColor{Light: "#008700", Dark: "#5fd75f"}
 	cEpic    = lipgloss.AdaptiveColor{Light: "#8700af", Dark: "#d787ff"}
 	cFeature = lipgloss.AdaptiveColor{Light: "#d75f00", Dark: "#ffaf5f"}
-	cPBI     = lipgloss.AdaptiveColor{Light: "#0057b8", Dark: "#5fafff"}
+	cPBI     = lipgloss.AdaptiveColor{Light: "#008787", Dark: "#5fd7d7"} // not cAccent: PBI tags would read as keys/focus
 	cTask    = lipgloss.AdaptiveColor{Light: "#5f5f5f", Dark: "#9e9e9e"}
 	cBug     = lipgloss.AdaptiveColor{Light: "#d70000", Dark: "#ff5f5f"}
 

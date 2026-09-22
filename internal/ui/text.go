@@ -125,6 +125,14 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
+// plural returns "1 lane", "3 lanes": count and noun, with an s unless n is 1.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // overlay centers popup on top of bg by replacing the covered cells.
 func overlay(bg, popup string, w, h int) string {
 	bgLines := strings.Split(bg, "\n")

@@ -260,7 +260,7 @@ func (a *App) onBulkDone(msg bulkDoneMsg) tea.Cmd {
 		a.popup = &report{title: fmt.Sprintf("%s: %d ok, %d failed", msg.label, ok, len(failed)), lines: failed}
 		return tea.Batch(cmds...)
 	}
-	cmds = append(cmds, a.setFlash(fmt.Sprintf("%s: %d item(s)", msg.label, ok), false))
+	cmds = append(cmds, a.setFlash(msg.label+": "+plural(ok, "item"), false))
 	return tea.Batch(cmds...)
 }
 
@@ -416,7 +416,7 @@ func (a *App) moveTo(targets []*model.WorkItem, path, name string) tea.Cmd {
 		}
 	}
 	if len(children) > 0 {
-		a.popup = newChoice(fmt.Sprintf("%s: %d item(s) with %d children", label, len(targets), len(children)), describe(targets),
+		a.popup = newChoice(fmt.Sprintf("%s: %s with %d children", label, plural(len(targets), "item"), len(children)), describe(targets),
 			[]choiceOpt{
 				{"y", "move with children", run(children)},
 				{"o", "move only these", run(nil)},
@@ -425,7 +425,7 @@ func (a *App) moveTo(targets []*model.WorkItem, path, name string) tea.Cmd {
 		return nil
 	}
 	if a.needConfirm(targets) {
-		a.popup = newConfirm(fmt.Sprintf("%s: %d item(s)?", label, len(targets)), describe(targets), run(nil))
+		a.popup = newConfirm(fmt.Sprintf("%s: %s?", label, plural(len(targets), "item")), describe(targets), run(nil))
 		return nil
 	}
 	return run(nil)()
@@ -480,7 +480,7 @@ func (a *App) pickParent(targets []*model.WorkItem) tea.Cmd {
 				})
 			}
 			if a.needConfirm(targets) {
-				a.popup = newConfirm(fmt.Sprintf("%s for %d item(s)?", label, len(targets)), describe(targets), run)
+				a.popup = newConfirm(fmt.Sprintf("%s for %s?", label, plural(len(targets), "item")), describe(targets), run)
 				return nil
 			}
 			return run()

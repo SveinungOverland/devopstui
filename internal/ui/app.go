@@ -2165,7 +2165,7 @@ func (a *App) renderHeader() string {
 	if a.me != "" {
 		right = sMuted.Render(a.me+"  ") + right
 	}
-	line1 := pad(left, a.w-lipgloss.Width(right)) + right
+	line1 := pad(left, a.w-lipgloss.Width(right)-2) + "  " + right // a truncated crumb never touches the name
 
 	var tabs []string
 	for _, v := range tabViews {
@@ -2196,15 +2196,16 @@ func (a *App) renderHeader() string {
 		}
 		summary = sMuted.Render(name)
 	case a.view == viewDash:
+		// The counts are on the summary line right below; this just says
+		// which half has the keys.
 		focus := "kanban"
 		if a.dashFocusLanes {
 			focus = "lanes"
 		}
-		pbis := 0
-		for _, col := range a.dashBoard.cols {
-			pbis += len(col)
+		if h := a.dashBoard.scrollHint(); h != "" && !a.dashFocusLanes {
+			focus += " · " + h
 		}
-		summary = sMuted.Render(fmt.Sprintf("%s · %d PBI(s) · %d lane(s)", focus, pbis, len(a.dashLanes.ls)))
+		summary = sMuted.Render(focus)
 	default:
 		if l := a.activeList(); l != nil {
 			summary = l.summary()
@@ -2310,8 +2311,12 @@ func (a *App) dashSummary(width int) string {
 			children += len(col)
 		}
 	}
-	s := fmt.Sprintf("%s PBI(s) assigned to you · %s work item(s) across %s lane(s)",
-		sKey.Render(strconv.Itoa(pbis)), sKey.Render(strconv.Itoa(children)), sKey.Render(strconv.Itoa(len(a.dashLanes.ls))))
+	count := func(n int, noun string) string {
+		p := plural(n, noun)
+		i := strings.IndexByte(p, ' ')
+		return sKey.Render(p[:i]) + p[i:]
+	}
+	s := count(pbis, "PBI") + " assigned to you · " + count(children, "work item") + " across " + count(len(a.dashLanes.ls), "lane")
 	return pad(s, width)
 }
 
@@ -2340,11 +2345,6 @@ func (a *App) renderFooter() string {
 	if a.focusDetail {
 		bindings = []key.Binding{keys.Up, keys.Down, keys.Focus, keys.Edit, keys.Open}
 	}
-	var parts []string
-	for _, kb := range bindings {
-		parts = append(parts, sKey.Render(kb.Help().Key)+" "+sMuted.Render(kb.Help().Desc))
-	}
-	hints := strings.Join(parts, "  ")
 	msg := ""
 	if a.flash != "" {
 		if a.flashErr {
@@ -2353,5 +2353,39 @@ func (a *App) renderFooter() string {
 			msg = sOK.Render(trunc(a.flash, a.w/2))
 		}
 	}
-	return pad(trunc(hints, a.w-lipgloss.Width(msg)-1), a.w-lipgloss.Width(msg)-1) + msg
+	avail := a.w - 1
+	if msg != "" {
+		avail -= lipgloss.Width(msg) + 3 // keep the flash clear of the hints
+	}
+	return pad(footerHints(bindings, avail), a.w-lipgloss.Width(msg)-1) + msg
+}
+
+// footerHints renders as many whole key hints as fit in width, in order.
+// When some don't fit, the last slot goes to "? more" so the rest are one
+// key away, instead of cutting a hint off mid-word.
+func footerHints(bindings []key.Binding, width int) string {
+	hint := func(k, desc string) string { return sKey.Render(k) + " " + sMuted.Render(desc) }
+	var parts []string
+	for _, kb := range bindings {
+		parts = append(parts, hint(kb.Help().Key, kb.Help().Desc))
+	}
+	if all := strings.Join(parts, "  "); lipgloss.Width(all) <= width {
+		return all
+	}
+	more := hint(keys.Help.Help().Key, "more")
+	out := ""
+	for _, p := range parts {
+		next := p
+		if out != "" {
+			next = out + "  " + p
+		}
+		if lipgloss.Width(next)+2+lipgloss.Width(more) > width {
+			break
+		}
+		out = next
+	}
+	if out == "" {
+		return trunc(more, width)
+	}
+	return out + "  " + more
 }

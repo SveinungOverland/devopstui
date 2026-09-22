@@ -242,21 +242,16 @@ func (v *itemView) renderHead(w int) string {
 	if len(it.Tags) > 0 {
 		facts = append(facts, strings.Join(it.Tags, ", "))
 	}
+	facts = append(facts, sMuted.Render("updated "+ago(it.ChangedDate)+" by "+it.ChangedBy))
 	meta := strings.Join(facts, sMuted.Render(" · "))
 
-	crumb := ""
+	head := " " + trunc(title, w-1) + "\n " + trunc(meta, w-1)
 	if v.parent != nil {
-		crumb = sMuted.Render("↑ ") + kindStyle(v.parent.Kind).Render(v.parent.Kind.Tag()) +
+		crumb := sMuted.Render("↑ ") + kindStyle(v.parent.Kind).Render(v.parent.Kind.Tag()) +
 			sMuted.Render(fmt.Sprintf(" %d %s", v.parent.ID, trunc(v.parent.Title, 40)))
+		head += "\n " + trunc(crumb, w-1)
 	}
-	updated := sMuted.Render(ago(it.ChangedDate) + " by " + it.ChangedBy)
-	line3 := crumb
-	if line3 == "" {
-		line3 = updated
-	} else {
-		line3 = pad(line3, w-lipgloss.Width(updated)-1) + updated
-	}
-	return " " + trunc(title, w-1) + "\n " + trunc(meta, w-1) + "\n " + trunc(line3, w-1)
+	return head
 }
 
 func (v *itemView) renderDesc(w, h int) string {
