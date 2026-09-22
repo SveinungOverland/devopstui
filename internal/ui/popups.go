@@ -324,10 +324,25 @@ func (helpPopup) View(w, h int) string {
 		}
 		cols = append(cols, strings.Join(lines, "\n"))
 	}
-	// Two rows of three columns keeps it readable on 100+ cols.
-	row1 := lipgloss.JoinHorizontal(lipgloss.Top, padCol(cols[0]), padCol(cols[1]), padCol(cols[2]))
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top, padCol(cols[3]), padCol(cols[4]), padCol(cols[5]))
-	body := sTitle.Render("Keys") + "\n\n" + row1 + "\n\n" + row2 + "\n\n" + sMuted.Render("any key to close")
+	// Fill each row with as many groups as fit the screen, in order: all
+	// six side by side on a wide monitor, three per row around 140
+	// columns, fewer on a narrow terminal.
+	avail := w - 6 // popup border and padding
+	var rows []string
+	var row []string
+	rowW := 0
+	for _, c := range cols {
+		c = padCol(c)
+		cw := lipgloss.Width(c)
+		if len(row) > 0 && rowW+cw > avail {
+			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
+			row, rowW = nil, 0
+		}
+		row = append(row, c)
+		rowW += cw
+	}
+	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
+	body := sTitle.Render("Keys") + "\n\n" + strings.Join(rows, "\n\n") + "\n\n" + sMuted.Render("any key to close")
 	return sPopup.Render(body)
 }
 
@@ -336,7 +351,7 @@ func (helpPopup) View(w, h int) string {
 // view and hides done items everywhere else.
 var helpWhere = map[string]string{
 	keys.Comment.Help().Desc: "details",
-	keys.Closed.Help().Desc:  "lists & boards",
+	keys.Closed.Help().Desc:  "elsewhere",
 }
 
 func padCol(s string) string { return lipgloss.NewStyle().MarginRight(3).Render(s) }
