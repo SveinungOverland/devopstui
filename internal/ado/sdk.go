@@ -16,6 +16,7 @@ import (
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/webapi"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/work"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/workitemtracking"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sveinungoverland/devopstui/internal/markdown"
 	"github.com/sveinungoverland/devopstui/internal/model"
@@ -221,30 +222,38 @@ func (s *SDK) Boards(ctx context.Context, project, team string) ([]model.Board, 
 	if err != nil {
 		return nil, err
 	}
-	var out []model.Board
-	for _, r := range *refs {
-		id := r.Id.String()
-		b, err := s.work.GetBoard(ctx, work.GetBoardArgs{Project: &project, Team: &team, Id: &id})
-		if err != nil {
-			return nil, err
-		}
-		mb := model.Board{ID: id, Name: deref(r.Name)}
-		if b.Columns != nil {
-			for _, c := range *b.Columns {
-				col := model.BoardColumn{Name: deref(c.Name)}
-				if c.StateMappings != nil {
-					seen := map[string]bool{}
-					for _, st := range *c.StateMappings {
-						if !seen[st] {
-							seen[st] = true
-							col.States = append(col.States, st)
+	out := make([]model.Board, len(*refs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(4)
+	for i, r := range *refs {
+		g.Go(func() error {
+			id := r.Id.String()
+			b, err := s.work.GetBoard(gctx, work.GetBoardArgs{Project: &project, Team: &team, Id: &id})
+			if err != nil {
+				return err
+			}
+			mb := model.Board{ID: id, Name: deref(r.Name)}
+			if b.Columns != nil {
+				for _, c := range *b.Columns {
+					col := model.BoardColumn{Name: deref(c.Name)}
+					if c.StateMappings != nil {
+						seen := map[string]bool{}
+						for _, st := range *c.StateMappings {
+							if !seen[st] {
+								seen[st] = true
+								col.States = append(col.States, st)
+							}
 						}
 					}
+					mb.Columns = append(mb.Columns, col)
 				}
-				mb.Columns = append(mb.Columns, col)
 			}
-		}
-		out = append(out, mb)
+			out[i] = mb
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -376,25 +385,38 @@ func (s *SDK) query(ctx context.Context, project, wiql string) ([]*model.WorkIte
 	return s.fetch(ctx, project, ids)
 }
 
-// fetch loads work items by id in batches of 200.
+// fetch loads work items by id in batches of 200, a few batches at a time,
+// keeping the order of ids.
 func (s *SDK) fetch(ctx context.Context, project string, ids []int) ([]*model.WorkItem, error) {
-	var out []*model.WorkItem
-	for start := 0; start < len(ids); start += 200 {
-		end := min(start+200, len(ids))
-		chunk := ids[start:end]
-		policy := workitemtracking.WorkItemErrorPolicyValues.Omit
-		res, err := s.wit.GetWorkItemsBatch(ctx, workitemtracking.GetWorkItemsBatchArgs{
-			Project: &project,
-			WorkItemGetRequest: &workitemtracking.WorkItemBatchGetRequest{
-				Ids: &chunk, Fields: &fields, ErrorPolicy: &policy,
-			},
+	const size = 200
+	batches := make([][]*model.WorkItem, (len(ids)+size-1)/size)
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(4)
+	for i := range batches {
+		chunk := ids[i*size : min((i+1)*size, len(ids))]
+		g.Go(func() error {
+			policy := workitemtracking.WorkItemErrorPolicyValues.Omit
+			res, err := s.wit.GetWorkItemsBatch(gctx, workitemtracking.GetWorkItemsBatchArgs{
+				Project: &project,
+				WorkItemGetRequest: &workitemtracking.WorkItemBatchGetRequest{
+					Ids: &chunk, Fields: &fields, ErrorPolicy: &policy,
+				},
+			})
+			if err != nil {
+				return err
+			}
+			for j := range *res {
+				batches[i] = append(batches[i], s.convert(&(*res)[j], project))
+			}
+			return nil
 		})
-		if err != nil {
-			return nil, err
-		}
-		for i := range *res {
-			out = append(out, s.convert(&(*res)[i], project))
-		}
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	var out []*model.WorkItem
+	for _, b := range batches {
+		out = append(out, b...)
 	}
 	return out, nil
 }
