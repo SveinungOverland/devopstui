@@ -1093,14 +1093,20 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 
 // dashOverride handles the keys the Dashboard's layout redefines: Tab
 // toggles focus between the kanban (top) and the lanes (bottom); it is a
-// no-op when there are no lanes to focus. The preview pane is never part
+// no-op when there are no lanes to focus. Tabbing down from a kanban card
+// that has a lane (an in-progress PBI) lands on that PBI's tasks; any other
+// card leaves the lanes cursor where it was. The preview pane is never part
 // of this cycle — it isn't a focusable pane at all on the Dashboard — so
 // ctrl+u/ctrl+d (scrollPreview) are the only way to scroll it, and they
 // work the same regardless of which of the two panes has focus.
 func (a *App) dashOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if key.Matches(msg, keys.Focus) {
 		if len(a.dashLanes.ls) > 0 {
+			if !a.dashFocusLanes {
+				a.dashLanes.focusLane(a.dashBoard.currentID())
+			}
 			a.dashFocusLanes = !a.dashFocusLanes
+			a.refreshDetail()
 		}
 		return nil, true
 	}
