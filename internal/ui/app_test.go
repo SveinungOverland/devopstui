@@ -363,7 +363,7 @@ func TestViewsAndPopups(t *testing.T) {
 	}
 	h.keys("1")
 	h.dump("10-dash")
-	if !strings.Contains(h.app.View(), "PBI(s) assigned to you") {
+	if !strings.Contains(h.app.View(), "assigned to you") {
 		t.Error("dash missing summary")
 	}
 	h.keys("4")

@@ -30,7 +30,11 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 
 	row("State", stateStyle(it.State).Render(it.State))
 	row("Assigned", it.Assignee())
-	row("Iteration", lastSeg(it.IterationPath)+sMuted.Render("  "+it.IterationPath))
+	iter := lastSeg(it.IterationPath)
+	if it.IterationPath != iter {
+		iter += sMuted.Render("  " + it.IterationPath) // the full path only adds something when nested
+	}
+	row("Iteration", iter)
 	if it.BoardColumn != "" && it.BoardColumn != it.State {
 		row("Column", it.BoardColumn)
 	}
@@ -86,12 +90,12 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 	}
 
 	if sections := narrativeSections(it); len(sections) > 0 {
-		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", min(width, 40))) + "\n")
+		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", width)) + "\n")
 		b.WriteString(renderNarrative(sections, width))
 	}
 
 	if len(comments) > 0 {
-		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", min(width, 40))) + "\n")
+		b.WriteString("\n" + sMuted.Render(strings.Repeat("─", width)) + "\n")
 		b.WriteString(sMuted.Render(fmt.Sprintf("Discussion (%d)", len(comments))) + "\n\n")
 		b.WriteString(markdown.Render(formatComments(comments), width))
 	}

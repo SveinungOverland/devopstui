@@ -230,9 +230,9 @@ func (a *App) dashInclude() func(*model.WorkItem) bool {
 
 // dashLayout splits the Dashboard's body height between the kanban (top)
 // and the lanes (bottom); topH also sizes the side preview pane when shown.
-// 5 = 1 summary line + 2 border rows for each of the two bordered rows.
+// Both heights include their panels' borders; the 1 is the summary line.
 func (a *App) dashLayout() (topH, botH int) {
-	budget := max(a.bodyHeight()-5, 6)
+	budget := max(a.bodyHeight()-1, 11)
 	// The lanes show every child (no more "+N" collapsing), so they get
 	// the bigger share of the body.
 	topH = max(budget*2/5, 5)
@@ -2071,7 +2071,36 @@ func (a *App) moveChildState(dc int) tea.Cmd {
 	return a.applyPatch([]*model.WorkItem{c}, "Move to "+state, model.Patch{Field: model.FieldState, Value: state})
 }
 
-func (a *App) bodyHeight() int { return max(a.h-5, 1) }
+// bodyHeight is the rows left for the panels once the two header lines and
+// the one footer line are taken.
+func (a *App) bodyHeight() int { return max(a.h-3, 1) }
+
+// boardWidth and dashBoardWidth are the widths the Board and the
+// Dashboard's kanban render at: the screen less the preview pane beside them.
+func (a *App) boardWidth() int {
+	if a.view != viewBoard {
+		return a.w
+	}
+	if dw := a.detailWidth(); dw > 0 {
+		return a.w - dw - 2
+	}
+	return a.w
+}
+
+func (a *App) dashBoardWidth() int {
+	if a.view != viewDash {
+		return a.w
+	}
+	if dw := a.detailWidth(); dw > 0 {
+		return a.w - dw - 2
+	}
+	return a.w
+}
+
+// previewMaxW caps the Board and Dashboard preview pane. It used to be 60,
+// which on a full-screen terminal wrapped descriptions at ~56 characters next
+// to columns with nothing in them.
+const previewMaxW = 100
 
 // detailWidth is the width of the side preview pane, 0 when hidden (toggled
 // off with z, or the terminal is too narrow).
@@ -2083,13 +2112,13 @@ func (a *App) detailWidth() int {
 		if !a.previewBoard {
 			return 0
 		}
-		return min(a.w/3, 60)
+		return min(a.w/3, previewMaxW)
 	}
 	if a.view == viewDash {
 		if !a.previewDash {
 			return 0
 		}
-		return min(a.w/3, 60)
+		return min(a.w/3, previewMaxW)
 	}
 	if !a.previewList {
 		return 0
@@ -2101,6 +2130,10 @@ func (a *App) View() string {
 	if a.w == 0 {
 		return "loading…"
 	}
+	// The header describes the boards' scroll position, so settle it for
+	// this frame's widths before rendering either.
+	a.board.scroll(a.boardWidth())
+	a.dashBoard.scroll(a.dashBoardWidth())
 	header := a.renderHeader()
 	body := a.renderBody()
 	footer := a.renderFooter()
@@ -2146,7 +2179,7 @@ func (a *App) renderHeader() string {
 	if a.me != "" {
 		right = sMuted.Render(a.me+"  ") + right
 	}
-	line1 := pad(left, a.w-lipgloss.Width(right)) + right
+	line1 := pad(left, a.w-lipgloss.Width(right)-2) + "  " + right // a truncated crumb never touches the name
 
 	var tabs []string
 	for _, v := range tabViews {
@@ -2171,17 +2204,22 @@ func (a *App) renderHeader() string {
 		}
 		summary = sMuted.Render(focus)
 	case a.view == viewBoard:
-		summary = sMuted.Render(a.currentBoard().Name)
+		name := a.currentBoard().Name
+		if h := a.board.scrollHint(); h != "" {
+			name += " · " + h
+		}
+		summary = sMuted.Render(name)
 	case a.view == viewDash:
+		// The counts are on the summary line right below; this just says
+		// which half has the keys.
 		focus := "kanban"
 		if a.dashFocusLanes {
 			focus = "lanes"
 		}
-		pbis := 0
-		for _, col := range a.dashBoard.cols {
-			pbis += len(col)
+		if h := a.dashBoard.scrollHint(); h != "" && !a.dashFocusLanes {
+			focus += " · " + h
 		}
-		summary = sMuted.Render(fmt.Sprintf("%s · %d PBI(s) · %d lane(s)", focus, pbis, len(a.dashLanes.ls)))
+		summary = sMuted.Render(focus)
 	default:
 		if l := a.activeList(); l != nil {
 			summary = l.summary()
@@ -2230,9 +2268,9 @@ func (a *App) renderBody() string {
 	}
 	if a.view == viewBoard {
 		if dw == 0 {
-			return a.board.view(a.w, h, true)
+			return a.board.view(a.boardWidth(), h, true)
 		}
-		left := a.board.view(a.w-dw-2, h, !a.focusDetail)
+		left := a.board.view(a.boardWidth(), h, !a.focusDetail)
 		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
@@ -2265,10 +2303,10 @@ func (a *App) renderDash(w, h int) string {
 		// The preview is never focusable on the Dashboard, so it never
 		// takes the focused-panel style.
 		right := sPanel.Width(dw).Height(topH - 2).Render(a.detail.View())
-		left := a.dashBoard.view(w-dw-2, topH, !a.dashFocusLanes)
+		left := a.dashBoard.view(a.dashBoardWidth(), topH, !a.dashFocusLanes)
 		top = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	} else {
-		top = a.dashBoard.view(w, topH, !a.dashFocusLanes)
+		top = a.dashBoard.view(a.dashBoardWidth(), topH, !a.dashFocusLanes)
 	}
 	bottom := a.dashLanes.view(w, botH, a.dashFocusLanes)
 	return summary + "\n" + top + "\n" + bottom
@@ -2287,8 +2325,12 @@ func (a *App) dashSummary(width int) string {
 			children += len(col)
 		}
 	}
-	s := fmt.Sprintf("%s PBI(s) assigned to you · %s work item(s) across %s lane(s)",
-		sKey.Render(strconv.Itoa(pbis)), sKey.Render(strconv.Itoa(children)), sKey.Render(strconv.Itoa(len(a.dashLanes.ls))))
+	count := func(n int, noun string) string {
+		p := plural(n, noun)
+		i := strings.IndexByte(p, ' ')
+		return sKey.Render(p[:i]) + p[i:]
+	}
+	s := count(pbis, "PBI") + " assigned to you · " + count(children, "work item") + " across " + count(len(a.dashLanes.ls), "lane")
 	return pad(s, width)
 }
 
@@ -2317,11 +2359,6 @@ func (a *App) renderFooter() string {
 	if a.focusDetail {
 		bindings = []key.Binding{keys.Up, keys.Down, keys.Focus, keys.Edit, keys.Open}
 	}
-	var parts []string
-	for _, kb := range bindings {
-		parts = append(parts, sKey.Render(kb.Help().Key)+" "+sMuted.Render(kb.Help().Desc))
-	}
-	hints := strings.Join(parts, "  ")
 	msg := ""
 	if a.flash != "" {
 		if a.flashErr {
@@ -2330,5 +2367,39 @@ func (a *App) renderFooter() string {
 			msg = sOK.Render(trunc(a.flash, a.w/2))
 		}
 	}
-	return pad(trunc(hints, a.w-lipgloss.Width(msg)-1), a.w-lipgloss.Width(msg)-1) + msg
+	avail := a.w - 1
+	if msg != "" {
+		avail -= lipgloss.Width(msg) + 3 // keep the flash clear of the hints
+	}
+	return pad(footerHints(bindings, avail), a.w-lipgloss.Width(msg)-1) + msg
+}
+
+// footerHints renders as many whole key hints as fit in width, in order.
+// When some don't fit, the last slot goes to "? more" so the rest are one
+// key away, instead of cutting a hint off mid-word.
+func footerHints(bindings []key.Binding, width int) string {
+	hint := func(k, desc string) string { return sKey.Render(k) + " " + sMuted.Render(desc) }
+	var parts []string
+	for _, kb := range bindings {
+		parts = append(parts, hint(kb.Help().Key, kb.Help().Desc))
+	}
+	if all := strings.Join(parts, "  "); lipgloss.Width(all) <= width {
+		return all
+	}
+	more := hint(keys.Help.Help().Key, "more")
+	out := ""
+	for _, p := range parts {
+		next := p
+		if out != "" {
+			next = out + "  " + p
+		}
+		if lipgloss.Width(next)+2+lipgloss.Width(more) > width {
+			break
+		}
+		out = next
+	}
+	if out == "" {
+		return trunc(more, width)
+	}
+	return out + "  " + more
 }

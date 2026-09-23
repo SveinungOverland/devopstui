@@ -87,11 +87,50 @@ func initials(name string) string {
 }
 
 // wrap word-wraps text to width.
+// titleLines word-wraps s into exactly n lines of at most width cells,
+// ending the last with "…" when there's more. Short titles are padded with
+// empty lines so cards stay the same height.
+func titleLines(s string, width, n int) []string {
+	if n <= 1 || width < 4 {
+		return []string{trunc(s, width)}
+	}
+	var out []string
+	rest := strings.TrimSpace(s)
+	for len(out) < n-1 && rest != "" {
+		if ansi.StringWidth(rest) <= width {
+			out = append(out, rest)
+			rest = ""
+			break
+		}
+		cut := ansi.Truncate(rest, width+1, "")
+		i := strings.LastIndex(cut, " ")
+		if i <= 0 {
+			cut = ansi.Truncate(rest, width, "")
+			i = len(cut)
+		}
+		out = append(out, strings.TrimRight(rest[:i], " "))
+		rest = strings.TrimLeft(rest[i:], " ")
+	}
+	out = append(out, trunc(rest, width))
+	for len(out) < n {
+		out = append(out, "")
+	}
+	return out[:n]
+}
+
 func wrap(s string, width int) string {
 	if width < 4 {
 		return s
 	}
 	return lipgloss.NewStyle().Width(width).Render(s)
+}
+
+// plural returns "1 lane", "3 lanes": count and noun, with an s unless n is 1.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // overlay centers popup on top of bg by replacing the covered cells.

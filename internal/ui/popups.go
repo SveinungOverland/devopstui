@@ -170,7 +170,17 @@ func (p *picker) Update(msg tea.Msg) (popup, tea.Cmd) {
 }
 
 func (p *picker) View(w, h int) string {
-	width := min(max(w-10, 30), 80)
+	// As wide as the longest entry needs (a state list doesn't need 80
+	// columns), but never narrower than the title and status line.
+	content := max(lipgloss.Width(p.title), 36)
+	for _, it := range p.items {
+		wd := lipgloss.Width(it.Label)
+		if it.Desc != "" {
+			wd += 2 + lipgloss.Width(it.Desc)
+		}
+		content = max(content, wd)
+	}
+	width := min(max(w-10, 30), 80, content+6)
 	maxRows := min(max(h-8, 5), 20)
 	var b strings.Builder
 	b.WriteString(sTitle.Render(p.title) + "\n")
@@ -306,15 +316,42 @@ func (helpPopup) View(w, h int) string {
 	for _, g := range helpGroups {
 		var lines []string
 		for _, kb := range g {
-			lines = append(lines, padLeft(sKey.Render(kb.Help().Key), 8)+"  "+kb.Help().Desc)
+			desc := kb.Help().Desc
+			if where, ok := helpWhere[desc]; ok {
+				desc += sMuted.Render(" (" + where + ")")
+			}
+			lines = append(lines, padLeft(sKey.Render(kb.Help().Key), 8)+"  "+desc)
 		}
 		cols = append(cols, strings.Join(lines, "\n"))
 	}
-	// Two rows of three columns keeps it readable on 100+ cols.
-	row1 := lipgloss.JoinHorizontal(lipgloss.Top, padCol(cols[0]), padCol(cols[1]), padCol(cols[2]))
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top, padCol(cols[3]), padCol(cols[4]), padCol(cols[5]))
-	body := sTitle.Render("Keys") + "\n\n" + row1 + "\n\n" + row2 + "\n\n" + sMuted.Render("any key to close")
+	// Fill each row with as many groups as fit the screen, in order: all
+	// six side by side on a wide monitor, three per row around 140
+	// columns, fewer on a narrow terminal.
+	avail := w - 6 // popup border and padding
+	var rows []string
+	var row []string
+	rowW := 0
+	for _, c := range cols {
+		c = padCol(c)
+		cw := lipgloss.Width(c)
+		if len(row) > 0 && rowW+cw > avail {
+			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
+			row, rowW = nil, 0
+		}
+		row = append(row, c)
+		rowW += cw
+	}
+	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
+	body := sTitle.Render("Keys") + "\n\n" + strings.Join(rows, "\n\n") + "\n\n" + sMuted.Render("any key to close")
 	return sPopup.Render(body)
+}
+
+// helpWhere marks the bindings that share a key with another, so the ?
+// overlay says which view each one belongs to. c comments in the details
+// view and hides done items everywhere else.
+var helpWhere = map[string]string{
+	keys.Comment.Help().Desc: "details",
+	keys.Closed.Help().Desc:  "elsewhere",
 }
 
 func padCol(s string) string { return lipgloss.NewStyle().MarginRight(3).Render(s) }
