@@ -2087,6 +2087,28 @@ func (a *App) moveChildState(dc int) tea.Cmd {
 // the one footer line are taken.
 func (a *App) bodyHeight() int { return max(a.h-3, 1) }
 
+// boardWidth and dashBoardWidth are the widths the Board and the
+// Dashboard's kanban render at: the screen less the preview pane beside them.
+func (a *App) boardWidth() int {
+	if a.view != viewBoard {
+		return a.w
+	}
+	if dw := a.detailWidth(); dw > 0 {
+		return a.w - dw - 2
+	}
+	return a.w
+}
+
+func (a *App) dashBoardWidth() int {
+	if a.view != viewDash {
+		return a.w
+	}
+	if dw := a.detailWidth(); dw > 0 {
+		return a.w - dw - 2
+	}
+	return a.w
+}
+
 // previewMaxW caps the Board and Dashboard preview pane. It used to be 60,
 // which on a full-screen terminal wrapped descriptions at ~56 characters next
 // to columns with nothing in them.
@@ -2120,6 +2142,10 @@ func (a *App) View() string {
 	if a.w == 0 {
 		return "loading…"
 	}
+	// The header describes the boards' scroll position, so settle it for
+	// this frame's widths before rendering either.
+	a.board.scroll(a.boardWidth())
+	a.dashBoard.scroll(a.dashBoardWidth())
 	header := a.renderHeader()
 	body := a.renderBody()
 	footer := a.renderFooter()
@@ -2254,9 +2280,9 @@ func (a *App) renderBody() string {
 	}
 	if a.view == viewBoard {
 		if dw == 0 {
-			return a.board.view(a.w, h, true)
+			return a.board.view(a.boardWidth(), h, true)
 		}
-		left := a.board.view(a.w-dw-2, h, !a.focusDetail)
+		left := a.board.view(a.boardWidth(), h, !a.focusDetail)
 		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
@@ -2289,10 +2315,10 @@ func (a *App) renderDash(w, h int) string {
 		// The preview is never focusable on the Dashboard, so it never
 		// takes the focused-panel style.
 		right := sPanel.Width(dw).Height(topH - 2).Render(a.detail.View())
-		left := a.dashBoard.view(w-dw-2, topH, !a.dashFocusLanes)
+		left := a.dashBoard.view(a.dashBoardWidth(), topH, !a.dashFocusLanes)
 		top = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	} else {
-		top = a.dashBoard.view(w, topH, !a.dashFocusLanes)
+		top = a.dashBoard.view(a.dashBoardWidth(), topH, !a.dashFocusLanes)
 	}
 	bottom := a.dashLanes.view(w, botH, a.dashFocusLanes)
 	return summary + "\n" + top + "\n" + bottom

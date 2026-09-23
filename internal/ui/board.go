@@ -190,16 +190,8 @@ func (b *board) view(width, height int, focused bool) string {
 	// there are enough of them that they'd drop below the minimum does
 	// scrolling kick in (same idea as lanes.go), so a handful of columns
 	// never leaves the rest of the row blank.
-	colW := max(width/len(b.cols), boardColMinW)
-	visible := max(width/colW, 1)
-	b.visible = visible
-	if b.col < b.offsetC {
-		b.offsetC = b.col
-	}
-	if b.col >= b.offsetC+visible {
-		b.offsetC = b.col - visible + 1
-	}
-	end := min(b.offsetC+visible, len(b.cols))
+	b.scroll(width)
+	end := min(b.offsetC+b.visible, len(b.cols))
 	// Once scrolling, the visible columns share the whole width between
 	// them, the first few taking a cell each of what doesn't divide evenly,
 	// so the row always reaches the preview pane.
@@ -225,6 +217,24 @@ func (b *board) view(width, height int, focused bool) string {
 		rendered = append(rendered, b.renderColumn(ci, w, height, focused, lines))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+// scroll works out how many columns fit in width and slides the window so
+// the cursor's column is in it. view calls it, and so does App.View before
+// the header renders, so scrollHint describes this frame, not the last one.
+func (b *board) scroll(width int) {
+	if len(b.cols) == 0 {
+		b.visible = 0
+		return
+	}
+	colW := max(width/len(b.cols), boardColMinW)
+	b.visible = max(width/colW, 1)
+	if b.col < b.offsetC {
+		b.offsetC = b.col
+	}
+	if b.col >= b.offsetC+b.visible {
+		b.offsetC = b.col - b.visible + 1
+	}
 }
 
 // scrollHint describes which board columns are on screen when they don't
