@@ -1401,6 +1401,48 @@ func TestDashboardFocusAndActions(t *testing.T) {
 	}
 }
 
+func TestDashboardTabTargetsPBILane(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	// #1013 is In Progress with a lane of its own: tab lands on its first
+	// task (To Do comes first) rather than wherever the lanes cursor was.
+	a.dashBoard.jumpTo(1013)
+	h.keys("tab")
+	if !a.dashFocusLanes {
+		t.Fatal("tab should move focus to the lanes")
+	}
+	it := a.currentItem()
+	if it == nil || it.ParentID != 1013 || it.State != "To Do" {
+		t.Fatalf("lane cursor = %v, want #1013's first To Do task", it)
+	}
+	if !strings.Contains(h.app.View(), it.Title) {
+		t.Errorf("preview pane should follow the lane cursor to %q", it.Title)
+	}
+
+	// Moving within the lane and tabbing out and back on the same PBI
+	// keeps the task you were on.
+	h.keys("j") // #1013's second To Do task
+	moved := a.currentItem()
+	if moved == nil || moved.ParentID != 1013 || moved.ID == it.ID {
+		t.Fatalf("after j, lane cursor = %v, want a #1013 task", moved)
+	}
+	h.keys("tab", "tab")
+	if got := a.currentItem(); got == nil || got.ID != moved.ID {
+		t.Fatalf("re-tabbing on the same PBI moved the lane cursor to %v, want #%d", got, moved.ID)
+	}
+
+	// #1003's To Do task (#1029) is planned for the next sprint and dimmed;
+	// its in-sprint In Progress task (#1023) wins.
+	h.keys("tab")
+	a.dashBoard.jumpTo(1003)
+	h.keys("tab")
+	if got := a.currentItem(); got == nil || got.ID != 1023 {
+		t.Fatalf("lane cursor = %v, want #1023", got)
+	}
+}
+
 func TestDashboardColumnMove(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	a := h.app

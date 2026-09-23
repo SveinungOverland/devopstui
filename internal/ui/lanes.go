@@ -118,6 +118,45 @@ func (ln *lanes) jumpToFirstCard() {
 	}
 }
 
+// laneOf is the index of parentID's lane, -1 when it has none.
+func (ln *lanes) laneOf(parentID int) int {
+	for li, l := range ln.ls {
+		if l.parent.ID == parentID {
+			return li
+		}
+	}
+	return -1
+}
+
+// focusLane moves the cursor into parentID's lane, onto its first card in
+// column order — preferring one in the selected sprint over a dimmed one
+// planned elsewhere. A cursor already in that lane stays put, so toggling
+// focus back and forth on the same PBI keeps the task you were on. Reports
+// false (cursor untouched) when the PBI has no lane.
+func (ln *lanes) focusLane(parentID int) bool {
+	li := ln.laneOf(parentID)
+	if li < 0 {
+		return false
+	}
+	if li == ln.lane {
+		return true
+	}
+	fallback := false
+	for ci, col := range ln.ls[li].cols {
+		for ri, it := range col {
+			if ln.inSprint(it) {
+				ln.lane, ln.col, ln.row = li, ci, ri
+				return true
+			}
+			if !fallback {
+				ln.lane, ln.col, ln.row = li, ci, ri
+				fallback = true
+			}
+		}
+	}
+	return fallback
+}
+
 // inSprint reports whether a child belongs to the selected sprint, using
 // the same exact path match dashInclude applies to the PBIs.
 func (ln *lanes) inSprint(it *model.WorkItem) bool {

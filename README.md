@@ -299,7 +299,9 @@ Board tabs) — plus an optional preview pane:
 Switching sprints (`[`/`]`/`S`/`:sprint`) updates both rows immediately. With no sprint
 selected, the dashboard falls back to every sprint at once.
 
-`tab` toggles focus between the kanban and the lanes (a no-op when there is nothing below); the
+`tab` toggles focus between the kanban and the lanes (a no-op when there is nothing below).
+Tabbing down from an in-progress PBI on the kanban lands on that PBI's own tasks — its first
+one in the selected sprint, or the task you were on if the cursor was already in its lane. The
 usual navigation, selection and edit/state/assign actions work in whichever has focus, and
 `D`/`enter` drills into the highlighted card. The preview pane is never itself focusable here —
 `ctrl+u`/`ctrl+d` scroll it in place from either the kanban or the lanes, whichever has focus.
