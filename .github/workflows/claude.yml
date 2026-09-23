@@ -54,7 +54,5 @@ jobs:
             actions: read
 
           claude_args: |
-            --model claude-opus-5-5
-            --effort medium
             --allowedTools "Bash,Edit,Write,Read,Glob,Grep,WebFetch"
             --append-system-prompt "Read .github/claude/CONTEXT.md before doing anything in this repository: it covers the package layout, how to verify a change with `make check`, and how to capture what the TUI looks like with scripts/tui-shot.sh. Show the UI in a fenced code block whenever a change is visible. Do not move cards on the project board — the workflows own that."
