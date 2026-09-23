@@ -1188,8 +1188,8 @@ func TestDashboardKanbanAndLanes(t *testing.T) {
 	// The lanes are a kanban with state as columns and the parent PBI as
 	// the swimlane: a PBI that is itself being worked on gets a lane
 	// showing ALL of its children, bucketed by state, not just the active
-	// ones. 1003 has one child (1023, In Progress); 1013 has three
-	// (1015/1017 To Do, 1016 Done). 1020's only child is a bug (1024),
+	// ones. 1003 has two children (1023 In Progress, 1029 To Do in the
+	// next sprint); 1013 has three (1015/1017 To Do, 1016 Done). 1020's only child is a bug (1024),
 	// which lanes drop entirely (see TestDashboardLanesExcludeBugs), so it
 	// also gets no lane. 1025 is "New" with a child task (1026) but isn't
 	// being worked on yet, so it gets no lane either, regardless of that
@@ -1244,6 +1244,40 @@ func TestDashboardKanbanAndLanes(t *testing.T) {
 	}
 	if strings.Contains(v, "+1") || strings.Contains(v, "+2") {
 		t.Error("lanes should not collapse extra cards behind a +N badge")
+	}
+}
+
+// TestDashboardLanesDimOtherSprints covers issue #46: a child planned for a
+// different sprint than the selected one still shows in its PBI's lane
+// (so the lane reads as the PBI's full progress) but is marked as outside
+// the sprint, which renderCard draws with a muted title.
+func TestDashboardLanesDimOtherSprints(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	h.keys("1")
+
+	cur := a.ctx.Iteration.Path
+	if cur == "" || a.dashLanes.sprint != cur {
+		t.Fatalf("lanes sprint = %q, want the selected sprint %q", a.dashLanes.sprint, cur)
+	}
+	next := a.dashLanes.find(1029) // #1003's task planned for Sprint 43
+	if next == nil {
+		t.Fatal("#1029 should still show in #1003's lane despite being planned for another sprint")
+	}
+	if a.dashLanes.inSprint(next) {
+		t.Errorf("#1029 is in %q, not the selected %q: it should be dimmed", next.IterationPath, cur)
+	}
+	for _, id := range []int{1015, 1016, 1017, 1023} {
+		if it := a.dashLanes.find(id); it == nil || !a.dashLanes.inSprint(it) {
+			t.Errorf("#%d is in the selected sprint and should not be dimmed", id)
+		}
+	}
+
+	// Switching sprint re-scopes the dimming along with the rest of the
+	// Dashboard.
+	h.keys("]")
+	if a.ctx.Iteration.Path == cur || a.dashLanes.sprint != a.ctx.Iteration.Path {
+		t.Errorf("lanes sprint = %q after ], want the new sprint %q", a.dashLanes.sprint, a.ctx.Iteration.Path)
 	}
 }
 
@@ -1476,7 +1510,8 @@ func TestDashboardFiltersBySelectedSprint(t *testing.T) {
 }
 
 // Down/Up must scan through a column's stacked cards before moving to
-// another lane — #1013's "To Do" cell has two cards (1015, 1017).
+// another lane — #1013's "To Do" cell has two cards (1015, 1017), and the
+// lane above it (#1003) has one (1029).
 func TestDashboardLaneNavigationScansColumn(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	a := h.app
@@ -1501,8 +1536,12 @@ func TestDashboardLaneNavigationScansColumn(t *testing.T) {
 	if it := a.currentItem(); it == nil || it.ID != 1015 {
 		t.Fatalf("up should move to the previous card in the cell, got %v", it)
 	}
+	h.keys("k") // up again: spills into the lane above, #1003's To Do card
+	if it := a.currentItem(); it == nil || it.ID != 1029 {
+		t.Fatalf("up at the cell's first card should move into the previous lane's cell, got %v", it)
+	}
 	h.keys("k") // up again: no more cards above in this column anywhere
-	if it := a.currentItem(); it == nil || it.ID != 1015 {
+	if it := a.currentItem(); it == nil || it.ID != 1029 {
 		t.Fatalf("up at the column's first card should stay put, got %v", it)
 	}
 }

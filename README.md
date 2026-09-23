@@ -289,7 +289,9 @@ Board tabs) — plus an optional preview pane:
   behind a "+N" — this row gets the bigger share of the body height for exactly that reason.
   Bugs are left out (they carry requirement-level states, not task states, and already show as
   their own card on the kanban above when they're at that level); a PBI with nothing left after
-  that simply has no lane. Children show regardless of who they are assigned to. `j`/`k` scroll
+  that simply has no lane. Children show regardless of who they are assigned to. A child planned
+  for a different sprint than the selected one still shows, so the lane stays the PBI's full
+  progress, but with its title greyed out. `j`/`k` scroll
   down/up through a column's cards — within the current lane first, then into the next lane's
   cell for that same column — so moving through several cards in one cell doesn't jump you to
   another lane early. `H`/`L` move the highlighted child to the neighbouring state.
