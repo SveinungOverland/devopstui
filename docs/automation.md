@@ -87,7 +87,7 @@ line of code on our side.
 
 | Workflow                   | Starts when                                    | Does                                                                |
 | -------------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
-| `issue-plan.yml`           | issue opened or reopened                       | Posts the plan comment, ensures the labels exist. Fails if no plan lands. |
+| `issue-plan.yml`           | issue opened or reopened, without `agent:dont-plan` | Posts the plan comment, ensures the labels exist. Fails if no plan lands. |
 | `agent-implement.yml`      | `agent:ready` added                            | Branch, draft PR, implementation, verification, hand-off to review. |
 | `agent-review.yml`         | chained from implement, or PR ready for review | The impact and security review.                                     |
 | `claude-code-review.yml`   | PR ready for review, new commits on a ready PR | Line-level inline comments.                                         |
@@ -259,6 +259,11 @@ next time it runs.
 | `agent:planned`        | A plan comment has been posted.                               |
 | `agent:needs-decision` | The plan is blocked on an answer. Do not add `agent:ready` yet. |
 | `agent:blocked`        | A run failed. The comment on the issue links the log.         |
+| `agent:dont-plan`      | **You add this** when opening an issue. No plan is posted.    |
+
+`agent:dont-plan` only counts at the moment the issue is opened or reopened —
+adding it later does not remove a plan that is already there. To plan such an
+issue after all, run *Agent — plan an issue* by hand with its number.
 
 One more goes on a **pull request** rather than an issue:
 

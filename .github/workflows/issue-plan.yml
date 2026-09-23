@@ -35,9 +35,14 @@ jobs:
     # only issues from people who can already push here are planned
     # automatically. Anything else waits for a maintainer to run this workflow
     # by hand from the Actions tab.
+    #
+    # An issue opened (or reopened) with `agent:dont-plan` is left alone: its
+    # author has said it needs no plan. Running this workflow by hand still
+    # plans it — that is someone asking for one explicitly.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
+      (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
+      !contains(github.event.issue.labels.*.name, 'agent:dont-plan'))
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
