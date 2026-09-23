@@ -204,6 +204,7 @@ func (a *App) refreshDashboard() {
 		items = kept
 	}
 	a.dashBoard.setItems(a.currentBoard(), items, a.ctx.Backlog, inc)
+	a.dashLanes.sprint = a.ctx.Iteration.Path
 	a.dashLanes.setLanes(a.dashLaneParents(), a.dashChildren, nil)
 }
 
@@ -667,6 +668,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.setFlash("active work: "+msg.err.Error(), true)
 		}
 		a.dashChildren = msg.children
+		a.dashLanes.sprint = a.ctx.Iteration.Path
 		a.dashLanes.setLanes(a.dashLaneParents(), a.dashChildren, msg.states)
 		return a, nil
 

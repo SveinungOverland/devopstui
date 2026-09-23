@@ -29,6 +29,11 @@ type lanes struct {
 	offsetCol      int // first visible column, horizontal scroll
 
 	selected map[int]bool
+
+	// sprint is the iteration path the Dashboard is scoped to, "" when
+	// none is selected. Children planned for another sprint still show
+	// (their PBI's progress would read wrong without them) but dimmed.
+	sprint string
 }
 
 func newLanes() *lanes { return &lanes{selected: map[int]bool{}} }
@@ -111,6 +116,12 @@ func (ln *lanes) jumpToFirstCard() {
 			}
 		}
 	}
+}
+
+// inSprint reports whether a child belongs to the selected sprint, using
+// the same exact path match dashInclude applies to the PBIs.
+func (ln *lanes) inSprint(it *model.WorkItem) bool {
+	return ln.sprint == "" || it.IterationPath == ln.sprint
 }
 
 func (ln *lanes) find(id int) *model.WorkItem {
@@ -444,7 +455,11 @@ func (ln *lanes) renderCard(it *model.WorkItem, w int, cur bool) string {
 	who := muted.Render(initials(it.AssignedTo))
 	line := mark + tag + plain.Render(" ") + idS + plain.Render(" ")
 	titleW := w - lipgloss.Width(line) - lipgloss.Width(who) - 1
-	line += plain.Render(trunc(it.Title, max(titleW, 1)))
+	title := plain
+	if !ln.inSprint(it) {
+		title = muted
+	}
+	line += title.Render(trunc(it.Title, max(titleW, 1)))
 	line += fill(plain, w-lipgloss.Width(line)-lipgloss.Width(who)) + who
 	return line
 }

@@ -117,6 +117,10 @@ func NewFake() *Fake {
 	// A Done PBI of mine, for the Dashboard's "show closed" toggle: hidden
 	// from the top kanban by default, shown once 'c' is pressed.
 	add(1028, 1002, "Product Backlog Item", "Add SSO login button to sign-in page", "Done", "Sveinung Øverland", cur, 3, 2)
+	// A task under a PBI of mine that is planned for the next sprint, for
+	// the Dashboard's lanes to dim. Unassigned, so it stays out of MyItems
+	// and the kanban's progress badges.
+	add(1029, 1003, "Task", "Localise the invite email", "To Do", "", next, 0, 0)
 	// A sub-team owns part of the area tree.
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
