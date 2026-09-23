@@ -102,7 +102,9 @@ status at a time, and that status is the whole control surface:
 
 Three more labels are independent of the status: `agent:planned` (a plan
 comment exists), `agent:needs-decision` (the plan is waiting on an answer) and
-`agent:blocked` (a run failed).
+`agent:blocked` (a run failed). `agent:dont-plan`, put on by the human when
+opening an issue, stops the automatic plan from being posted; like
+`agent:ready`, never add or remove it yourself.
 
 One label goes on a pull request rather than an issue: `agent:merge-main`, which
 merges the default branch into that PR's branch and puts an agent on the

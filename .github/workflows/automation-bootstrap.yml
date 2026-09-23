@@ -53,6 +53,9 @@ jobs:
           adding it merges the default branch into that PR's branch and puts an
           agent on the conflicts.
 
+          Open an issue with `agent:dont-plan` and no plan comment is posted
+          for it. Run *Agent — plan an issue* by hand to plan it anyway.
+
           ### Still yours to check
 
           - `secrets.CLAUDE_CODE_OAUTH_TOKEN` is set, and the Claude GitHub App is

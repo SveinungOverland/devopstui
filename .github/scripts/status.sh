@@ -33,6 +33,9 @@ FLAGS="planned needs-decision blocked"
 # writes them — pr-merge-main.yml removes its own with `gh pr edit`.
 # ensure-labels creates them so they are in the picker with the rest.
 PR_LABELS="merge-main"
+# Labels a human puts on an issue to opt it out of automation. Like PR_LABELS,
+# nothing here writes them; ensure-labels creates them for the picker.
+OPT_OUTS="dont-plan"
 
 label_colour() {
 	case "$1" in
@@ -43,6 +46,7 @@ label_colour() {
 	needs-decision) printf 'fbca04' ;; # yellow — waiting on an answer
 	blocked) printf 'b60205' ;;        # red — something failed
 	merge-main) printf 'd4c5f9' ;;     # pale purple — on a pull request
+	dont-plan) printf 'cfd3d7' ;;      # grey — automation opted out
 	*) printf 'ededed' ;;
 	esac
 }
@@ -56,6 +60,7 @@ label_description() {
 	needs-decision) printf 'The plan is waiting on a human decision.' ;;
 	blocked) printf 'An automated run failed and needs a look.' ;;
 	merge-main) printf 'On a PR: merge the default branch in, resolving conflicts.' ;;
+	dont-plan) printf 'Open the issue with this to skip the automatic plan.' ;;
 	*) printf '' ;;
 	esac
 }
@@ -146,7 +151,7 @@ flag)
 	cmd_flag "$2" "$3" "$4"
 	;;
 ensure-labels)
-	for l in $STATUSES $FLAGS $PR_LABELS; do
+	for l in $STATUSES $FLAGS $PR_LABELS $OPT_OUTS; do
 		ensure_label "$l"
 		printf '%s\n' "$PREFIX$l"
 	done
