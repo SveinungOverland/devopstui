@@ -387,12 +387,14 @@ var signalHelp = map[model.Signal]string{
 // helpWhere marks the bindings that share a key with another, so the ?
 // overlay says which view each one belongs to. c comments in the details
 // view and hides done items everywhere else; f switches the details
-// view's children layout and flattens the Sprint and Backlog trees.
+// view's children layout and the Board's layout, and flattens the Sprint
+// and Backlog trees.
 var helpWhere = map[string]string{
 	keys.Comment.Help().Desc:     "details",
 	keys.Closed.Help().Desc:      "elsewhere",
 	keys.Flat.Help().Desc:        "lists",
 	keys.ChildLayout.Help().Desc: "details",
+	keys.BoardLayout.Help().Desc: "board",
 }
 
 func padCol(s string) string { return lipgloss.NewStyle().MarginRight(3).Render(s) }

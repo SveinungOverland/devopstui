@@ -26,6 +26,9 @@ type board struct {
 	flags    map[int]model.Health
 	// attention shows only flagged cards.
 	attention bool
+	// list shows the cards as one list grouped by column instead of
+	// columns side by side, for when the width is too tight for a kanban.
+	list bool
 }
 
 func newBoard() *board { return &board{selected: map[int]bool{}} }
@@ -105,6 +108,15 @@ func (b *board) clamp() {
 		return
 	}
 	b.col = min(max(b.col, 0), len(b.cols)-1)
+	if b.list && len(b.cols[b.col]) == 0 {
+		// The list has no row for an empty column, so the cursor moves to
+		// the nearest column that has one, forwards first.
+		if c := b.nonEmpty(b.col, 1); c >= 0 {
+			b.col = c
+		} else if c := b.nonEmpty(b.col, -1); c >= 0 {
+			b.col = c
+		}
+	}
 	b.row = min(max(b.row, 0), max(len(b.cols[b.col])-1, 0))
 }
 
@@ -178,10 +190,58 @@ func (b *board) toggleSelect() {
 	}
 }
 
+// nonEmpty is the first column from c, stepping by d, that has cards; -1
+// when there is none.
+func (b *board) nonEmpty(c, d int) int {
+	for ; c >= 0 && c < len(b.cols); c += d {
+		if len(b.cols[c]) > 0 {
+			return c
+		}
+	}
+	return -1
+}
+
 func (b *board) move(dc, dr int) {
+	if b.list {
+		b.moveList(dc, dr)
+		return
+	}
 	b.col += dc
 	b.row += dr
 	b.clamp()
+}
+
+// moveList is move for the list, where the columns run top to bottom: j
+// and k walk every row in order, across the column headings, and h and l
+// jump to the first row of the previous or next column with cards.
+func (b *board) moveList(dc, dr int) {
+	if len(b.cols) == 0 {
+		return
+	}
+	b.clamp()
+	if dc != 0 {
+		if c := b.nonEmpty(b.col+dc, dc); c >= 0 {
+			b.col, b.row = c, 0
+		}
+	}
+	for ; dr > 0; dr-- {
+		if b.row+1 < len(b.cols[b.col]) {
+			b.row++
+		} else if c := b.nonEmpty(b.col+1, 1); c >= 0 {
+			b.col, b.row = c, 0
+		} else {
+			break
+		}
+	}
+	for ; dr < 0; dr++ {
+		if b.row > 0 {
+			b.row--
+		} else if c := b.nonEmpty(b.col-1, -1); c >= 0 {
+			b.col, b.row = c, len(b.cols[c])-1
+		} else {
+			break
+		}
+	}
 }
 
 // adjacentColumn returns the column index dc away, or -1.
@@ -196,6 +256,9 @@ func (b *board) adjacentColumn(dc int) (int, model.BoardColumn, bool) {
 func (b *board) view(width, height int, focused bool) string {
 	if len(b.cols) == 0 {
 		return sMuted.Render("no board columns")
+	}
+	if b.list {
+		return b.renderList(width, height, focused)
 	}
 	// Columns stretch to fill the full width when they all fit; only once
 	// there are enough of them that they'd drop below the minimum does
@@ -234,7 +297,7 @@ func (b *board) view(width, height int, focused bool) string {
 // the cursor's column is in it. view calls it, and so does App.View before
 // the header renders, so scrollHint describes this frame, not the last one.
 func (b *board) scroll(width int) {
-	if len(b.cols) == 0 {
+	if len(b.cols) == 0 || b.list {
 		b.visible = 0
 		return
 	}
@@ -251,7 +314,7 @@ func (b *board) scroll(width int) {
 // scrollHint describes which board columns are on screen when they don't
 // all fit, e.g. "columns 1-3 of 5"; "" when every column shows.
 func (b *board) scrollHint() string {
-	if b.visible == 0 || b.visible >= len(b.cols) {
+	if b.list || b.visible == 0 || b.visible >= len(b.cols) {
 		return ""
 	}
 	end := min(b.offsetC+b.visible, len(b.cols))
@@ -331,4 +394,102 @@ func (b *board) renderCard(it *model.WorkItem, w int, cur bool, lines int) []str
 		out = append(out, l+fill(plain, w-lipgloss.Width(l)))
 	}
 	return append(out, "")
+}
+
+// renderList is the compact layout: every card in one panel, under a
+// heading per column in board order, one line each. Columns with no cards
+// are left out; H and L still move a card through them.
+func (b *board) renderList(width, height int, focused bool) string {
+	style := sPanel
+	if focused {
+		style = sPanelFocus
+	}
+	w := max(width-4, 20)
+	innerH := max(height-2, 3)
+	var lines []string
+	curLine := 0
+	for ci, col := range b.cols {
+		if len(col) == 0 {
+			continue
+		}
+		lines = append(lines, b.listHeading(ci))
+		for ri, it := range col {
+			cur := ci == b.col && ri == b.row
+			if cur {
+				curLine = len(lines)
+			}
+			lines = append(lines, b.renderRow(it, w, cur && focused))
+		}
+	}
+	if len(lines) == 0 {
+		lines = []string{sMuted.Render("board is empty")}
+	}
+	start := 0
+	if curLine >= innerH {
+		start = curLine - innerH + 1
+	}
+	if start > 0 && curLine == start {
+		start-- // keep a group's first row with its heading
+	}
+	end := min(start+innerH, len(lines))
+	return style.Width(width - 2).Height(innerH).Render(strings.Join(lines[start:end], "\n"))
+}
+
+// listHeading heads a column's group in the list: its name, highlighted
+// for the cursor's column, then the card count and points.
+func (b *board) listHeading(ci int) string {
+	name := b.def.Columns[ci].Name
+	items := b.cols[ci]
+	var effort float64
+	for _, it := range items {
+		effort += it.Effort
+	}
+	count := fmt.Sprintf(" %d", len(items))
+	if effort > 0 {
+		count += fmt.Sprintf(" · %s pts", fmtEffort(effort))
+	}
+	head := stateStyle(name).Render(name)
+	if ci == b.col {
+		head = sHeader.Render(name)
+	}
+	return head + sMuted.Render(count)
+}
+
+// renderRow is one card in the list: the card's facts on one line, with
+// the title given all the room the others leave.
+func (b *board) renderRow(it *model.WorkItem, w int, cur bool) string {
+	st := rowStyler(cur)
+	plain := st(lipgloss.NewStyle())
+	muted := st(sMuted)
+	mark := plain.Render(" ")
+	switch {
+	case cur && b.selected[it.ID]:
+		mark = st(sSelected).Render("●")
+	case cur:
+		mark = st(sKey).Render(cursorMark)
+	case b.selected[it.ID]:
+		mark = sSelected.Render("●")
+	}
+	var right []string
+	if p, ok := b.progress[it.ID]; ok {
+		right = append(right, st(p.style()).Render(p.text()))
+	}
+	if it.Effort > 0 {
+		right = append(right, muted.Render(padLeft(fmtEffort(it.Effort), 4)))
+	}
+	right = append(right, muted.Render(padLeft(initials(it.AssignedTo), 2)))
+	// The flag sits right after the id, as on a card; the pair is padded
+	// so titles line up whether or not a row has one.
+	left := mark + st(kindStyle(it.Kind)).Render(fmt.Sprintf("%-4s", it.Kind.Tag())) +
+		muted.Render(fmt.Sprintf(" %d", it.ID))
+	if f, ok := b.flags[it.ID]; ok {
+		left += plain.Render(" ") + b.health.glyph(f, st)
+	}
+	left += fill(plain, 12-lipgloss.Width(left))
+	rw := 0
+	for _, r := range right {
+		rw += lipgloss.Width(r) + 1
+	}
+	left += plain.Render(" " + trunc(it.Title, max(w-lipgloss.Width(left)-rw-2, 4)))
+	return spread(plain, left, w, right...)
 }

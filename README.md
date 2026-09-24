@@ -84,6 +84,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
 | `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
 | `item_kanban`        | `false`    | Show a details view's children as a kanban, not a list (`f` toggles) |
+| `board_list`         | `false`    | Show the Board as a list grouped by column (`f` toggles)             |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
@@ -197,6 +198,12 @@ On the board, `h`/`l` move between columns and `H`/`L` move the card to the neig
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, `ctrl+u`/
 `ctrl+d` scroll it in place when its description doesn't fit, and `tab` focuses it so the
 usual navigation keys scroll it instead.
+
+When the terminal is too narrow for every column, `f` switches the board to a compact list:
+the same cards under a heading per column, one line each, like the details view's children
+list. `j`/`k` walk every card across the headings, `h`/`l` jump to the previous or next column
+with cards, and `H`/`L` still move a card. `f` switches back; the choice is saved as
+`board_list`.
 
 ## Assigning people
 

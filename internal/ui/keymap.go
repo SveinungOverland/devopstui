@@ -28,7 +28,7 @@ type keymap struct {
 	NewBug                                                             key.Binding
 	Move, MoveNext, MoveBacklog, Parent                                key.Binding
 	Open, Yank, Flat, Closed                                           key.Binding
-	ChildLayout                                                        key.Binding
+	ChildLayout, BoardLayout                                           key.Binding
 	// board
 	Left, Right, ColLeft, ColRight key.Binding
 }
@@ -110,6 +110,7 @@ var keys = keymap{
 	Closed: b("hide done", "c"),
 
 	ChildLayout: b("children list/kanban", "f"),
+	BoardLayout: b("board list/kanban", "f"),
 
 	Left:     b("left", "h", "left"),
 	Right:    b("right", "l", "right"),
@@ -125,11 +126,11 @@ var helpGroups = [][]key.Binding{
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.NewBug, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
-	{keys.Open, keys.Yank, keys.Flat, keys.ChildLayout, keys.Closed, keys.Help, keys.Quit},
+	{keys.Open, keys.Yank, keys.Flat, keys.ChildLayout, keys.BoardLayout, keys.Closed, keys.Help, keys.Quit},
 }
 
 var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.NewBug, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.PreviewUp, keys.PreviewDown, keys.Help}
-var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
+var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.BoardLayout, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 // footerDashKanban and footerDashLanes are the two focus modes of the
 // Dashboard's two-row layout.

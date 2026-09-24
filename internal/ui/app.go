@@ -176,6 +176,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	a.ctx.FilterTeam = cfg.FilterTeam
 	a.refreshEvery = cfg.RefreshSeconds
 	a.dashShowDone = cfg.DashShowDone
+	a.board.list = cfg.BoardList
 	return a
 }
 
@@ -1370,7 +1371,7 @@ func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.Right):
 		b.move(1, 0)
 	case key.Matches(msg, keys.Top):
-		b.row = 0
+		b.move(0, -1<<20)
 	case key.Matches(msg, keys.Bottom):
 		b.move(0, 1<<20)
 	case key.Matches(msg, keys.Select):
@@ -1381,6 +1382,11 @@ func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 		return a.moveColumn(-1)
 	case key.Matches(msg, keys.ColRight):
 		return a.moveColumn(1)
+	case key.Matches(msg, keys.BoardLayout):
+		b.list = !b.list
+		b.clamp()
+		a.cfg.BoardList = b.list
+		a.persist()
 	default:
 		return a.onActionKey(msg)
 	}
@@ -2576,6 +2582,9 @@ func (a *App) renderHeader() string {
 		summary = sMuted.Render(focus)
 	case a.view == viewBoard:
 		name := a.currentBoard().Name
+		if a.board.list {
+			name += " · list"
+		}
 		if h := a.board.scrollHint(); h != "" {
 			name += " · " + h
 		}
