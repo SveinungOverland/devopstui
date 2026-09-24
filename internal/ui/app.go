@@ -613,8 +613,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Mentions come from the item's text and its discussion, which many
 	// messages can change (a load, a save, a posted comment); re-scanning
 	// after each is cheaper than remembering every path that edits them.
-	if mcmd := a.resolveMentions(); mcmd != nil {
-		cmd = tea.Batch(cmd, mcmd)
+	// Spinner ticks never do, and arrive many times a second.
+	if _, tick := msg.(spinner.TickMsg); !tick {
+		if mcmd := a.resolveMentions(); mcmd != nil {
+			cmd = tea.Batch(cmd, mcmd)
+		}
 	}
 	return m, cmd
 }
@@ -1873,7 +1876,27 @@ func (a *App) loadPreviewComments(force bool) tea.Cmd {
 		return nil
 	}
 	if it := a.currentItem(); it != nil {
-		return a.loadComments(it.ID, force)
+		return a.loadComments(it, force)
+	}
+	return nil
+}
+
+// projectOf is the project to address an item through. Items reached via a
+// link or mention can live in another project than the one being browsed.
+func (a *App) projectOf(it *model.WorkItem) string {
+	if it != nil && it.Project != "" {
+		return it.Project
+	}
+	return a.ctx.Project
+}
+
+// otherProject refuses an action that only makes sense inside the current
+// project (its sprints, areas and parents) when a target lives elsewhere.
+func (a *App) otherProject(targets []*model.WorkItem, action string) tea.Cmd {
+	for _, it := range targets {
+		if p := a.projectOf(it); !strings.EqualFold(p, a.ctx.Project) {
+			return a.setFlash(fmt.Sprintf("#%d is in project %s; switch to it (:project) to %s", it.ID, p, action), true)
+		}
 	}
 	return nil
 }
@@ -1978,7 +2001,7 @@ func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 		v.setComments(c)
 	}
 	a.item = v
-	return tea.Batch(a.loadItemChildren(it), a.loadComments(it.ID, false), a.loadLinks(it.ID))
+	return tea.Batch(a.loadItemChildren(it), a.loadComments(it, false), a.loadLinks(it.ID))
 }
 
 type linksLoadedMsg struct {
@@ -1988,11 +2011,10 @@ type linksLoadedMsg struct {
 }
 
 func (a *App) loadLinks(id int) tea.Cmd {
-	project := a.ctx.Project
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		links, err := a.client.Links(ctx, project, id)
+		links, err := a.client.Links(ctx, id)
 		return linksLoadedMsg{id: id, links: links, err: err}
 	}
 }
@@ -2069,7 +2091,7 @@ func mentionRows(ids []int, items map[int]*model.WorkItem) []model.RelatedItem {
 }
 
 func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
-	project, id, cfg := a.ctx.Project, it.ID, a.ctx.Backlog
+	project, id, cfg := a.projectOf(it), it.ID, a.ctx.Backlog
 	known := a.childItems(id)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2106,7 +2128,8 @@ type commentsLoadedMsg struct {
 // visit (or a fast cursor across Board cards) doesn't refetch or pile up
 // duplicate in-flight requests. force bypasses the cache, for an explicit
 // refresh.
-func (a *App) loadComments(id int, force bool) tea.Cmd {
+func (a *App) loadComments(it *model.WorkItem, force bool) tea.Cmd {
+	id := it.ID
 	if !force {
 		if _, ok := a.comments[id]; ok {
 			return nil
@@ -2116,7 +2139,7 @@ func (a *App) loadComments(id int, force bool) tea.Cmd {
 		return nil
 	}
 	a.commentsLoading[id] = true
-	project, since := a.ctx.Project, a.commentsGen[id]
+	project, since := a.projectOf(it), a.commentsGen[id]
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -2240,7 +2263,7 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		v.commentsLoading = true
 		v.linksLoading = true
 		v.mentionIDs = nil // re-resolve mentions once the links are back
-		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item.ID, true), a.loadLinks(v.item.ID)), true
+		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item, true), a.loadLinks(v.item.ID)), true
 	case key.Matches(msg, keys.Details), msg.String() == "enter":
 		if c := v.currentChild(); v.focusKan && c != nil {
 			return a.openItem(c), true
@@ -2336,7 +2359,7 @@ func (a *App) loadItemPreview() tea.Cmd {
 		return nil
 	}
 	if it := a.item.previewed(); it != nil {
-		return a.loadComments(it.ID, false)
+		return a.loadComments(it, false)
 	}
 	return nil
 }

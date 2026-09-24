@@ -60,16 +60,28 @@ func (a *App) onActionKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.Assign):
 		return a.pickAssignee(targets)
 	case key.Matches(msg, keys.Move), key.Matches(msg, keys.Iteration):
+		if cmd := a.otherProject(targets, "move it"); cmd != nil {
+			return cmd
+		}
 		return a.pickMoveTarget(targets)
 	case key.Matches(msg, keys.MoveNext):
+		if cmd := a.otherProject(targets, "move it"); cmd != nil {
+			return cmd
+		}
 		next, ok := a.nextIteration()
 		if !ok {
 			return a.setFlash("no next sprint", true)
 		}
 		return a.moveTo(targets, next.Path, next.Name)
 	case key.Matches(msg, keys.MoveBacklog):
+		if cmd := a.otherProject(targets, "move it"); cmd != nil {
+			return cmd
+		}
 		return a.moveTo(targets, a.ctx.Project, "backlog")
 	case key.Matches(msg, keys.Parent):
+		if cmd := a.otherProject(targets, "re-parent it"); cmd != nil {
+			return cmd
+		}
 		return a.pickParent(targets)
 	case key.Matches(msg, keys.Effort):
 		return a.promptNumber(targets, "Effort", model.FieldEffort, cur.Effort)
@@ -109,6 +121,11 @@ func (a *App) createBug() tea.Cmd {
 func (a *App) newItem(forceBug bool) tea.Cmd {
 	cfg := a.ctx.Backlog
 	parent := a.currentItem()
+	if parent != nil {
+		if cmd := a.otherProject([]*model.WorkItem{parent}, "add to it"); cmd != nil {
+			return cmd
+		}
+	}
 	if parent != nil && cfg.TaskLevel(parent) {
 		parent = a.lookup(parent.ParentID) // new sibling task
 	}
@@ -184,13 +201,14 @@ func (a *App) update(it *model.WorkItem, patches ...model.Patch) tea.Cmd {
 // addComment opens the Markdown composer for a new comment on it.
 func (a *App) addComment(it *model.WorkItem) tea.Cmd {
 	return a.editComment(it, func(text string) tea.Cmd {
-		return a.postComment(it.ID, text)
+		return a.postComment(it, text)
 	})
 }
 
-func (a *App) postComment(id int, text string) tea.Cmd {
+func (a *App) postComment(it *model.WorkItem, text string) tea.Cmd {
+	id := it.ID
 	a.busy = fmt.Sprintf("commenting on #%d", id)
-	project := a.ctx.Project
+	project := a.projectOf(it)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -301,7 +319,7 @@ func describe(items []*model.WorkItem) string {
 
 func (a *App) pickState(targets []*model.WorkItem) tea.Cmd {
 	typ := targets[0].Type
-	project := a.ctx.Project
+	project := a.projectOf(targets[0])
 	return func() tea.Msg {
 		states, err := a.client.States(context.Background(), project, typ)
 		if err != nil {
