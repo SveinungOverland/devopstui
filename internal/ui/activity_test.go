@@ -2,11 +2,15 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/sveinungoverland/devopstui/internal/ado"
 	"github.com/sveinungoverland/devopstui/internal/config"
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
@@ -213,5 +217,76 @@ func TestActivityReloadsOnVisit(t *testing.T) {
 	h.keys("5")
 	if got := h.app.activity.rows[0]; got.ID != 1005 || got.Title != "Expire invites after 3 days" {
 		t.Errorf("top row = #%d %q, want the change made elsewhere", got.ID, got.Title)
+	}
+}
+
+// feedClient serves a fixed Activity feed on top of the demo Fake, for
+// data the demo seed doesn't have.
+type feedClient struct {
+	*ado.Fake
+	feed []*model.WorkItem
+}
+
+func (c *feedClient) Activity(context.Context, string) ([]*model.WorkItem, error) {
+	return c.feed, nil
+}
+
+// TestActivityFrameFitsRealData: real organisations have six- and
+// seven-digit ids, long names and the odd tab or line break in a title.
+// A row even one cell wider than the panel wraps inside it, which grew the
+// panel past the terminal and scrolled the header and the cursor off the
+// top. The frame must stay exactly the terminal's size, with the cursor on
+// it, however far the cursor travels.
+func TestActivityFrameFitsRealData(t *testing.T) {
+	titles := []string{
+		"Short",
+		"A really rather long title that goes on and on about the work across several teams",
+		"Title\twith\ttabs",
+		"Title with a\r\nline break\n",
+		"Emoji 🚀 title ✅ and 日本語のタイトル",
+	}
+	names := []string{"Alex Kim", "Dr. Maximiliana Konstantinopoulou-Wetherington (Contractor)", ""}
+	now := time.Now()
+	var feed []*model.WorkItem
+	for i := range 60 {
+		feed = append(feed, &model.WorkItem{
+			ID: 99990 + i*40000, Rev: 1 + i%3, Type: "Product Backlog Item", Kind: model.KindRequirement,
+			Title: titles[i%len(titles)], State: "Ready for Acceptance Testing",
+			AssignedTo: names[i%len(names)], ChangedBy: names[(i+1)%len(names)],
+			ChangedDate: now.Add(-time.Duration(i) * 37 * time.Minute),
+		})
+	}
+	for _, sz := range [][2]int{{80, 24}, {140, 40}, {200, 50}} {
+		w, hgt := sz[0], sz[1]
+		h := newHarness(t, w, hgt)
+		h.app.client = &feedClient{Fake: h.fake, feed: feed}
+		h.app.cfg.LastSeenActivity = now.Add(-5 * time.Hour) // draw the marker too
+		h.keys("5")
+		check := func(step string) {
+			t.Helper()
+			lines := strings.Split(h.app.View(), "\n")
+			if len(lines) != hgt {
+				t.Fatalf("%dx%d %s: frame is %d lines, want %d", w, hgt, step, len(lines), hgt)
+			}
+			cursor := false
+			for i, l := range lines {
+				if lw := lipgloss.Width(l); lw > w {
+					t.Fatalf("%dx%d %s: line %d is %d wide, want <= %d", w, hgt, step, i, lw, w)
+				}
+				cursor = cursor || strings.Contains(l, cursorMark)
+			}
+			if !cursor {
+				t.Fatalf("%dx%d %s: cursor row is off screen", w, hgt, step)
+			}
+		}
+		check("top")
+		for i := range len(feed) {
+			h.keys("j")
+			check(fmt.Sprintf("down %d", i+1))
+		}
+		for i := range len(feed) {
+			h.keys("k")
+			check(fmt.Sprintf("up %d", i+1))
+		}
 	}
 }

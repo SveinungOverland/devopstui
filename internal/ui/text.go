@@ -23,6 +23,22 @@ func trunc(s string, width int) string {
 	return ansi.Truncate(s, width, "…")
 }
 
+// oneLine flattens s onto a single line: tabs and line breaks become
+// spaces. A row that measures one width but renders as several lines, or
+// wider (lipgloss expands tabs), would break a fixed-height layout.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// clip cuts a rendered line to width cells without an ellipsis, as a last
+// guard against a row wrapping inside its panel and growing it.
+func clip(s string, width int) string {
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, max(width, 0), "")
+}
+
 // pad right-pads s to width cells.
 func pad(s string, width int) string {
 	w := ansi.StringWidth(s)

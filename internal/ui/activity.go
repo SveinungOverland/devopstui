@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -206,7 +207,14 @@ func (f *activity) view(width, height int) string {
 	}
 	f.offset = max(min(f.offset, total-height), 0)
 
-	// Columns: marker(2) tag(5) id(6) title(*) state(12) by(whoW) [→ assignee] ago(9)
+	// Columns: marker(2) tag(5) id(idW+1) title(*) state(12) by(whoW) [→ assignee] ago(9)
+	// The id column fits the widest id in the feed: real organisations are
+	// well past five digits, and a row even one cell too wide wraps inside
+	// the panel, doubling its height.
+	idW := 5
+	for _, it := range f.rows {
+		idW = max(idW, len(strconv.Itoa(it.ID)))
+	}
 	stateW, whoW, agoW, assignW := 12, 2, 9, 0
 	if width >= activityWideW {
 		whoW = 18
@@ -240,8 +248,8 @@ func (f *activity) view(width, height int) string {
 			mark = sSelected.Render("● ")
 		}
 		tag := st(kindStyle(it.Kind)).Render(pad(it.Kind.Tag(), 4))
-		id := muted.Render(fmt.Sprintf("%5d", it.ID))
-		titleW := width - 2 - 5 - 6 - stateW - 1 - whoW - 1 - agoW - 1
+		id := muted.Render(padLeft(strconv.Itoa(it.ID), idW))
+		titleW := width - 2 - 5 - (idW + 1) - stateW - 1 - whoW - 1 - agoW - 1
 		if assignW > 0 {
 			titleW -= assignW + 1
 		}
@@ -250,12 +258,12 @@ func (f *activity) view(width, height int) string {
 		if it.Rev == 1 {
 			badge = " " + st(sOK).Render("created")
 		}
-		title := plain.Render(trunc(it.Title, titleW-lipgloss.Width(badge))) + badge
+		title := plain.Render(trunc(oneLine(it.Title), titleW-lipgloss.Width(badge))) + badge
 		title += fill(plain, titleW-lipgloss.Width(title))
 		state := st(stateStyle(it.State)).Render(pad(trunc(it.State, stateW), stateW))
 		by := muted.Render(initials(it.ChangedBy))
 		if whoW > 2 {
-			by = muted.Render(pad(trunc(it.ChangedBy, whoW), whoW))
+			by = muted.Render(pad(trunc(oneLine(it.ChangedBy), whoW), whoW))
 		}
 		when := muted.Render(padLeft(ago(it.ChangedDate), agoW))
 		if i < nNew {
@@ -264,11 +272,11 @@ func (f *activity) view(width, height int) string {
 		sp := plain.Render(" ")
 		line := mark + tag + sp + id + sp + title + sp + state + sp + by
 		if assignW > 0 {
-			line += sp + muted.Render(pad(trunc("→ "+it.Assignee(), assignW), assignW))
+			line += sp + muted.Render(pad(trunc("→ "+oneLine(it.Assignee()), assignW), assignW))
 		}
 		line += sp + when
 		line += fill(plain, width-lipgloss.Width(line))
-		lines = append(lines, line)
+		lines = append(lines, clip(line, width))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -277,7 +285,7 @@ func (f *activity) view(width, height int) string {
 func (f *activity) markerLine(nNew, width int) string {
 	label := fmt.Sprintf(" ▲ %s since you last looked, %s ", plural(nNew, "change"), f.since.Local().Format("Mon Jan 2 15:04"))
 	rule := max(width-lipgloss.Width(label)-2, 0)
-	return sSelected.Render("──" + label + strings.Repeat("─", rule))
+	return clip(sSelected.Render("──"+label+strings.Repeat("─", rule)), width)
 }
 
 // summary is the header's right-hand status: position, new count, scope.
