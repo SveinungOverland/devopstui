@@ -129,6 +129,9 @@ type App struct {
 	flashErr bool
 
 	pendingJump int // item to select once the next load lands (after create)
+
+	// health holds the staleness threshold every view flags items by.
+	health *health
 }
 
 // New builds the app. The client may be a Fake for demo mode.
@@ -155,6 +158,8 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		previewList:  true,
 		previewBoard: true,
 		previewDash:  true,
+
+		health: &health{staleAfter: cfg.StaleAfter()},
 	}
 	a.wireLists()
 	a.sprint.showDone = !cfg.HideDone
@@ -323,6 +328,7 @@ func (a *App) pickTeamFilter() tea.Cmd {
 func (a *App) wireLists() {
 	for _, l := range []*list{a.sprint, a.backlog} {
 		l.taskLevel = func(w *model.WorkItem) bool { return a.ctx.Backlog.TaskLevel(w) }
+		l.health = a.health
 		l.parentTitle = func(id int) string {
 			if p := a.lookup(id); p != nil {
 				return p.Title
@@ -330,6 +336,7 @@ func (a *App) wireLists() {
 			return ""
 		}
 	}
+	a.board.health, a.dashBoard.health, a.dashLanes.health = a.health, a.health, a.health
 	// Tasks already show in the PBI's detail preview and progress badge, so
 	// the flat sprint view drops them. Backlog's query never returns
 	// task-level items in the first place, flat or not.
@@ -1428,11 +1435,68 @@ func (a *App) runCommand(c string) tea.Cmd {
 			return a.setFlash("auto: give a number of seconds (5 or more), on, or off", true)
 		}
 		return a.setAutoRefresh(sec)
+	case "attention", "att":
+		return a.toggleAttention()
+	case "stale":
+		if arg == "" {
+			if d := a.cfg.Stale(); d > 0 {
+				return a.setFlash(fmt.Sprintf("stale after %d days without a change", d), false)
+			}
+			return a.setFlash("stale flag off", false)
+		}
+		days, err := strconv.Atoi(arg)
+		if arg == "off" {
+			days, err = 0, nil
+		}
+		if err != nil || days < 0 {
+			return a.setFlash("stale: give a number of days, or off", true)
+		}
+		return a.setStale(days)
 	case "help", "h":
 		a.popup = helpPopup{}
 		return nil
 	}
 	return a.setFlash("unknown command: "+word, true)
+}
+
+// toggleAttention narrows the Sprint tree, Backlog and Board to items
+// with a health signal. It applies to all three at once, so switching view
+// keeps the same question answered.
+func (a *App) toggleAttention() tea.Cmd {
+	on := !a.sprint.attention
+	a.sprint.attention, a.backlog.attention, a.board.attention = on, on, on
+	a.rehealth()
+	if on {
+		return a.setFlash("showing only items that need attention", false)
+	}
+	return a.setFlash("showing all items", false)
+}
+
+// setStale changes the staleness threshold and writes it to the config.
+func (a *App) setStale(days int) tea.Cmd {
+	a.cfg.StaleDays = &days
+	a.health.staleAfter = a.cfg.StaleAfter()
+	a.persist()
+	a.rehealth()
+	if days == 0 {
+		return a.setFlash("stale flag off", false)
+	}
+	return a.setFlash(fmt.Sprintf("stale after %d days without a change", days), false)
+}
+
+// rehealth recomputes every view's cached health signals.
+func (a *App) rehealth() {
+	for _, l := range []*list{a.sprint, a.backlog} {
+		if l.all != nil {
+			l.rebuild()
+		}
+	}
+	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	a.refreshDashboard()
+	if a.item != nil {
+		a.item.buildColumns()
+	}
+	a.refreshDetail()
 }
 
 func (a *App) switchView(v viewID) tea.Cmd {
@@ -1644,10 +1708,8 @@ func (a *App) clearSelection() {
 // data (myItems and the last ChildrenOf fetch for "my PBIs").
 func (a *App) lookup(id int) *model.WorkItem {
 	for _, l := range []*list{a.sprint, a.backlog} {
-		if l.tree != nil {
-			if n, ok := l.tree.Get(id); ok {
-				return n.Item
-			}
+		if it, ok := l.get(id); ok {
+			return it
 		}
 	}
 	for _, it := range a.myItems {
@@ -1780,7 +1842,7 @@ func (a *App) refreshDetail() {
 	}
 	a.detail.Width = w
 	a.detail.Height = height
-	a.detail.SetContent(renderDetail(it, parent, children, comments, w, a.ctx.Backlog))
+	a.detail.SetContent(renderDetail(it, parent, children, comments, w, a.ctx.Backlog, a.health))
 	a.detail.GotoTop()
 }
 
@@ -1847,7 +1909,7 @@ func (a *App) showItem(id int) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, nil, 70, a.ctx.Backlog), "\n")}}
+		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, nil, 70, a.ctx.Backlog, a.health), "\n")}}
 	}
 }
 
@@ -1881,7 +1943,7 @@ func (a *App) openItem(it *model.WorkItem) tea.Cmd {
 }
 
 func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
-	v := newItemView(it, a.ctx.Backlog)
+	v := newItemView(it, a.ctx.Backlog, a.health)
 	v.parent = a.lookup(it.ParentID)
 	v.focusKan = len(a.childItems(it.ID)) > 0
 	v.setChildren(a.childItems(it.ID), nil)

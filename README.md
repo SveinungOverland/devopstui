@@ -80,6 +80,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `filter_team`        |            | Show only this team's area paths in every view (`T` at runtime)      |
 | `confirm_writes`     | `false`    | Ask before single-item edits too (bulk and re-parent always ask)     |
 | `refresh_seconds`    | `0`        | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets)         |
+| `stale_days`         | `5`        | Days an active item may go unchanged before it's flagged ◷, 0 = off  |
 | `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
 | `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
@@ -287,6 +288,34 @@ choice is saved as `filter_team` in the config.
   team's bug behaviour, or where bugs are switched off entirely, is a no-op with a flash
   explaining why.
 
+## Flags: items that need attention
+
+Every view marks items that probably need a hand with a small glyph. There is no separate
+view for this. Each glyph is a distinct shape, so they read without colour too:
+
+| Glyph | Flag           | When                                                                          |
+| ----- | -------------- | ----------------------------------------------------------------------------- |
+| `✗`   | open tasks     | The item is Done but some of its tasks aren't                                 |
+| `✓`   | ready to close | Every task is Done but the item isn't                                         |
+| `◷`   | stale          | Active, and neither it nor any of its tasks has changed for `stale_days`      |
+| `?`   | unassigned     | Active, but nobody is assigned                                                |
+| `↑`   | orphan         | An open PBI with no parent Feature                                            |
+
+- The stale glyph fades in with age: it's grey at first and turns amber once the item has sat
+  for twice the threshold. Activity on any of a PBI's tasks counts as activity on the PBI.
+- An unassigned item in `New` is ordinary backlog and isn't flagged. The assignee check only
+  applies once work has started. Removed items are never flagged.
+- The open-tasks and ready-to-close flags need the tasks to be loaded, so they show in the
+  Sprint tree, on the Board and in the details, but not in the Backlog, which doesn't fetch
+  tasks.
+- A row or card has room for one glyph, the first in the table above. The details pane
+  (`Flags`) and the item view's header list every flag, and say how long a stale item has sat.
+- **`:attention`** (or `:att`) narrows the Sprint tree, Backlog and Board to flagged items.
+  Parents stay visible, dimmed. Run it again to show everything.
+- **`:stale 7`** sets the threshold in days and saves it as `stale_days`. `:stale off` turns
+  the flag off, and `:stale` on its own shows the current value.
+- The `?` help lists the glyphs too.
+
 ## Dashboard
 
 The dashboard (`1`) is two rows, both scoped to items assigned to `@Me` and, when a sprint is
@@ -331,7 +360,7 @@ header shows `↻60s` while it is on, and the interval is whatever `refresh_seco
 seconds by default. `:auto 30` sets a different interval. Reloads are skipped while a dialog
 is open or a write is in flight, so nothing shifts under you mid-edit.
 
-Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
+Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:attention`, `:stale [days|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
 
 ## Develop

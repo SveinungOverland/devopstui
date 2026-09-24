@@ -1,0 +1,92 @@
+package model
+
+import (
+	"reflect"
+	"testing"
+	"time"
+)
+
+func TestAssess(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	rules := HealthRules{Now: now, StaleAfter: 5 * 24 * time.Hour}
+	fresh := now.Add(-time.Hour)
+	old := now.AddDate(0, 0, -9)
+
+	// pbi is a healthy, assigned, parented requirement to vary from.
+	pbi := func(mod func(*WorkItem)) *WorkItem {
+		w := &WorkItem{ID: 1, Kind: KindRequirement, State: "Committed", AssignedTo: "Ann", Effort: 3, ParentID: 9, ChangedDate: fresh}
+		if mod != nil {
+			mod(w)
+		}
+		return w
+	}
+	task := func(mod func(*WorkItem)) *WorkItem {
+		w := &WorkItem{ID: 2, Kind: KindTask, State: "In Progress", AssignedTo: "Ann", RemainingWork: 4, ParentID: 1, ChangedDate: fresh}
+		if mod != nil {
+			mod(w)
+		}
+		return w
+	}
+
+	cases := []struct {
+		name  string
+		it    *WorkItem
+		tasks TaskTally
+		want  Signal
+	}{
+		{"healthy", pbi(nil), TaskTally{Done: 1, Total: 2}, 0},
+		{"ready to close", pbi(nil), TaskTally{Done: 2, Total: 2}, SignalReadyToClose},
+		{"done with open tasks", pbi(func(w *WorkItem) { w.State = "Done" }), TaskTally{Done: 1, Total: 2}, SignalOpenTasks},
+		{"done with done tasks", pbi(func(w *WorkItem) { w.State = "Done" }), TaskTally{Done: 2, Total: 2}, 0},
+		{"tasks unknown", pbi(nil), TaskTally{}, 0},
+		{"stale", pbi(func(w *WorkItem) { w.ChangedDate = old }), TaskTally{}, SignalStale},
+		{"stale but tasks moving", pbi(func(w *WorkItem) { w.ChangedDate = old }), TaskTally{Done: 0, Total: 1, Latest: fresh}, 0},
+		{"old but not active", pbi(func(w *WorkItem) { w.State = "New"; w.ChangedDate = old }), TaskTally{}, 0},
+		{"old but removed", pbi(func(w *WorkItem) { w.State = "Removed"; w.ChangedDate = old; w.ParentID = 0 }), TaskTally{}, 0},
+		{"no effort is fine", pbi(func(w *WorkItem) { w.Effort = 0 }), TaskTally{}, 0},
+		{"active and unassigned", pbi(func(w *WorkItem) { w.AssignedTo = "" }), TaskTally{}, SignalUnassigned},
+		{"active task unassigned", task(func(w *WorkItem) { w.AssignedTo = "" }), TaskTally{}, SignalUnassigned},
+		{"new and unassigned", pbi(func(w *WorkItem) { w.State = "New"; w.AssignedTo = "" }), TaskTally{}, 0},
+		{"task healthy", task(nil), TaskTally{}, 0},
+		{"task in progress with 0h is fine", task(func(w *WorkItem) { w.RemainingWork = 0 }), TaskTally{}, 0},
+		{"done task with hours is fine", task(func(w *WorkItem) { w.State = "Done" }), TaskTally{}, 0},
+		{"task needs no effort", task(func(w *WorkItem) { w.Effort = 0; w.ParentID = 0 }), TaskTally{}, 0},
+		{"orphan", pbi(func(w *WorkItem) { w.ParentID = 0 }), TaskTally{}, SignalOrphan},
+		{"done orphan", pbi(func(w *WorkItem) { w.ParentID = 0; w.State = "Done" }), TaskTally{}, 0},
+		{"parentless epic", &WorkItem{Kind: KindEpic, State: "New"}, TaskTally{}, 0},
+		{"parentless bug", pbi(func(w *WorkItem) { w.Kind = KindBug; w.ParentID = 0 }), TaskTally{}, 0},
+		{"several", pbi(func(w *WorkItem) { w.ParentID = 0; w.AssignedTo = ""; w.ChangedDate = old }), TaskTally{Done: 1, Total: 1},
+			SignalReadyToClose | SignalStale | SignalUnassigned | SignalOrphan},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := Assess(c.it, c.tasks, rules)
+			if h.Signals != c.want {
+				t.Errorf("signals = %v, want %v", h.Signals.List(), c.want.List())
+			}
+		})
+	}
+}
+
+func TestAssessStaleOff(t *testing.T) {
+	now := time.Now()
+	it := &WorkItem{Kind: KindTask, State: "In Progress", AssignedTo: "Ann", RemainingWork: 1, ChangedDate: now.AddDate(-1, 0, 0)}
+	if h := Assess(it, TaskTally{}, HealthRules{Now: now}); h.Signals.Has(SignalStale) {
+		t.Error("stale with StaleAfter 0")
+	}
+}
+
+func TestSignalTop(t *testing.T) {
+	s := SignalOrphan | SignalUnassigned | SignalStale
+	if s.Top() != SignalStale {
+		t.Errorf("top = %v", s.Top().Name())
+	}
+	if Signal(0).Top() != 0 {
+		t.Error("empty set has a top")
+	}
+	h := Health{Signals: SignalStale | SignalUnassigned, Idle: 9 * 24 * time.Hour}
+	want := []string{"stale: 9 days without a change", "unassigned"}
+	if got := h.Describe(); !reflect.DeepEqual(got, want) {
+		t.Errorf("describe = %q", got)
+	}
+}

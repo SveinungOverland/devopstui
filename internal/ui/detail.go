@@ -15,7 +15,7 @@ import (
 // comments is only ever populated by the Board, Sprint and Backlog views
 // (see refreshDetail) and appended as a Discussion section after the
 // description.
-func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.WorkItem, comments []model.Comment, width int, cfg model.BacklogConfig) string {
+func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.WorkItem, comments []model.Comment, width int, cfg model.BacklogConfig, h *health) string {
 	if it == nil {
 		return sMuted.Render("nothing selected")
 	}
@@ -55,10 +55,18 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 	if len(it.Tags) > 0 {
 		row("Tags", sMuted.Render(strings.Join(it.Tags, ", ")))
 	}
+	p := computeProgress(children, func(w *model.WorkItem) bool { return w.ParentID == it.ID && cfg.TaskLevel(w) })
+	// The one place besides the drill-down with room for every signal.
+	for i, f := range h.flags(h.assess(it, p[it.ID])) {
+		label := ""
+		if i == 0 {
+			label = "Flags"
+		}
+		row(label, f)
+	}
 	row("Updated", ago(it.ChangedDate)+sMuted.Render("  by "+it.ChangedBy))
 
 	if len(children) > 0 {
-		p := computeProgress(children, func(w *model.WorkItem) bool { return w.ParentID == it.ID && cfg.TaskLevel(w) })
 		head := fmt.Sprintf("%d children", len(children))
 		if pr, ok := p[it.ID]; ok {
 			head = fmt.Sprintf("%d/%d tasks done", pr.done, pr.total)
@@ -70,11 +78,13 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 			}
 		}
 		b.WriteString("\n" + sMuted.Render(head) + "\n")
+		flags := h.assessAll(children, nil)
 		for _, c := range children {
 			mark := "○"
 			if isDone(c.State) {
 				mark = sOK.Render("●")
 			}
+			mark += h.glyph(flags[c.ID], func(s lipgloss.Style) lipgloss.Style { return s })
 			rem := ""
 			if cfg.TaskLevel(c) && c.RemainingWork > 0 && !isDone(c.State) {
 				rem = fmtEffort(c.RemainingWork) + "h"
