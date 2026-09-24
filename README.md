@@ -192,38 +192,47 @@ members, so you can assign to anyone regardless of which team owns the sprint.
 ## Item details view
 
 Press `D` on any item (or `enter` on a board card) to open it full screen: its metadata across
-the top, the rendered Markdown description on the left, and a kanban of its children on the
-right, one column per state.
+the top, the rendered Markdown description on the left, and on the right its related items above
+a kanban of its children, one column per state.
 
 ```
  Product Backlog Item #1013  Propagate trace id through queue workers
  In Progress · Sveinung Øverland · Sprint 42 · 8 pts · P1 · 1/3 tasks · 6h left
  ↑ FEAT 1012 Request tracing                                    2h ago by Alex Kim
 ╭─────────────────────────────────────╮╭──────────────────────────────────────────╮
-│Description                          ││Children (3)                              │
-│  Propagate trace id through queue…  ││To Do 2         In Progress 0     Done 1  │
+│Description                          ││Related (3)                               │
+│  Propagate trace id through queue…  ││Related                                   │
+│                                     ││ BUG  1020   Spans lost when re… Approved │
+│  Acceptance criteria                ││Successors                                │
+│  ▪ trace id survives the queue      ││ PBI  1014   Trace dashboard i… Committed │
+│                                     ││Mentioned                                 │
+│                                     ││ TASK 1015   Add trace header t…    To Do │
+│                                     │╰──────────────────────────────────────────╯
+│                                     │╭──────────────────────────────────────────╮
+│                                     ││Children (3)                              │
+│                                     ││To Do 2         In Progress 0     Done 1  │
 │                                     ││──────────────  ──────────────  ────────  │
-│  Acceptance criteria                ││▌TASK 1015 2h SØ                TASK 1016 │
-│  ▪ trace id survives the queue      ││ Add trace hea…                  Read tr… │
+│                                     ││▌TASK 1015 2h SØ                TASK 1016 │
+│                                     ││ Add trace hea…                  Read tr… │
 ╰─────────────────────────────────────╯╰──────────────────────────────────────────╯
 ```
 
 | Key             |                                                                        |
 | --------------- | ---------------------------------------------------------------------- |
-| `tab`           | switch focus between the description and the kanban                    |
-| `j` `k` `h` `l` | scroll the description, or move between cards and columns              |
+| `tab`           | move focus: description, related items, kanban                         |
+| `x`             | jump to the related items, and back to the description                 |
+| `j` `k` `h` `l` | scroll the description, or move between rows, cards and columns        |
 | `H` `L`         | move the highlighted child to the neighbouring column (sets its state) |
 | `n`             | add a child; on a highlighted child it adds a sibling                  |
-| `D` `enter`     | drill into the highlighted child                                       |
+| `D` `enter`     | drill into the highlighted related item or child                       |
 | `esc` `q`       | walk back out, one level at a time                                     |
-| `z`             | give the description the full width                                    |
+| `z`             | give the description the full width, hiding the right-hand side        |
 | `C`             | swap the left pane between the description and the discussion          |
-| `x`             | swap the left pane to the related items, and back                      |
 | `c`             | add a comment to the discussion                                        |
 | `r`             | re-fetch the children, discussion and links                            |
 
 Every action key works here too and applies to whatever has focus: the item itself while the
-description is focused, otherwise the highlighted child. So `s` sets a child's state, `d` edits
+description is focused, otherwise the highlighted related item or child. So `s` sets a child's state, `d` edits
 the item's description, `a` assigns, and so on. Children are fetched for the item you open, so
 the kanban is complete even in views that do not load tasks, such as the backlog.
 
@@ -235,27 +244,15 @@ lands. On the Board, Sprint and Backlog views, where the preview pane already ha
 terminal height to work with, the discussion shows underneath the description instead, read-only,
 with no toggle needed.
 
-`x` toggles the left pane to the item's **Related** section and puts the cursor there:
-
-```
-│Related (3)                                                                │
-│Related                                                                    │
-│▌BUG  1020   Spans lost when retry budget exhausted              Approved  │
-│                                                                           │
-│Successors                                                                 │
-│ PBI  1014   Trace dashboard in Grafana                         Committed  │
-│                                                                           │
-│Mentioned                                                                  │
-│ TASK 1015   Add trace header to publisher                          To Do  │
-```
-
-It lists the item's work item links (Related, Predecessors, Successors, Duplicates, Duplicate of)
-followed by every `#1234` mentioned in the description, repro steps, acceptance criteria or the
-discussion. Parent and child links are left out, since the header and the kanban already show
-them, and an item that is both linked and mentioned is listed once, under its link. `j` `k` move
-the cursor, and `D` or `enter` drills into the highlighted item. `esc` walks back and puts you on
-the row you left from. Links into other projects are included. Mentions are picked up again when
-comments load, when you post one and when you edit the description.
+The **Related** panel lists the item's work item links (Related, Predecessors, Successors,
+Duplicates, Duplicate of) followed by every `#1234` mentioned in the description, repro steps,
+acceptance criteria or the discussion. Parent and child links are left out, since the header and
+the kanban already show them, and an item that is both linked and mentioned is listed once, under
+its link. The panel is as tall as its rows, up to about 2/5 of the column, and grows while it has
+focus; with nothing related it is a single line and `tab` skips it. `j` `k` move the cursor, and
+`D` or `enter` drills into the highlighted item; `esc` walks back and puts you on the row you left
+from. Links into other projects are included. Mentions are picked up again when comments load,
+when you post one and when you edit the description.
 
 ## Team filter
 

@@ -51,7 +51,7 @@ var keys = keymap{
 	Details:     b("details", "D"),
 	Comments:    b("discussion", "C"),
 	Comment:     b("add comment", "c"),
-	Related:     b("related", "x"),
+	Related:     b("focus related", "x"),
 
 	Dashboard:   b("dashboard", "1"),
 	Sprint:      b("sprint", "2"),

@@ -718,7 +718,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.view == viewItem && a.item != nil {
 			// Show it in the kanban straight away, then reconcile.
 			a.item.setChildren(append(a.item.children, msg.item), nil)
-			a.item.focusKan = true
+			a.item.focusKan, a.item.focusRel = true, false
 			a.item.jumpTo(msg.item.ID)
 			return a, tea.Batch(a.reloadAll(), a.loadItemChildren(a.item.item), flash)
 		}
@@ -2117,24 +2117,24 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return a.closeItem(), true
 	case key.Matches(msg, keys.Focus):
 		if !v.descOnly {
-			v.focusKan = !v.focusKan
+			v.cycleFocus()
 		}
 		return nil, true
 	case key.Matches(msg, keys.Preview):
 		v.descOnly = !v.descOnly
 		if v.descOnly {
-			v.focusKan = false // the kanban is gone; focus follows
+			v.focusKan, v.focusRel = false, false // the right side is gone; focus follows
 		}
 		return nil, true
 	case key.Matches(msg, keys.Comments):
 		v.showComments = !v.showComments
-		v.showRelated = false
 		return nil, true
 	case key.Matches(msg, keys.Related):
-		// Related is only useful with its cursor, so it takes focus.
-		v.showRelated = !v.showRelated
-		if v.showRelated {
-			v.showComments, v.focusKan = false, false
+		// A jump straight to Related, and back out to the description.
+		if v.focusRel {
+			v.focusRel = false
+		} else {
+			v.focusRel, v.focusKan, v.descOnly = true, false, false
 		}
 		return nil, true
 	case key.Matches(msg, keys.Comment):
@@ -2149,7 +2149,7 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		if c := v.currentChild(); v.focusKan && c != nil {
 			return a.openItem(c), true
 		}
-		if r := v.currentRelated(); !v.focusKan && v.showRelated && r != nil {
+		if r := v.currentRelated(); v.focusRel && r != nil {
 			return a.openItem(r), true
 		}
 		return nil, true
@@ -2159,7 +2159,7 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 	v := a.item
-	if !v.focusKan && v.showRelated {
+	if v.focusRel {
 		switch {
 		case key.Matches(msg, keys.Down):
 			v.moveRelated(1)
@@ -2367,7 +2367,7 @@ func (a *App) renderHeader() string {
 		switch {
 		case a.item.focusKan:
 			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
-		case a.item.showRelated:
+		case a.item.focusRel:
 			focus = "related"
 			if n := len(a.item.related()); n > 0 {
 				focus = fmt.Sprintf("related %d/%d", a.item.relIndex()+1, n)
@@ -2519,7 +2519,7 @@ func (a *App) renderFooter() string {
 		switch {
 		case a.item.focusKan:
 			bindings = footerItemKanban
-		case a.item.showRelated:
+		case a.item.focusRel:
 			bindings = footerItemRelated
 		}
 	case a.view == viewBoard:

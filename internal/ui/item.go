@@ -23,7 +23,8 @@ type itemView struct {
 	col, row int
 
 	desc     viewport.Model
-	focusKan bool // kanban has focus; otherwise the description
+	focusKan bool // kanban has focus
+	focusRel bool // Related has focus; with neither, the description
 	descOnly bool // z: hide the kanban and use the full width
 	loading  bool
 
@@ -33,14 +34,13 @@ type itemView struct {
 	commentsLoading bool
 	showComments    bool
 
-	// links and mentions back the x-toggled Related pane, the third thing
-	// the left-hand slot can show. mentionIDs is what mentions was last
-	// resolved for, so a re-scan that finds the same ids is a no-op.
+	// links and mentions back the Related panel above the kanban.
+	// mentionIDs is what mentions was last resolved for, so a re-scan that
+	// finds the same ids is a no-op.
 	links        []model.RelatedItem
 	mentions     []model.RelatedItem
 	mentionIDs   []int
 	linksLoading bool
-	showRelated  bool
 	relRow       int
 
 	cfg      model.BacklogConfig
@@ -55,18 +55,34 @@ func newItemView(it *model.WorkItem, cfg model.BacklogConfig) *itemView {
 // itemPane is the part of a drill-down level that esc restores when it
 // walks back to it, so coming back from a related item lands on its row.
 type itemPane struct {
-	focusKan, descOnly, showComments, showRelated bool
-	col, row, relRow                              int
+	focusKan, focusRel, descOnly, showComments bool
+	col, row, relRow                           int
 }
 
 func (v *itemView) pane() itemPane {
-	return itemPane{v.focusKan, v.descOnly, v.showComments, v.showRelated, v.col, v.row, v.relRow}
+	return itemPane{v.focusKan, v.focusRel, v.descOnly, v.showComments, v.col, v.row, v.relRow}
 }
 
 func (v *itemView) restore(p itemPane) {
-	v.focusKan, v.descOnly, v.showComments, v.showRelated = p.focusKan, p.descOnly, p.showComments, p.showRelated
+	v.focusKan, v.focusRel, v.descOnly, v.showComments = p.focusKan, p.focusRel, p.descOnly, p.showComments
 	v.col, v.row, v.relRow = p.col, p.row, p.relRow
 	v.clamp()
+}
+
+// focusDesc reports whether the left-hand pane has focus.
+func (v *itemView) focusDesc() bool { return !v.focusKan && !v.focusRel }
+
+// cycleFocus is tab: description → Related → kanban, in the order they sit
+// on screen. An empty Related panel has nothing to select, so it is skipped.
+func (v *itemView) cycleFocus() {
+	switch {
+	case v.focusDesc() && len(v.related()) > 0:
+		v.focusRel = true
+	case v.focusKan:
+		v.focusKan = false
+	default:
+		v.focusRel, v.focusKan = false, true
+	}
 }
 
 // related is the Related pane's rows: links first, then mentions.
@@ -221,9 +237,14 @@ func (v *itemView) currentChild() *model.WorkItem {
 	return v.cols[v.col][v.row]
 }
 
-// current is what actions apply to: the highlighted child when the kanban
-// has focus, otherwise the item itself.
+// current is what actions apply to: the highlighted child or related item
+// when the kanban or Related has focus, otherwise the item itself.
 func (v *itemView) current() *model.WorkItem {
+	if v.focusRel {
+		if r := v.currentRelated(); r != nil {
+			return r
+		}
+	}
 	if v.focusKan {
 		if c := v.currentChild(); c != nil {
 			return c
@@ -274,7 +295,7 @@ func (v *itemView) view(w, h int, spin string) string {
 	headH := lipgloss.Height(head)
 	paneH := max(h-headH, 3)
 
-	descW, kanW := w, 0
+	descW, rightW := w, 0
 	stacked := false
 	switch {
 	case v.descOnly:
@@ -283,8 +304,8 @@ func (v *itemView) view(w, h int, spin string) string {
 		// The kanban wants about 22 cells per state column; give it that
 		// when the screen allows, never less than 9/20 of the width, and
 		// always leave the description at least 80 to read in.
-		kanW = max(w*9/20, min(len(v.states)*22+4, w-80))
-		descW = w - kanW
+		rightW = max(w*9/20, min(len(v.states)*22+4, w-80))
+		descW = w - rightW
 	default:
 		stacked = true
 	}
@@ -294,18 +315,40 @@ func (v *itemView) view(w, h int, spin string) string {
 	}
 	if stacked {
 		dh := max(paneH*3/5, 5)
-		return head + "\n" + v.renderLeft(w, dh) + "\n" + v.renderKanban(w, paneH-dh, spin)
+		if !v.focusDesc() {
+			// Stacked three high, the focused panel on the right needs
+			// the room more than the description does.
+			dh = max(paneH/3, 4)
+		}
+		return head + "\n" + v.renderLeft(w, dh) + "\n" + v.renderRight(w, paneH-dh, spin)
 	}
 	return head + "\n" + lipgloss.JoinHorizontal(lipgloss.Top,
-		v.renderLeft(descW, paneH), v.renderKanban(kanW, paneH, spin))
+		v.renderLeft(descW, paneH), v.renderRight(rightW, paneH, spin))
 }
 
-// renderLeft is the left-hand pane: the description, (C) the discussion,
-// or (x) the related items.
-func (v *itemView) renderLeft(w, h int) string {
-	if v.showRelated {
-		return v.renderRelated(w, h)
+// renderRight stacks the Related panel over the kanban. Related takes the
+// height its rows need, up to 2/5 of the column (more while it has focus),
+// so the kanban keeps most of the room and an item with no links only
+// costs it three lines.
+func (v *itemView) renderRight(w, h int, spin string) string {
+	lines, _ := v.relatedLines(max(w-4, 20))
+	relH := 3 // title and borders
+	if len(lines) > 0 {
+		relH += len(lines)
 	}
+	limit, kanMin := max(h*2/5, 6), 8
+	if v.focusRel {
+		limit, kanMin = h, 5
+	}
+	relH = max(min(relH, limit, h-kanMin), 3)
+	if relH < 5 {
+		relH = 3 // a single row out of context reads worse than just the count
+	}
+	return v.renderRelated(w, relH) + "\n" + v.renderKanban(w, h-relH, spin)
+}
+
+// renderLeft is the left-hand pane: the description or (C) the discussion.
+func (v *itemView) renderLeft(w, h int) string {
 	if v.showComments {
 		return v.renderDiscussion(w, h)
 	}
@@ -356,7 +399,7 @@ func (v *itemView) renderHead(w int) string {
 
 func (v *itemView) renderDesc(w, h int) string {
 	style := sPanel
-	if !v.focusKan {
+	if v.focusDesc() {
 		style = sPanelFocus
 	}
 	inner := max(w-4, 20)
@@ -384,7 +427,7 @@ func (v *itemView) renderDesc(w, h int) string {
 
 func (v *itemView) renderDiscussion(w, h int) string {
 	style := sPanel
-	if !v.focusKan {
+	if v.focusDesc() {
 		style = sPanelFocus
 	}
 	inner := max(w-4, 20)
@@ -415,38 +458,25 @@ func (v *itemView) renderDiscussion(w, h int) string {
 // relation, one selectable row each.
 func (v *itemView) renderRelated(w, h int) string {
 	style := sPanel
-	if !v.focusKan {
+	if v.focusRel {
 		style = sPanelFocus
 	}
-	inner := max(w-4, 20)
 	rows := v.related()
 	title := sMuted.Render(fmt.Sprintf("Related (%d)", len(rows)))
-	if v.linksLoading {
+	switch {
+	case v.linksLoading:
 		title += sMuted.Render("  loading links…")
+	case len(rows) == 0:
+		title += sMuted.Render("  no linked or mentioned items")
 	}
-
-	var lines []string
-	curLine := 0
-	for i, r := range rows {
-		if i == 0 || r.Kind != rows[i-1].Kind {
-			if i > 0 {
-				lines = append(lines, "")
-			}
-			lines = append(lines, sHeader.Render(r.Kind.Label()))
-		}
-		cur := !v.focusKan && i == v.relIndex()
-		if cur {
-			curLine = len(lines)
-		}
-		lines = append(lines, v.renderRelatedRow(r.Item, inner, cur))
-	}
-	if len(rows) == 0 && !v.linksLoading {
-		lines = append(lines, sMuted.Render("no linked or mentioned items"))
-	}
+	lines, curLine := v.relatedLines(max(w-4, 20))
 
 	// Scroll so the cursor row stays on screen, with its heading when it
 	// is the first of its group.
-	body := max(h-3, 1)
+	body := h - 3
+	if body <= 0 {
+		lines = nil
+	}
 	start := 0
 	if curLine >= body {
 		start = curLine - body + 1
@@ -455,7 +485,27 @@ func (v *itemView) renderRelated(w, h int) string {
 	if len(lines) > body {
 		title += sMuted.Render(fmt.Sprintf("  %d-%d of %d lines", start+1, end, len(lines)))
 	}
-	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + strings.Join(lines[start:end], "\n"))
+	if len(lines) > 0 {
+		title += "\n" + strings.Join(lines[start:end], "\n")
+	}
+	return style.Width(w - 2).Height(h - 2).Render(title)
+}
+
+// relatedLines renders the rows under a heading per relation, and says
+// which line the cursor is on.
+func (v *itemView) relatedLines(w int) (lines []string, curLine int) {
+	rows := v.related()
+	for i, r := range rows {
+		if i == 0 || r.Kind != rows[i-1].Kind {
+			lines = append(lines, sHeader.Render(r.Kind.Label()))
+		}
+		cur := v.focusRel && i == v.relIndex()
+		if cur {
+			curLine = len(lines)
+		}
+		lines = append(lines, v.renderRelatedRow(r.Item, w, cur))
+	}
+	return lines, curLine
 }
 
 func (v *itemView) renderRelatedRow(it *model.WorkItem, w int, cur bool) string {
