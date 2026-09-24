@@ -145,7 +145,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | Navigate          |                       | Views   |                     | Change  |                 | Move |                     |
 | ----------------- | --------------------- | ------- | ------------------- | ------- | --------------- | ---- | ------------------- |
 | `j` `k`           | down / up             | `1`     | dashboard           | `e`     | edit form       | `m`  | move to iteration…  |
-| `g` `G`           | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
+| `gg` `G`          | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
 | `l` `h`           | expand / collapse     | `3`     | board               | `d`     | description     | `B`  | move to backlog     |
 | `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
 | `tab`             | focus detail pane     | `[` `]` | prev / next sprint  | `a`     | assign          |      |                     |
@@ -160,6 +160,24 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `ctrl+a`          | select all            | `R`     | auto refresh on/off | `y`     | yank id         |      |                     |
 |                   |                       | `f`     | flat / tree         |         |                 |      |                     |
 | `esc`             | clear selection       | `c`     | hide done           | `?` `q` | help / quit     |      |                     |
+
+### Jumping around
+
+| Keys              |                                                     |
+| ----------------- | --------------------------------------------------- |
+| `ctrl+o` `ctrl+n` | jump back / forward                                 |
+| `gd` `gs`         | show the highlighted item in the dashboard / sprint |
+| `gb` `gB`         | show the highlighted item on the board / backlog    |
+| `gp`              | go to (open) the parent                             |
+| `esc`             | close one level of the item details view            |
+| `q`               | quit, from anywhere                                 |
+
+`ctrl+o` and `ctrl+n` work like vim's jump list. Switching tabs (`1`-`4`, `:backlog`,
+`:dash`), `:<id>`, opening an item (`D`/`enter`), leaving one with `esc`, and every `g`
+motion are recorded. `ctrl+o` goes back through them, and that includes going back into an
+item details view and its drill-down trail. `ctrl+n` goes forward again. It isn't `ctrl+i`
+as in vim, because terminals send `ctrl+i` as `tab`. `gp` only navigates; `p` sets an
+item's parent.
 
 Any change key acts on the **selection** when there is one, otherwise on the highlighted
 item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Epic offers
@@ -226,7 +244,9 @@ a kanban of its children, one column per state.
 | `H` `L`         | move the highlighted child to the neighbouring column (sets its state) |
 | `n`             | add a child; on a highlighted child it adds a sibling                  |
 | `D` `enter`     | drill into the highlighted related item or child                       |
-| `esc` `q`       | walk back out, one level at a time                                     |
+| `esc`           | walk back out, one level at a time                                     |
+| `ctrl+o`        | jump back, like `esc` but through the whole jump list                  |
+| `gp`            | open the item's parent                                                 |
 | `z`             | give the description the full width, hiding the right-hand side        |
 | `C`             | swap the left pane between the description and the discussion          |
 | `c`             | add a comment to the discussion                                        |
