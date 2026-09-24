@@ -28,6 +28,7 @@ type keymap struct {
 	NewBug                                                             key.Binding
 	Move, MoveNext, MoveBacklog, Parent                                key.Binding
 	Open, Yank, Flat, Closed                                           key.Binding
+	ChildLayout                                                        key.Binding
 	// board
 	Left, Right, ColLeft, ColRight key.Binding
 }
@@ -108,6 +109,8 @@ var keys = keymap{
 	Flat:   b("flat/tree", "f"),
 	Closed: b("hide done", "c"),
 
+	ChildLayout: b("children list/kanban", "f"),
+
 	Left:     b("left", "h", "left"),
 	Right:    b("right", "l", "right"),
 	ColLeft:  b("move column left", "H"),
@@ -122,7 +125,7 @@ var helpGroups = [][]key.Binding{
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.NewBug, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
-	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Help, keys.Quit},
+	{keys.Open, keys.Yank, keys.Flat, keys.ChildLayout, keys.Closed, keys.Help, keys.Quit},
 }
 
 var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.NewBug, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.PreviewUp, keys.PreviewDown, keys.Help}
@@ -136,5 +139,5 @@ var footerDashLanes = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, k
 // footerItemDesc, footerItemRelated and footerItemKanban are the focus
 // modes of the drill-down view.
 var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.Comments, keys.Related, keys.Comment, keys.New, keys.NewBug, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Back, keys.JumpBack, keys.Help}
-var footerItemRelated = []key.Binding{keys.Up, keys.Down, keys.Details, keys.Related, keys.Focus, keys.Comments, keys.Comment, keys.Edit, keys.State, keys.Assign, keys.Back, keys.JumpBack, keys.Help}
-var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.New, keys.NewBug, keys.Details, keys.Edit, keys.State, keys.Focus, keys.Comments, keys.Related, keys.Comment, keys.Back, keys.JumpBack}
+var footerItemRelated = []key.Binding{keys.Up, keys.Down, keys.Details, keys.Related, keys.Focus, keys.PreviewUp, keys.PreviewDown, keys.Comments, keys.Comment, keys.Edit, keys.State, keys.Assign, keys.Back, keys.JumpBack, keys.Help}
+var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.ChildLayout, keys.New, keys.NewBug, keys.Details, keys.Edit, keys.State, keys.Focus, keys.PreviewUp, keys.PreviewDown, keys.Comments, keys.Related, keys.Comment, keys.Back, keys.JumpBack}

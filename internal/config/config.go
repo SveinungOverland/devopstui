@@ -31,6 +31,9 @@ type Config struct {
 	// HideDone hides Done/Closed/Removed/Resolved/Completed items in the
 	// Sprint view. Default false: they show, and `c` toggles them away.
 	HideDone bool `yaml:"hide_done,omitempty"`
+	// ItemKanban shows a drill-down's children as a kanban of their
+	// states instead of a list grouped by state; `f` toggles it.
+	ItemKanban bool `yaml:"item_kanban,omitempty"`
 	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
 	DashShowDone bool `yaml:"dash_show_done,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,

@@ -1064,7 +1064,7 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 
 	if a.view == viewItem && a.item != nil {
 		if cmd, handled := a.itemOverride(msg); handled {
-			return cmd
+			return tea.Batch(cmd, a.loadItemPreview())
 		}
 	}
 	if a.view == viewDash {
@@ -1132,7 +1132,7 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.createBug()
 	}
 	if a.view == viewItem {
-		return a.onItemKey(msg)
+		return tea.Batch(a.onItemKey(msg), a.loadItemPreview())
 	}
 	if key.Matches(msg, keys.Details) {
 		return a.openItem(a.currentItem())
@@ -1965,6 +1965,12 @@ func (a *App) openItem(it *model.WorkItem) tea.Cmd {
 
 func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 	v := newItemView(it, a.ctx.Backlog, a.health)
+	v.kanban = a.cfg.ItemKanban
+	v.src = itemSource{
+		lookup:     a.lookup,
+		childrenOf: a.childItems,
+		commentsOf: func(id int) []model.Comment { return a.comments[id] },
+	}
 	v.parent = a.lookup(it.ParentID)
 	v.focusKan = len(a.childItems(it.ID)) > 0
 	v.setChildren(a.childItems(it.ID), nil)
@@ -2213,6 +2219,12 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, keys.Comments):
 		v.showComments = !v.showComments
 		return nil, true
+	case key.Matches(msg, keys.ChildLayout):
+		v.kanban = !v.kanban
+		v.clamp()
+		a.cfg.ItemKanban = v.kanban
+		a.persist()
+		return nil, true
 	case key.Matches(msg, keys.Related):
 		// A jump straight to Related, and back out to the description.
 		if v.focusRel {
@@ -2257,6 +2269,12 @@ func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 		case key.Matches(msg, keys.Bottom):
 			v.moveRelated(1 << 20)
 			return nil
+		case key.Matches(msg, keys.PreviewDown):
+			v.preview.HalfViewDown()
+			return nil
+		case key.Matches(msg, keys.PreviewUp):
+			v.preview.HalfViewUp()
+			return nil
 		}
 		return a.onActionKey(msg)
 	}
@@ -2293,16 +2311,32 @@ func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.Right):
 		v.move(1, 0)
 	case key.Matches(msg, keys.Top):
-		v.row = 0
-		v.clamp()
+		// The top of the column on the kanban, the first child in the list.
+		v.move(0, -1<<20)
 	case key.Matches(msg, keys.Bottom):
 		v.move(0, 1<<20)
+	case key.Matches(msg, keys.PreviewDown):
+		v.preview.HalfViewDown()
+	case key.Matches(msg, keys.PreviewUp):
+		v.preview.HalfViewUp()
 	case key.Matches(msg, keys.ColLeft):
 		return a.moveChildState(-1)
 	case key.Matches(msg, keys.ColRight):
 		return a.moveChildState(1)
 	default:
 		return a.onActionKey(msg)
+	}
+	return nil
+}
+
+// loadItemPreview fetches the discussion of the item the drill-down is
+// previewing, so it can show under the preview's description.
+func (a *App) loadItemPreview() tea.Cmd {
+	if a.view != viewItem || a.item == nil {
+		return nil
+	}
+	if it := a.item.previewed(); it != nil {
+		return a.loadComments(it.ID, false)
 	}
 	return nil
 }
@@ -2450,7 +2484,7 @@ func (a *App) renderHeader() string {
 		focus := strings.ToLower(narrativeTitle(a.item.item, narrativeSections(a.item.item)))
 		switch {
 		case a.item.focusKan:
-			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
+			focus = fmt.Sprintf("children %d/%d", a.item.childIndex()+1, len(a.item.children))
 		case a.item.focusRel:
 			focus = "related"
 			if n := len(a.item.related()); n > 0 {

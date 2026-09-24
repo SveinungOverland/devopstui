@@ -83,6 +83,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `stale_days`         | `5`        | Days an active item may go unchanged before it's flagged ◷, 0 = off  |
 | `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
 | `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
+| `item_kanban`        | `false`    | Show a details view's children as a kanban, not a list (`f` toggles) |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
@@ -212,7 +213,12 @@ members, so you can assign to anyone regardless of which team owns the sprint.
 
 Press `D` on any item (or `enter` on a board card) to open it full screen: its metadata across
 the top, the rendered Markdown description on the left, and on the right its related items above
-a kanban of its children, one column per state.
+its children, listed under a heading per state.
+
+While the related items or the children have focus, the left side splits: the description
+shrinks to what it needs (up to 2/5 of the height) and a **preview** of the highlighted row
+takes the rest, with its fields, its own children, description and discussion. `ctrl+d` and
+`ctrl+u` scroll the preview without moving the cursor.
 
 ```
  Product Backlog Item #1013  Propagate trace id through queue workers
@@ -221,27 +227,32 @@ a kanban of its children, one column per state.
 ╭─────────────────────────────────────╮╭──────────────────────────────────────────╮
 │Description                          ││Related (3)                               │
 │  Propagate trace id through queue…  ││Related                                   │
-│                                     ││ BUG  1020   Spans lost when re… Approved │
-│  Acceptance criteria                ││Successors                                │
-│  ▪ trace id survives the queue      ││ PBI  1014   Trace dashboard i… Committed │
-│                                     ││Mentioned                                 │
-│                                     ││ TASK 1015   Add trace header t…    To Do │
-│                                     │╰──────────────────────────────────────────╯
-│                                     │╭──────────────────────────────────────────╮
+╰─────────────────────────────────────╯│ BUG  1020   Spans lost when re… Approved │
+╭─────────────────────────────────────╮│Successors                                │
+│Preview #1015                        ││ PBI  1014   Trace dashboard i… Committed │
+│Task  #1015                          │╰──────────────────────────────────────────╯
+│Add trace header to publisher        │╭──────────────────────────────────────────╮
 │                                     ││Children (3)                              │
-│                                     ││To Do 2         In Progress 0     Done 1  │
-│                                     ││──────────────  ──────────────  ────────  │
-│                                     ││▌TASK 1015 2h SØ                TASK 1016 │
-│                                     ││ Add trace hea…                  Read tr… │
+│State      To Do                     ││To Do 2                                   │
+│Assigned   Sveinung Øverland         ││▌TASK 1015   Add trace header to…   2h SØ │
+│Remaining  2h                        ││ TASK 1017   Load test with trac…   4h    │
+│Parent     PBI 1013 Propagate trace… ││Done 1                                    │
+│─────────────────────────────────    ││ TASK 1016   Read trace header i…      SØ │
 ╰─────────────────────────────────────╯╰──────────────────────────────────────────╯
 ```
 
+`f` switches the children between that list and a kanban with one column per state, and the
+choice is saved as `item_kanban`. In the kanban a state with no children only takes the width
+of its heading, leaving the room to the columns that have cards.
+
 | Key             |                                                                        |
 | --------------- | ---------------------------------------------------------------------- |
-| `tab`           | move focus: description, related items, kanban                         |
+| `tab`           | move focus: description, related items, children                       |
 | `x`             | jump to the related items, and back to the description                 |
-| `j` `k` `h` `l` | scroll the description, or move between rows, cards and columns        |
-| `H` `L`         | move the highlighted child to the neighbouring column (sets its state) |
+| `j` `k` `h` `l` | scroll the description, or move between rows and states                |
+| `ctrl+d` `ctrl+u` | scroll the preview of the highlighted related item or child          |
+| `f`             | show the children as a list grouped by state, or as a kanban           |
+| `H` `L`         | move the highlighted child to the previous or next state               |
 | `n`             | add a child; on a highlighted child it adds a sibling                  |
 | `D` `enter`     | drill into the highlighted related item or child                       |
 | `esc`           | walk back out, one level at a time                                     |
@@ -255,7 +266,7 @@ a kanban of its children, one column per state.
 Every action key works here too and applies to whatever has focus: the item itself while the
 description is focused, otherwise the highlighted related item or child. So `s` sets a child's state, `d` edits
 the item's description, `a` assigns, and so on. Children are fetched for the item you open, so
-the kanban is complete even in views that do not load tasks, such as the backlog.
+the list is complete even in views that do not load tasks, such as the backlog.
 
 `C` toggles the left pane to the item's Azure DevOps comments (oldest first) and back. `c` opens
 the same Markdown composer used for `d` — the built-in editor, or `$EDITOR` when configured — to
@@ -268,7 +279,7 @@ with no toggle needed.
 The **Related** panel lists the item's work item links (Related, Predecessors, Successors,
 Duplicates, Duplicate of) followed by every `#1234` mentioned in the description, repro steps,
 acceptance criteria or the discussion. Parent and child links are left out, since the header and
-the kanban already show them, and an item that is both linked and mentioned is listed once, under
+the children already show them, and an item that is both linked and mentioned is listed once, under
 its link. The panel is as tall as its rows, up to about 2/5 of the column, and grows while it has
 focus; with nothing related it is a single line and `tab` skips it. `j` `k` move the cursor, and
 `D` or `enter` drills into the highlighted item; `esc` walks back and puts you on the row you left

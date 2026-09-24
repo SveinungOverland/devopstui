@@ -762,7 +762,7 @@ func TestPostCommentSurvivesRacingFetch(t *testing.T) {
 	h := newHarness(t, 160, 45)
 	a := h.app
 	a.sprint.jumpTo(1013) // seeded with a demo discussion, see ado.NewFake
-	h.keys("D")
+	h.keys("D", "tab")    // a comment on the item itself is posted from its description
 	staleSnapshot := append([]model.Comment(nil), a.comments[1013]...)
 	if len(staleSnapshot) == 0 {
 		t.Fatal("expected seeded comments for #1013")
