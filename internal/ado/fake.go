@@ -17,11 +17,19 @@ type Fake struct {
 	me       string
 	items    map[int]*model.WorkItem
 	comments map[int][]model.Comment
+	links    []fakeLink
 	iters    []model.Iteration
 	nextID   int
 	Updates  []FakeUpdate // recorded writes, for tests
 	Latency  time.Duration
 	FailNext error
+}
+
+// fakeLink is a work item link as stored on from; Links reads it from
+// either end.
+type fakeLink struct {
+	from, to int
+	kind     model.RelationKind
 }
 
 // FakeUpdate is a recorded write.
@@ -130,6 +138,16 @@ func NewFake() *Fake {
 			"Sveinung Øverland", "First use only — otherwise a leaked email thread keeps working forever.\n\nWorth calling out in the acceptance criteria."),
 		1013: demoComments(now, "Alex Kim", "Publisher change is in review, consumer side still needs the header read added.",
 			"Sveinung Øverland", "Picking this up now that #1015 landed."),
+	}
+	// Links for the Related section: the trace work is related to the bug
+	// it fixes, the dashboard waits on it, and within it the consumer task
+	// waits on the publisher one.
+	f.links = []fakeLink{
+		{1013, 1020, model.RelRelated},
+		{1013, 1014, model.RelSuccessor},
+		{1015, 1016, model.RelSuccessor},
+		{1003, 1004, model.RelSuccessor},
+		{1022, 1020, model.RelRelated},
 	}
 	f.nextID = 2000
 	return f
@@ -481,6 +499,62 @@ func (f *Fake) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 	}
 	c := *it
 	return &c, nil
+}
+
+func (f *Fake) Items(ctx context.Context, ids []int) ([]*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*model.WorkItem
+	for _, id := range ids {
+		if it, ok := f.items[id]; ok {
+			c := *it
+			out = append(out, &c)
+		}
+	}
+	return out, nil
+}
+
+func (f *Fake) Links(ctx context.Context, project string, id int) ([]model.RelatedItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.RelatedItem
+	add := func(kind model.RelationKind, target int) {
+		if it, ok := f.items[target]; ok {
+			c := *it
+			out = append(out, model.RelatedItem{Kind: kind, Item: &c})
+		}
+	}
+	for _, l := range f.links {
+		switch id {
+		case l.from:
+			add(l.kind, l.to)
+		case l.to:
+			add(inverse(l.kind), l.from)
+		}
+	}
+	model.SortRelated(out)
+	return out, nil
+}
+
+// inverse is the same link read from its other end.
+func inverse(k model.RelationKind) model.RelationKind {
+	switch k {
+	case model.RelSuccessor:
+		return model.RelPredecessor
+	case model.RelPredecessor:
+		return model.RelSuccessor
+	case model.RelDuplicate:
+		return model.RelDuplicateOf
+	case model.RelDuplicateOf:
+		return model.RelDuplicate
+	}
+	return k
 }
 
 func (f *Fake) Comments(ctx context.Context, project string, id int) ([]model.Comment, error) {

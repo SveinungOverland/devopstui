@@ -33,13 +33,102 @@ type itemView struct {
 	commentsLoading bool
 	showComments    bool
 
+	// links and mentions back the x-toggled Related pane, the third thing
+	// the left-hand slot can show. mentionIDs is what mentions was last
+	// resolved for, so a re-scan that finds the same ids is a no-op.
+	links        []model.RelatedItem
+	mentions     []model.RelatedItem
+	mentionIDs   []int
+	linksLoading bool
+	showRelated  bool
+	relRow       int
+
 	cfg      model.BacklogConfig
 	lastDesc string
 	lastW    int
 }
 
 func newItemView(it *model.WorkItem, cfg model.BacklogConfig) *itemView {
-	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true, commentsLoading: true}
+	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true, commentsLoading: true, linksLoading: true}
+}
+
+// itemPane is the part of a drill-down level that esc restores when it
+// walks back to it, so coming back from a related item lands on its row.
+type itemPane struct {
+	focusKan, descOnly, showComments, showRelated bool
+	col, row, relRow                              int
+}
+
+func (v *itemView) pane() itemPane {
+	return itemPane{v.focusKan, v.descOnly, v.showComments, v.showRelated, v.col, v.row, v.relRow}
+}
+
+func (v *itemView) restore(p itemPane) {
+	v.focusKan, v.descOnly, v.showComments, v.showRelated = p.focusKan, p.descOnly, p.showComments, p.showRelated
+	v.col, v.row, v.relRow = p.col, p.row, p.relRow
+	v.clamp()
+}
+
+// related is the Related pane's rows: links first, then mentions.
+func (v *itemView) related() []model.RelatedItem {
+	return append(append([]model.RelatedItem(nil), v.links...), v.mentions...)
+}
+
+// relIndex is the highlighted Related row. relRow itself is left alone
+// while rows are still loading, so a cursor restored by esc survives the
+// links arriving before the mentions do.
+func (v *itemView) relIndex() int {
+	return min(max(v.relRow, 0), max(len(v.related())-1, 0))
+}
+
+// currentRelated is the highlighted Related row, nil when there is none.
+func (v *itemView) currentRelated() *model.WorkItem {
+	rs := v.related()
+	if len(rs) == 0 {
+		return nil
+	}
+	return rs[v.relIndex()].Item
+}
+
+func (v *itemView) moveRelated(d int) {
+	v.relRow = v.relIndex()
+	v.relRow = min(max(v.relRow+d, 0), max(len(v.related())-1, 0))
+}
+
+// setLinks swaps in loaded links, keeping the cursor on the same row.
+func (v *itemView) setLinks(links []model.RelatedItem) {
+	cur := v.rowAtCursor()
+	v.links = links
+	v.linksLoading = false
+	v.keepRelated(cur)
+}
+
+func (v *itemView) setMentions(ids []int, mentions []model.RelatedItem) {
+	cur := v.rowAtCursor()
+	v.mentionIDs = ids
+	v.mentions = mentions
+	v.keepRelated(cur)
+}
+
+// rowAtCursor is the item exactly at relRow, nil when relRow points past
+// rows that have not loaded yet.
+func (v *itemView) rowAtCursor() *model.WorkItem {
+	if rs := v.related(); v.relRow >= 0 && v.relRow < len(rs) {
+		return rs[v.relRow].Item
+	}
+	return nil
+}
+
+func (v *itemView) keepRelated(cur *model.WorkItem) {
+	if cur == nil {
+		return
+	}
+	for i, r := range v.related() {
+		if r.Item.ID == cur.ID {
+			v.relRow = i
+			return
+		}
+	}
 }
 
 // setComments swaps in a loaded discussion.
@@ -56,6 +145,13 @@ func (v *itemView) apply(it *model.WorkItem) {
 	for i, c := range v.children {
 		if c.ID == it.ID {
 			v.children[i] = it
+		}
+	}
+	for _, rs := range [][]model.RelatedItem{v.links, v.mentions} {
+		for i, r := range rs {
+			if r.Item.ID == it.ID {
+				rs[i].Item = it
+			}
 		}
 	}
 }
@@ -204,8 +300,12 @@ func (v *itemView) view(w, h int, spin string) string {
 		v.renderLeft(descW, paneH), v.renderKanban(kanW, paneH, spin))
 }
 
-// renderLeft is the left-hand pane: the description, or (C) the discussion.
+// renderLeft is the left-hand pane: the description, (C) the discussion,
+// or (x) the related items.
 func (v *itemView) renderLeft(w, h int) string {
+	if v.showRelated {
+		return v.renderRelated(w, h)
+	}
 	if v.showComments {
 		return v.renderDiscussion(w, h)
 	}
@@ -309,6 +409,68 @@ func (v *itemView) renderDiscussion(w, h int) string {
 		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
 	}
 	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
+}
+
+// renderRelated lists linked and mentioned items, grouped under their
+// relation, one selectable row each.
+func (v *itemView) renderRelated(w, h int) string {
+	style := sPanel
+	if !v.focusKan {
+		style = sPanelFocus
+	}
+	inner := max(w-4, 20)
+	rows := v.related()
+	title := sMuted.Render(fmt.Sprintf("Related (%d)", len(rows)))
+	if v.linksLoading {
+		title += sMuted.Render("  loading links…")
+	}
+
+	var lines []string
+	curLine := 0
+	for i, r := range rows {
+		if i == 0 || r.Kind != rows[i-1].Kind {
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, sHeader.Render(r.Kind.Label()))
+		}
+		cur := !v.focusKan && i == v.relIndex()
+		if cur {
+			curLine = len(lines)
+		}
+		lines = append(lines, v.renderRelatedRow(r.Item, inner, cur))
+	}
+	if len(rows) == 0 && !v.linksLoading {
+		lines = append(lines, sMuted.Render("no linked or mentioned items"))
+	}
+
+	// Scroll so the cursor row stays on screen, with its heading when it
+	// is the first of its group.
+	body := max(h-3, 1)
+	start := 0
+	if curLine >= body {
+		start = curLine - body + 1
+	}
+	end := min(start+body, len(lines))
+	if len(lines) > body {
+		title += sMuted.Render(fmt.Sprintf("  %d-%d of %d lines", start+1, end, len(lines)))
+	}
+	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + strings.Join(lines[start:end], "\n"))
+}
+
+func (v *itemView) renderRelatedRow(it *model.WorkItem, w int, cur bool) string {
+	st := rowStyler(cur)
+	plain := st(lipgloss.NewStyle())
+	mark := plain.Render(" ")
+	if cur {
+		mark = st(sKey).Render(cursorMark)
+	}
+	state := st(stateStyle(it.State)).Render(trunc(it.State, 14))
+	left := mark + st(kindStyle(it.Kind)).Render(fmt.Sprintf("%-4s", it.Kind.Tag())) +
+		st(sMuted).Render(fmt.Sprintf(" %-6d ", it.ID))
+	room := w - lipgloss.Width(left) - lipgloss.Width(state) - 2
+	left += plain.Render(trunc(it.Title, max(room, 4)))
+	return spread(plain, left, w, state)
 }
 
 // formatComments renders a discussion as one Markdown document, oldest

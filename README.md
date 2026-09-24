@@ -218,8 +218,9 @@ right, one column per state.
 | `esc` `q`       | walk back out, one level at a time                                     |
 | `z`             | give the description the full width                                    |
 | `C`             | swap the left pane between the description and the discussion          |
+| `x`             | swap the left pane to the related items, and back                      |
 | `c`             | add a comment to the discussion                                        |
-| `r`             | re-fetch the children                                                  |
+| `r`             | re-fetch the children, discussion and links                            |
 
 Every action key works here too and applies to whatever has focus: the item itself while the
 description is focused, otherwise the highlighted child. So `s` sets a child's state, `d` edits
@@ -233,6 +234,28 @@ the discussion is currently showing; it switches the pane to the discussion once
 lands. On the Board, Sprint and Backlog views, where the preview pane already has the full
 terminal height to work with, the discussion shows underneath the description instead, read-only,
 with no toggle needed.
+
+`x` toggles the left pane to the item's **Related** section and puts the cursor there:
+
+```
+│Related (3)                                                                │
+│Related                                                                    │
+│▌BUG  1020   Spans lost when retry budget exhausted              Approved  │
+│                                                                           │
+│Successors                                                                 │
+│ PBI  1014   Trace dashboard in Grafana                         Committed  │
+│                                                                           │
+│Mentioned                                                                  │
+│ TASK 1015   Add trace header to publisher                          To Do  │
+```
+
+It lists the item's work item links (Related, Predecessors, Successors, Duplicates, Duplicate of)
+followed by every `#1234` mentioned in the description, repro steps, acceptance criteria or the
+discussion. Parent and child links are left out, since the header and the kanban already show
+them, and an item that is both linked and mentioned is listed once, under its link. `j` `k` move
+the cursor, and `D` or `enter` drills into the highlighted item. `esc` walks back and puts you on
+the row you left from. Links into other projects are included. Mentions are picked up again when
+comments load, when you post one and when you edit the description.
 
 ## Team filter
 
