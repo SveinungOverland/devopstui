@@ -1708,10 +1708,8 @@ func (a *App) clearSelection() {
 // data (myItems and the last ChildrenOf fetch for "my PBIs").
 func (a *App) lookup(id int) *model.WorkItem {
 	for _, l := range []*list{a.sprint, a.backlog} {
-		if l.tree != nil {
-			if n, ok := l.tree.Get(id); ok {
-				return n.Item
-			}
+		if it, ok := l.get(id); ok {
+			return it
 		}
 	}
 	for _, it := range a.myItems {

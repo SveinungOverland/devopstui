@@ -2077,3 +2077,66 @@ func TestStaleCommand(t *testing.T) {
 		t.Error("a bad value should flash an error")
 	}
 }
+
+// Flat and filtered lists render copies with ParentID cleared. What leaves
+// the list must be the real item, or a parented PBI reads as an orphan.
+func TestFlatListKeepsRealParent(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	h.keys("f")
+	a.sprint.jumpTo(1014)
+	a.refreshDetail()
+	if it := a.currentItem(); it == nil || it.ParentID != 1012 {
+		t.Fatalf("current item in flat mode = %+v, want parent 1012", it)
+	}
+	v := a.View()
+	if strings.Contains(v, "orphan") {
+		t.Errorf("details pane flags a parented PBI as orphan in flat mode:\n%s", v)
+	}
+	if !strings.Contains(v, "Parent     FEAT 1012") {
+		t.Errorf("details pane lost the parent in flat mode:\n%s", v)
+	}
+
+	h.keys("D")
+	v = a.View()
+	if strings.Contains(v, "orphan") || !strings.Contains(v, "↑ FEAT 1012") {
+		t.Errorf("drill-down from a flat list should keep the parent, not flag an orphan:\n%s", v)
+	}
+	// Its child cards carry their own flags.
+	if !strings.Contains(v, "TASK 1018 ◷") {
+		t.Errorf("drill-down child card should show the stale flag:\n%s", v)
+	}
+}
+
+func TestFilteredListKeepsRealParent(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	h.keys("/")
+	h.keys("G", "r", "a", "f", "a", "n", "a", "enter")
+	a.sprint.jumpTo(1014)
+	if it := a.currentItem(); it == nil || it.ParentID != 1012 {
+		t.Fatalf("current item while filtering = %+v, want parent 1012", it)
+	}
+	for _, it := range a.sprint.targetItems() {
+		if it.ID == 1014 && it.ParentID != 1012 {
+			t.Error("targetItems handed out a flattened copy")
+		}
+	}
+	if p := a.lookup(1014); p == nil || p.ParentID != 1012 {
+		t.Error("lookup handed out a flattened copy")
+	}
+}
+
+func TestHelpFitsNarrowTerminal(t *testing.T) {
+	h := newHarness(t, 60, 80)
+	h.keys("?")
+	v := h.app.View()
+	if !strings.Contains(v, "Flags") {
+		t.Fatal("help should show the flag legend")
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if w := lipgloss.Width(l); w > 60 {
+			t.Errorf("help line is %d wide at 60 columns: %q", w, l)
+		}
+	}
+}

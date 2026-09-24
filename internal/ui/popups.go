@@ -348,13 +348,19 @@ func (helpPopup) View(w, h int) string {
 	return sPopup.Render(body)
 }
 
-// flagLegend explains the health glyphs, packed into as few lines as fit.
+// flagLegend explains the health glyphs, packed into as few lines as fit
+// in w. No line may be wider than w, or it stretches the popup past the
+// screen on a narrow terminal; what doesn't fit is truncated.
 func flagLegend(w int) string {
 	var entries []string
 	for _, s := range model.AllSignals() {
-		entries = append(entries, signalStyle(s).Render(signalGlyphs[s])+" "+s.Name()+sMuted.Render(" – "+signalHelp[s]))
+		e := signalStyle(s).Render(signalGlyphs[s]) + " " + s.Name() + sMuted.Render(" – "+signalHelp[s])
+		entries = append(entries, trunc(e, w))
 	}
-	lines := []string{sTitle.Render("Flags") + sMuted.Render("  :attention shows only flagged items, :stale <days> sets the threshold")}
+	lines := []string{sTitle.Render("Flags")}
+	for _, h := range []string{":attention shows only flagged items", ":stale <days> sets the threshold"} {
+		entries = append(entries, trunc(sMuted.Render(h), w))
+	}
 	line := ""
 	for _, e := range entries {
 		switch {
@@ -373,7 +379,7 @@ func flagLegend(w int) string {
 var signalHelp = map[model.Signal]string{
 	model.SignalOpenTasks:    "done, but tasks still open",
 	model.SignalReadyToClose: "every task done, item still open",
-	model.SignalStale:        "active, no change in a while (amber at twice that)",
+	model.SignalStale:        "active, unchanged for a while; amber at 2×",
 	model.SignalUnassigned:   "active, but nobody is assigned",
 	model.SignalOrphan:       "PBI without a parent Feature",
 }

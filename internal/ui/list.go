@@ -47,6 +47,11 @@ type list struct {
 	progressItems func() []*model.WorkItem
 	progress      map[int]progress // parent id → task progress
 	parents       map[int]int      // item id → parent id, kept when flattening
+	// originals maps an id to the loaded item. Flat and filtered rows hold
+	// copies with ParentID cleared so the tree renders flat; anything that
+	// leaves the list (details, drill-down, actions) must get the original,
+	// or it sees an item with no parent.
+	originals map[int]*model.WorkItem
 
 	health *health
 	// flags holds the health of every flagged item, computed once per
@@ -103,8 +108,13 @@ func (l *list) rebuild() {
 	}
 	l.progress = computeProgress(src, l.taskLevel)
 	l.parents = make(map[int]int, len(l.all))
+	l.originals = make(map[int]*model.WorkItem, len(l.all)+len(l.external))
+	for _, it := range l.external {
+		l.originals[it.ID] = it
+	}
 	for _, it := range l.all {
 		l.parents[it.ID] = it.ParentID
+		l.originals[it.ID] = it
 	}
 	l.flags = l.health.assessAll(l.all, l.progress)
 	if l.include != nil {
@@ -236,7 +246,27 @@ func (l *list) current() *model.WorkItem {
 	if l.cursor < 0 || l.cursor >= len(l.rows) {
 		return nil
 	}
-	return l.rows[l.cursor].Item
+	return l.original(l.rows[l.cursor].Item)
+}
+
+// original returns the loaded item behind a row's (possibly flattened) copy.
+func (l *list) original(it *model.WorkItem) *model.WorkItem {
+	if o, ok := l.originals[it.ID]; ok {
+		return o
+	}
+	return it
+}
+
+// get returns the loaded item for id when it is in the list's tree.
+func (l *list) get(id int) (*model.WorkItem, bool) {
+	if l.tree == nil {
+		return nil, false
+	}
+	n, ok := l.tree.Get(id)
+	if !ok {
+		return nil, false
+	}
+	return l.original(n.Item), true
 }
 
 func (l *list) currentNode() *model.Node {
@@ -275,8 +305,8 @@ func (l *list) targets() []int {
 func (l *list) targetItems() []*model.WorkItem {
 	var out []*model.WorkItem
 	for _, id := range l.targets() {
-		if n, ok := l.tree.Get(id); ok {
-			out = append(out, n.Item)
+		if it, ok := l.get(id); ok {
+			out = append(out, it)
 		}
 	}
 	return out
