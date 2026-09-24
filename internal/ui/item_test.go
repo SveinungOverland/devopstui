@@ -119,8 +119,13 @@ func TestItemViewFocusAndNavigation(t *testing.T) {
 	if !v.descOnly || strings.Contains(h.app.View(), "Children (") {
 		t.Error("z should hide the kanban")
 	}
+	// tab walks the panes in screen order: Related sits above the kanban.
 	h.keys("z", "tab")
-	if !v.focusKan {
+	if !v.focusRel || v.current().ID != 1020 {
+		t.Errorf("tab from the description should focus Related, got focusRel=%v cur=%d", v.focusRel, v.current().ID)
+	}
+	h.keys("tab")
+	if !v.focusKan || v.focusRel {
 		t.Error("tab should return to the kanban")
 	}
 }

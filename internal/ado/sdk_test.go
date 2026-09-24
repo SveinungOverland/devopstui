@@ -112,3 +112,55 @@ func TestConvertComment(t *testing.T) {
 		t.Errorf("convertComment(%+v) = %+v, want %+v", c, got, want)
 	}
 }
+
+func TestRelationTargetID(t *testing.T) {
+	cases := []struct {
+		url string
+		id  int
+		ok  bool
+	}{
+		{"https://dev.azure.com/contoso/_apis/wit/workItems/1234", 1234, true},
+		{"https://dev.azure.com/contoso/abc-guid/_apis/wit/workitems/7", 7, true},
+		{"vstfs:///Git/Commit/abc%2Fdef", 0, false},
+		{"https://dev.azure.com/contoso/_apis/wit/attachments/99", 0, false},
+		{"https://dev.azure.com/contoso/_apis/wit/workItems/", 0, false},
+		{"", 0, false},
+	}
+	for _, c := range cases {
+		id, ok := relationTargetID(c.url)
+		if id != c.id || ok != c.ok {
+			t.Errorf("relationTargetID(%q) = %d, %v; want %d, %v", c.url, id, ok, c.id, c.ok)
+		}
+	}
+}
+
+func TestLinkKinds(t *testing.T) {
+	rel := func(r, url string) workitemtracking.WorkItemRelation {
+		return workitemtracking.WorkItemRelation{Rel: &r, Url: &url}
+	}
+	wi := func(id string) string { return "https://dev.azure.com/o/_apis/wit/workItems/" + id }
+	got := linkKinds([]workitemtracking.WorkItemRelation{
+		rel("System.LinkTypes.Hierarchy-Reverse", wi("1")),
+		rel("System.LinkTypes.Related", wi("2")),
+		rel("System.LinkTypes.Dependency-Forward", wi("3")),
+		rel("System.LinkTypes.Dependency-Reverse", wi("4")),
+		rel("System.LinkTypes.Duplicate-Forward", wi("5")),
+		rel("System.LinkTypes.Duplicate-Reverse", wi("6")),
+		rel("Microsoft.VSTS.Common.TestedBy-Forward", wi("7")),
+		rel("ArtifactLink", "vstfs:///Git/Commit/x"),
+		rel("System.LinkTypes.Related", wi("2")),
+		{},
+	})
+	want := []link{
+		{model.RelRelated, 2}, {model.RelSuccessor, 3}, {model.RelPredecessor, 4},
+		{model.RelDuplicate, 5}, {model.RelDuplicateOf, 6},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("linkKinds = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("linkKinds[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}

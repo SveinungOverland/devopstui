@@ -66,7 +66,7 @@ var fields = []string{
 	"System.Id", "System.Rev", model.FieldWorkItemType, model.FieldTitle, model.FieldState, model.FieldAssignedTo,
 	model.FieldIterationPath, model.FieldAreaPath, model.FieldBoardColumn, model.FieldTags, model.FieldPriority,
 	model.FieldEffort, model.FieldStoryPoints, model.FieldRemainingWork, model.FieldChangedDate, model.FieldChangedBy, "System.Parent",
-	model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria,
+	model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria, "System.TeamProject",
 }
 
 func (s *SDK) Me(ctx context.Context) (string, error) {
@@ -551,6 +551,99 @@ func (s *SDK) Get(ctx context.Context, id int) (*model.WorkItem, error) {
 		return nil, err
 	}
 	return s.convert(wi, ""), nil
+}
+
+// Items fetches without a project scope, so a link or mention into another
+// project resolves rather than silently dropping.
+func (s *SDK) Items(ctx context.Context, ids []int) ([]*model.WorkItem, error) {
+	return s.fetch(ctx, "", ids)
+}
+
+func (s *SDK) Links(ctx context.Context, project string, id int) ([]model.RelatedItem, error) {
+	// The expand parameter cannot be combined with a field list, so this
+	// fetches the whole item once just for its relations.
+	expand := workitemtracking.WorkItemExpandValues.Relations
+	wi, err := s.wit.GetWorkItem(ctx, workitemtracking.GetWorkItemArgs{Id: &id, Expand: &expand})
+	if err != nil {
+		return nil, err
+	}
+	var rels []workitemtracking.WorkItemRelation
+	if wi.Relations != nil {
+		rels = *wi.Relations
+	}
+	links := linkKinds(rels)
+	if len(links) == 0 {
+		return nil, nil
+	}
+	ids := make([]int, len(links))
+	for i, l := range links {
+		ids[i] = l.id
+	}
+	items, err := s.Items(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[int]*model.WorkItem{}
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	var out []model.RelatedItem
+	for _, l := range links {
+		if it, ok := byID[l.id]; ok {
+			out = append(out, model.RelatedItem{Kind: l.kind, Item: it})
+		}
+	}
+	model.SortRelated(out)
+	return out, nil
+}
+
+type link struct {
+	kind model.RelationKind
+	id   int
+}
+
+// relationKinds maps the link types the Related section shows. Anything
+// else (hierarchy, artifacts, hyperlinks, attachments, tests) is skipped.
+var relationKinds = map[string]model.RelationKind{
+	"System.LinkTypes.Related":            model.RelRelated,
+	"System.LinkTypes.Dependency-Forward": model.RelSuccessor,
+	"System.LinkTypes.Dependency-Reverse": model.RelPredecessor,
+	"System.LinkTypes.Duplicate-Forward":  model.RelDuplicate,
+	"System.LinkTypes.Duplicate-Reverse":  model.RelDuplicateOf,
+}
+
+// linkKinds picks the work item links out of an item's relations,
+// dropping duplicates of the same kind and target.
+func linkKinds(rels []workitemtracking.WorkItemRelation) []link {
+	var out []link
+	seen := map[link]bool{}
+	for _, r := range rels {
+		kind, ok := relationKinds[deref(r.Rel)]
+		if !ok {
+			continue
+		}
+		id, ok := relationTargetID(deref(r.Url))
+		if !ok {
+			continue
+		}
+		l := link{kind, id}
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// relationTargetID reads the work item id off the end of a relation URL,
+// .../_apis/wit/workItems/1234.
+func relationTargetID(url string) (int, bool) {
+	i := strings.LastIndex(url, "/")
+	if i < 0 || !strings.Contains(strings.ToLower(url[:i]), "/workitems") {
+		return 0, false
+	}
+	id, err := strconv.Atoi(url[i+1:])
+	return id, err == nil && id > 0
 }
 
 func (s *SDK) Comments(ctx context.Context, project string, id int) ([]model.Comment, error) {
