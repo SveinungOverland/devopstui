@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -39,8 +38,8 @@ const (
 	SignalReadyToClose
 	// SignalStale: active, yet nothing about it has changed for a while.
 	SignalStale
-	// SignalMissing: a field the item's state calls for is empty.
-	SignalMissing
+	// SignalUnassigned: active, but nobody is assigned.
+	SignalUnassigned
 	// SignalOrphan: a requirement with no parent Feature.
 	SignalOrphan
 
@@ -65,8 +64,8 @@ func (s Signal) Name() string {
 		return "ready to close"
 	case SignalStale:
 		return "stale"
-	case SignalMissing:
-		return "missing info"
+	case SignalUnassigned:
+		return "unassigned"
 	case SignalOrphan:
 		return "orphan"
 	}
@@ -111,20 +110,16 @@ type HealthRules struct {
 // Health is what Assess found for one item.
 type Health struct {
 	Signals Signal
-	// Missing names what SignalMissing is about, e.g. "no assignee".
-	Missing []string
 	// Idle is how long since the item (or one of its tasks) last changed,
 	// set when SignalStale is.
 	Idle time.Duration
 }
 
-// Describe lists every signal by name, with what is missing spelled out.
+// Describe lists every signal by name, with how long a stale item has sat.
 func (h Health) Describe() []string {
 	var out []string
 	for _, s := range h.Signals.List() {
 		switch s {
-		case SignalMissing:
-			out = append(out, s.Name()+": "+strings.Join(h.Missing, ", "))
 		case SignalStale:
 			out = append(out, s.Name()+": "+idleText(h.Idle))
 		default:
@@ -144,14 +139,13 @@ func idleText(d time.Duration) string {
 
 // Assess works out which signals apply to it. tasks is the tally of its
 // task-level children, zero when unknown.
-func Assess(it *WorkItem, tasks TaskTally, cfg BacklogConfig, r HealthRules) Health {
+func Assess(it *WorkItem, tasks TaskTally, r HealthRules) Health {
 	var h Health
 	if it == nil || it.State == "Removed" {
 		return h
 	}
 	done := IsDone(it.State)
 	active := IsActive(it.State)
-	task := cfg.TaskLevel(it)
 
 	if tasks.Total > 0 {
 		switch {
@@ -176,13 +170,7 @@ func Assess(it *WorkItem, tasks TaskTally, cfg BacklogConfig, r HealthRules) Hea
 	// An unassigned New item is ordinary backlog; one someone is meant to
 	// be working on is not.
 	if active && it.AssignedTo == "" {
-		h.Missing = append(h.Missing, "no assignee")
-	}
-	if task && done && it.RemainingWork > 0 {
-		h.Missing = append(h.Missing, "hours left on a done task")
-	}
-	if len(h.Missing) > 0 {
-		h.Signals |= SignalMissing
+		h.Signals |= SignalUnassigned
 	}
 
 	if it.Kind == KindRequirement && !done && it.ParentID == 0 {

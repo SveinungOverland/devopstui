@@ -88,9 +88,7 @@ func (ln *lanes) setLanes(parents []*model.WorkItem, childrenOf map[int][]*model
 			continue
 		}
 		cols := make([][]*model.WorkItem, len(order))
-		// Children here are Tasks (bugs were dropped above), which the
-		// zero config already treats as task level.
-		for id, f := range ln.health.assessAll(children, nil, model.BacklogConfig{}) {
+		for id, f := range ln.health.assessAll(children, nil) {
 			ln.flags[id] = f
 		}
 		for _, c := range children {

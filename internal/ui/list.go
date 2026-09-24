@@ -48,8 +48,6 @@ type list struct {
 	progress      map[int]progress // parent id → task progress
 	parents       map[int]int      // item id → parent id, kept when flattening
 
-	// cfg is the team's backlog configuration, for the health signals.
-	cfg    func() model.BacklogConfig
 	health *health
 	// flags holds the health of every flagged item, computed once per
 	// rebuild so rendering and typing in the filter don't redo it.
@@ -108,11 +106,7 @@ func (l *list) rebuild() {
 	for _, it := range l.all {
 		l.parents[it.ID] = it.ParentID
 	}
-	var cfg model.BacklogConfig
-	if l.cfg != nil {
-		cfg = l.cfg()
-	}
-	l.flags = l.health.assessAll(l.all, l.progress, cfg)
+	l.flags = l.health.assessAll(l.all, l.progress)
 	if l.include != nil {
 		items, ext = applyTeamFilter(items, ext, l.include)
 	}

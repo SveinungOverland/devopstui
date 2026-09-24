@@ -132,15 +132,15 @@ func (h *health) rules() model.HealthRules {
 const defaultStaleAfter = 5 * 24 * time.Hour
 
 // assess is model.Assess with the task tally taken from a progress badge.
-func (h *health) assess(it *model.WorkItem, p progress, cfg model.BacklogConfig) model.Health {
-	return model.Assess(it, model.TaskTally{Done: p.done, Total: p.total, Latest: p.latest}, cfg, h.rules())
+func (h *health) assess(it *model.WorkItem, p progress) model.Health {
+	return model.Assess(it, model.TaskTally{Done: p.done, Total: p.total, Latest: p.latest}, h.rules())
 }
 
 // assessAll assesses every item, keeping only the flagged ones.
-func (h *health) assessAll(items []*model.WorkItem, prog map[int]progress, cfg model.BacklogConfig) map[int]model.Health {
+func (h *health) assessAll(items []*model.WorkItem, prog map[int]progress) map[int]model.Health {
 	out := map[int]model.Health{}
 	for _, it := range items {
-		if hh := h.assess(it, prog[it.ID], cfg); hh.Signals != 0 {
+		if hh := h.assess(it, prog[it.ID]); hh.Signals != 0 {
 			out[it.ID] = hh
 		}
 	}
@@ -153,7 +153,7 @@ var signalGlyphs = map[model.Signal]string{
 	model.SignalOpenTasks:    "✗",
 	model.SignalReadyToClose: "✓",
 	model.SignalStale:        "◷",
-	model.SignalMissing:      "?",
+	model.SignalUnassigned:   "?",
 	model.SignalOrphan:       "↑",
 }
 
@@ -163,7 +163,7 @@ func signalStyle(s model.Signal) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(cErr).Bold(true)
 	case model.SignalReadyToClose:
 		return lipgloss.NewStyle().Foreground(cOK).Bold(true)
-	case model.SignalMissing:
+	case model.SignalUnassigned:
 		return lipgloss.NewStyle().Foreground(cSelect).Bold(true)
 	default:
 		return lipgloss.NewStyle().Foreground(cMuted)

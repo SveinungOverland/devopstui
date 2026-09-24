@@ -278,7 +278,7 @@ view for this. Each glyph is a distinct shape, so they read without colour too:
 | `✗`   | open tasks     | The item is Done but some of its tasks aren't                                 |
 | `✓`   | ready to close | Every task is Done but the item isn't                                         |
 | `◷`   | stale          | Active, and neither it nor any of its tasks has changed for `stale_days`      |
-| `?`   | missing info   | Active item with no assignee; Done task with hours left |
+| `?`   | unassigned     | Active, but nobody is assigned                                                |
 | `↑`   | orphan         | An open PBI with no parent Feature                                            |
 
 - The stale glyph fades in with age: it's grey at first and turns amber once the item has sat
@@ -289,7 +289,7 @@ view for this. Each glyph is a distinct shape, so they read without colour too:
   Sprint tree, on the Board and in the details, but not in the Backlog, which doesn't fetch
   tasks.
 - A row or card has room for one glyph, the first in the table above. The details pane
-  (`Flags`) and the item view's header list every flag, and say what exactly is missing.
+  (`Flags`) and the item view's header list every flag, and say how long a stale item has sat.
 - **`:attention`** (or `:att`) narrows the Sprint tree, Backlog and Board to flagged items.
   Parents stay visible, dimmed. Run it again to show everything.
 - **`:stale 7`** sets the threshold in days and saves it as `stale_days`. `:stale off` turns

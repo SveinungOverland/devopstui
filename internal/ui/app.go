@@ -325,7 +325,6 @@ func (a *App) pickTeamFilter() tea.Cmd {
 func (a *App) wireLists() {
 	for _, l := range []*list{a.sprint, a.backlog} {
 		l.taskLevel = func(w *model.WorkItem) bool { return a.ctx.Backlog.TaskLevel(w) }
-		l.cfg = func() model.BacklogConfig { return a.ctx.Backlog }
 		l.health = a.health
 		l.parentTitle = func(id int) string {
 			if p := a.lookup(id); p != nil {

@@ -57,7 +57,7 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 	}
 	p := computeProgress(children, func(w *model.WorkItem) bool { return w.ParentID == it.ID && cfg.TaskLevel(w) })
 	// The one place besides the drill-down with room for every signal.
-	for i, f := range h.flags(h.assess(it, p[it.ID], cfg)) {
+	for i, f := range h.flags(h.assess(it, p[it.ID])) {
 		label := ""
 		if i == 0 {
 			label = "Flags"
@@ -78,7 +78,7 @@ func renderDetail(it *model.WorkItem, parent *model.WorkItem, children []*model.
 			}
 		}
 		b.WriteString("\n" + sMuted.Render(head) + "\n")
-		flags := h.assessAll(children, nil, cfg)
+		flags := h.assessAll(children, nil)
 		for _, c := range children {
 			mark := "○"
 			if isDone(c.State) {

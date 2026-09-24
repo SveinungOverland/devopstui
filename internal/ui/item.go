@@ -94,7 +94,7 @@ func (v *itemView) buildColumns() {
 	v.states = order
 	// Children's own tasks aren't loaded here, so only the signals that
 	// need none can show on their cards.
-	v.flags = v.health.assessAll(v.children, nil, v.cfg)
+	v.flags = v.health.assessAll(v.children, nil)
 	v.cols = make([][]*model.WorkItem, len(order))
 	for _, c := range v.children {
 		i := index[c.State]
@@ -255,7 +255,7 @@ func (v *itemView) renderHead(w int) string {
 
 	head := " " + trunc(title, w-1) + "\n " + trunc(meta, w-1)
 	// The drill-down has the room to name every signal, not just the top one.
-	if flags := v.health.flags(v.health.assess(it, v.progress(), v.cfg)); len(flags) > 0 {
+	if flags := v.health.flags(v.health.assess(it, v.progress())); len(flags) > 0 {
 		head += "\n " + trunc(strings.Join(flags, sMuted.Render(" · ")), w-1)
 	}
 	if v.parent != nil {

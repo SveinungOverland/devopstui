@@ -36,7 +36,7 @@ func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.Bac
 	cur := b.current()
 	b.def = def
 	b.progress = computeProgress(items, cfg.TaskLevel)
-	b.flags = b.health.assessAll(items, b.progress, cfg)
+	b.flags = b.health.assessAll(items, b.progress)
 	if b.attention {
 		inc := include
 		include = func(w *model.WorkItem) bool {
