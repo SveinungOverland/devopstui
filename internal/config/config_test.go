@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // The shipped template must parse and produce the documented defaults.
@@ -25,8 +26,27 @@ func TestExampleConfigLoads(t *testing.T) {
 	if c.PAT != "" {
 		t.Error("template must not ship a PAT")
 	}
+	if c.Stale() != DefaultStaleDays {
+		t.Errorf("stale = %d", c.Stale())
+	}
 	if c.Confirm() || c.RefreshSeconds != 0 || c.EditorCommand() != "" || c.WriteHTML() || c.HideDone || c.DashShowDone {
 		t.Errorf("defaults: confirm=%v refresh=%d editor=%q html=%v hidedone=%v dashShowDone=%v", c.Confirm(), c.RefreshSeconds, c.EditorCommand(), c.WriteHTML(), c.HideDone, c.DashShowDone)
+	}
+}
+
+func TestStaleDays(t *testing.T) {
+	var c Config
+	if c.Stale() != DefaultStaleDays || c.StaleAfter() != DefaultStaleDays*24*time.Hour {
+		t.Errorf("unset: %d %v", c.Stale(), c.StaleAfter())
+	}
+	off, neg := 0, -3
+	c.StaleDays = &off
+	if c.Stale() != 0 || c.StaleAfter() != 0 {
+		t.Errorf("off: %d", c.Stale())
+	}
+	c.StaleDays = &neg
+	if c.Stale() != 0 {
+		t.Errorf("negative: %d", c.Stale())
 	}
 }
 

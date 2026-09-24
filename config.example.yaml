@@ -46,6 +46,11 @@ confirm_writes: false
 # the value is written back here.
 refresh_seconds: 0
 
+# Flag an active item as stale (◷) once neither it nor any of its tasks has
+# changed for this many days. 0 turns the flag off. Set at runtime with
+# :stale 7 — the value is written back here.
+stale_days: 5
+
 # Hide Done/Closed/Removed/Resolved/Completed items in the Sprint view.
 # Default false: they show, and `c` hides them. Toggling `c` writes the
 # choice back here.

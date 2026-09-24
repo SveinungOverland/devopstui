@@ -34,12 +34,14 @@ type itemView struct {
 	showComments    bool
 
 	cfg      model.BacklogConfig
+	health   *health
+	flags    map[int]model.Health // children's, from buildColumns
 	lastDesc string
 	lastW    int
 }
 
-func newItemView(it *model.WorkItem, cfg model.BacklogConfig) *itemView {
-	return &itemView{item: it, cfg: cfg, desc: viewport.New(40, 10), loading: true, commentsLoading: true}
+func newItemView(it *model.WorkItem, cfg model.BacklogConfig, h *health) *itemView {
+	return &itemView{item: it, cfg: cfg, health: h, desc: viewport.New(40, 10), loading: true, commentsLoading: true}
 }
 
 // setComments swaps in a loaded discussion.
@@ -90,6 +92,9 @@ func (v *itemView) buildColumns() {
 		}
 	}
 	v.states = order
+	// Children's own tasks aren't loaded here, so only the signals that
+	// need none can show on their cards.
+	v.flags = v.health.assessAll(v.children, nil, v.cfg)
 	v.cols = make([][]*model.WorkItem, len(order))
 	for _, c := range v.children {
 		i := index[c.State]
@@ -162,6 +167,9 @@ func (v *itemView) progress() progress {
 			continue
 		}
 		p.total++
+		if c.ChangedDate.After(p.latest) {
+			p.latest = c.ChangedDate
+		}
 		if isDone(c.State) {
 			p.done++
 		} else {
@@ -246,6 +254,10 @@ func (v *itemView) renderHead(w int) string {
 	meta := strings.Join(facts, sMuted.Render(" · "))
 
 	head := " " + trunc(title, w-1) + "\n " + trunc(meta, w-1)
+	// The drill-down has the room to name every signal, not just the top one.
+	if flags := v.health.flags(v.health.assess(it, v.progress(), v.cfg)); len(flags) > 0 {
+		head += "\n " + trunc(strings.Join(flags, sMuted.Render(" · ")), w-1)
+	}
 	if v.parent != nil {
 		crumb := sMuted.Render("↑ ") + kindStyle(v.parent.Kind).Render(v.parent.Kind.Tag()) +
 			sMuted.Render(fmt.Sprintf(" %d %s", v.parent.ID, trunc(v.parent.Title, 40)))
@@ -420,6 +432,9 @@ func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool, lines int) []
 		right = append(right, muted.Render(who))
 	}
 	l1 := mark + st(kindStyle(it.Kind)).Render(it.Kind.Tag()) + plain.Render(" ") + muted.Render(fmt.Sprintf("%d", it.ID))
+	if f, ok := v.flags[it.ID]; ok {
+		l1 += plain.Render(" ") + v.health.glyph(f, st)
+	}
 	l1 = spread(plain, l1, w, right...)
 	out := []string{l1}
 	for _, t := range titleLines(it.Title, w-1, lines) {

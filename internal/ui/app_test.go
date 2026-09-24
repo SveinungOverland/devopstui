@@ -1963,3 +1963,117 @@ func TestPreviewScrollFallsBackToPagingWhenHidden(t *testing.T) {
 		t.Fatal("ctrl+d should page the list cursor when there is no preview to scroll")
 	}
 }
+
+// rowOf returns the first line of the view that shows item id.
+func rowOf(v string, id int) string {
+	for _, l := range strings.Split(v, "\n") {
+		if strings.Contains(l, fmt.Sprintf(" %d ", id)) {
+			return l
+		}
+	}
+	return ""
+}
+
+func TestHealthFlagsRender(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	v := a.View()
+	h.dump("health-sprint")
+	if r := rowOf(v, 1018); !strings.HasPrefix(strings.TrimLeft(r, "│ ▌"), "◷") {
+		t.Errorf("stale task row = %q, want it flagged ◷", r)
+	}
+	if r := rowOf(v, 1021); !strings.Contains(r, "↑") {
+		t.Errorf("orphan PBI row = %q, want it flagged ↑", r)
+	}
+	if r := rowOf(v, 1003); strings.ContainsAny(r, "◷↑✓✗?") {
+		t.Errorf("healthy row = %q, want no flag", r)
+	}
+
+	// Finish every open task under 1013: it is now ready to close.
+	for _, it := range a.sprint.all {
+		if it.ID == 1015 || it.ID == 1017 {
+			it.State = "Done"
+			it.RemainingWork = 0
+		}
+	}
+	a.rehealth()
+	if r := rowOf(a.View(), 1013); !strings.Contains(r, "✓") {
+		t.Errorf("row with every task done = %q, want ✓", r)
+	}
+
+	a.sprint.jumpTo(1018)
+	a.refreshDetail()
+	if v := a.View(); !strings.Contains(v, "Flags") || !strings.Contains(v, "stale: 8 days without a change") {
+		t.Errorf("details pane should name the stale flag:\n%s", v)
+	}
+}
+
+func TestHealthFlagsNarrow(t *testing.T) {
+	h := newHarness(t, 60, 30)
+	for _, l := range strings.Split(h.app.View(), "\n") {
+		if w := lipgloss.Width(l); w > 60 {
+			t.Errorf("line is %d wide at 60 columns: %q", w, l)
+		}
+	}
+}
+
+func TestAttentionFilter(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	h.keys(":")
+	h.keys("a", "t", "t", "enter")
+	v := a.View()
+	h.dump("health-attention")
+	if !a.sprint.attention || !strings.Contains(v, "attention") {
+		t.Fatal(":att should turn on the attention filter")
+	}
+	for _, id := range []int{1018, 1021} {
+		if rowOf(v, id) == "" {
+			t.Errorf("flagged %d should show", id)
+		}
+	}
+	if rowOf(v, 1003) != "" {
+		t.Error("healthy 1003 should be hidden")
+	}
+	if n, ok := a.sprint.tree.Get(1014); !ok || !n.External {
+		t.Error("parent of a flagged task should stay, dimmed")
+	}
+
+	h.keys("3")
+	v = a.View()
+	if !strings.Contains(v, "PBI 1021 ↑") || strings.Contains(v, "PBI 1003") {
+		t.Errorf("board should show only flagged cards:\n%s", v)
+	}
+
+	h.keys("2", ":")
+	h.keys("a", "t", "t", "enter")
+	if a.sprint.attention || rowOf(a.View(), 1003) == "" {
+		t.Error("second :att should show everything again")
+	}
+}
+
+func TestStaleCommand(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.Config{Org: "https://dev.azure.com/demo", Project: "Platform", Team: "Team Blue"}
+	h := newHarnessWithConfig(t, 140, 40, cfg, cfgPath)
+	if r := rowOf(h.app.View(), 1018); !strings.Contains(r, "◷") {
+		t.Fatalf("stale task row = %q, want ◷ at the default threshold", r)
+	}
+	h.keys(":")
+	h.keys("s", "t", "a", "l", "e", " ", "1", "0", "enter")
+	if r := rowOf(h.app.View(), 1018); strings.Contains(r, "◷") {
+		t.Errorf("8 days is under a 10-day threshold, row = %q", r)
+	}
+	saved, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Stale() != 10 {
+		t.Errorf("saved stale_days = %d, want 10", saved.Stale())
+	}
+	h.keys(":")
+	h.keys("s", "t", "a", "l", "e", " ", "x", "enter")
+	if !h.app.flashErr {
+		t.Error("a bad value should flash an error")
+	}
+}

@@ -22,6 +22,10 @@ type board struct {
 	visible  int // columns on screen at the last render
 	selected map[int]bool
 	progress map[int]progress
+	health   *health
+	flags    map[int]model.Health
+	// attention shows only flagged cards.
+	attention bool
 }
 
 func newBoard() *board { return &board{selected: map[int]bool{}} }
@@ -32,6 +36,13 @@ func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.Bac
 	cur := b.current()
 	b.def = def
 	b.progress = computeProgress(items, cfg.TaskLevel)
+	b.flags = b.health.assessAll(items, b.progress, cfg)
+	if b.attention {
+		inc := include
+		include = func(w *model.WorkItem) bool {
+			return b.flags[w.ID].Signals != 0 && (inc == nil || inc(w))
+		}
+	}
 	if include != nil {
 		var kept []*model.WorkItem
 		for _, it := range items {
@@ -302,6 +313,9 @@ func (b *board) renderCard(it *model.WorkItem, w int, cur bool, lines int) []str
 	l1 := mark + st(kindStyle(it.Kind)).Render(it.Kind.Tag()) + plain.Render(" ") + muted.Render(fmt.Sprintf("%d", it.ID))
 	if p, ok := b.progress[it.ID]; ok {
 		l1 += plain.Render(" ") + st(p.style()).Render(p.text())
+	}
+	if f, ok := b.flags[it.ID]; ok {
+		l1 += plain.Render(" ") + b.health.glyph(f, st)
 	}
 	var right []string
 	if it.Effort > 0 {
