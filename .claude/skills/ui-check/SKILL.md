@@ -11,11 +11,11 @@ Capture the screen.
 ## The standard tour
 
 ```bash
-make shots          # builds, then writes shots/*.txt for nine scenes
+make shots          # builds, then writes shots/*.txt for twelve scenes
 ```
 
 Scenes: sprint tree, dashboard, board, backlog, details pane, state popup,
-filter, description editor, help. Read the `.txt` files — each is the exact
+filter, description editor, discussion, comment composer, help, activity. Read the `.txt` files — each is the exact
 terminal grid, 140×40.
 
 ## One specific thing

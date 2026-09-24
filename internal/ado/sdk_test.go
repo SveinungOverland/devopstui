@@ -1,6 +1,7 @@
 package ado
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,45 @@ func TestConvertComment(t *testing.T) {
 	want := model.Comment{ID: 7, Author: "Alex Kim", CreatedDate: when.Time, Text: "Looks **good** to me."}
 	if got != want {
 		t.Errorf("convertComment(%+v) = %+v, want %+v", c, got, want)
+	}
+}
+
+func TestActivityWIQL(t *testing.T) {
+	got := activityWIQL(14)
+	want := "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.State] <> 'Removed' AND [System.ChangedDate] >= @Today - 14 ORDER BY [System.ChangedDate] DESC"
+	if got != want {
+		t.Errorf("activityWIQL(14) =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestConvert_CreatedBy(t *testing.T) {
+	fields := map[string]any{
+		model.FieldCreatedBy: map[string]any{"displayName": "Priya Natarajan", "uniqueName": "priya@contoso.com"},
+		model.FieldChangedBy: map[string]any{"displayName": "Alex Kim", "uniqueName": "alex@contoso.com"},
+	}
+	m := (&SDK{}).convert(&workitemtracking.WorkItem{Id: ptr(7), Rev: ptr(1), Fields: &fields}, "Platform")
+	if m.CreatedBy != "Priya Natarajan" || m.ChangedBy != "Alex Kim" {
+		t.Errorf("CreatedBy = %q, ChangedBy = %q", m.CreatedBy, m.ChangedBy)
+	}
+}
+
+func TestFakeActivity(t *testing.T) {
+	f := NewFake()
+	f.Latency = 0
+	items, err := f.Activity(context.Background(), "Platform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) == 0 {
+		t.Fatal("demo feed is empty: seed changes must fall inside the window")
+	}
+	since := time.Now().AddDate(0, 0, -ActivityDays)
+	for i, it := range items {
+		if it.ChangedDate.Before(since) {
+			t.Errorf("#%d changed %v, outside the %d-day window", it.ID, it.ChangedDate, ActivityDays)
+		}
+		if i > 0 && it.ChangedDate.After(items[i-1].ChangedDate) {
+			t.Errorf("#%d is out of order", it.ID)
+		}
 	}
 }

@@ -82,6 +82,9 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `refresh_seconds`    | `0`        | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets)         |
 | `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
 | `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
+| `last_seen_activity` |            | When the Activity tab was last opened; written on every visit        |
+| `activity_involved`  | `false`    | Activity feed: only items you're involved in (`I` toggles)           |
+| `activity_sprint`    | `false`    | Activity feed: only the selected sprint (`A` toggles)                |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
@@ -147,11 +150,11 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `g` `G`           | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
 | `l` `h`           | expand / collapse     | `3`     | board               | `d`     | description     | `B`  | move to backlog     |
 | `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
-| `tab`             | focus detail pane     | `[` `]` | prev / next sprint  | `a`     | assign          |      |                     |
-| `z`               | toggle preview pane   | `T`     | team filter         | `n`     | new child item  |      |                     |
-| `ctrl+u` `ctrl+d` | scroll preview pane   |         |                     | `N`     | new bug         |      |                     |
-| `D`               | item details view     |         |                     |         |                 |      |                     |
-| `C`               | discussion            |         |                     |         |                 |      |                     |
+| `tab`             | focus detail pane     | `5`     | activity feed       | `a`     | assign          |      |                     |
+| `z`               | toggle preview pane   | `[` `]` | prev / next sprint  | `n`     | new child item  |      |                     |
+| `ctrl+u` `ctrl+d` | scroll preview pane   | `T`     | team filter         | `N`     | new bug         |      |                     |
+| `D`               | item details view     | `I`     | involved only       |         |                 |      |                     |
+| `C`               | discussion            | `A`     | this sprint only    |         |                 |      |                     |
 | `c`               | add comment           |         |                     |         |                 |      |                     |
 | `/`               | filter                | `S`     | current sprint      | `E`     | effort          |      |                     |
 | `space`           | select                | `:`     | command bar         | `P`     | priority        |      |                     |
@@ -230,7 +233,7 @@ the kanban is complete even in views that do not load tasks, such as the backlog
 the same Markdown composer used for `d` — the built-in editor, or `$EDITOR` when configured — to
 post a new comment on whatever has focus (the composer title names the target), whether or not
 the discussion is currently showing; it switches the pane to the discussion once the comment
-lands. On the Board, Sprint and Backlog views, where the preview pane already has the full
+lands. On the Board, Sprint, Backlog and Activity views, where the preview pane already has the full
 terminal height to work with, the discussion shows underneath the description instead, read-only,
 with no toggle needed.
 
@@ -311,8 +314,43 @@ header shows `↻60s` while it is on, and the interval is whatever `refresh_seco
 seconds by default. `:auto 30` sets a different interval. Reloads are skipped while a dialog
 is open or a write is in flight, so nothing shifts under you mid-edit.
 
-Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
+Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:project`, `:board`, `:backlog`, `:dash`, `:activity`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
+
+## Activity
+
+The Activity tab (`5`, or `:activity`) answers "what changed while I was away?". It lists
+every work item in the project changed in the last 14 days, newest change first: who made the
+change, when, and the item's current state. Items that have only just been created (no edits
+since) carry a green `created` tag.
+
+```
+│▌ PBI   1028 Add SSO login button to sign-in page    New          Sveinung Øverland   just now│
+│── ▲ 1 change since you last looked, Thu Sep 24 08:54 ─────────────────────────────────────────│
+│  TASK  1029 Localise the invite email created       To Do        Priya Natarajan       5h ago│
+│  PBI   1027 Add workspace naming validation created New          Alex Kim             15h ago│
+│  TASK  1026 Add resend button to invite page        To Do        Alex Kim             20h ago│
+```
+
+- **Since you last looked.** Opening the tab records the time in `last_seen_activity`. On the
+  next visit, a marker line separates what changed since then from the rest, and the header
+  counts the new entries. The marker stays put for the whole visit, auto refresh included.
+  Drilling into an item and coming back with `esc` doesn't count as a new visit. The very first
+  visit has no marker.
+- **Always fresh.** Every visit refetches the feed. `r` and auto refresh work as on the other
+  tabs.
+- **Scope.** The team filter (`T`) applies, as everywhere. `I` narrows the feed to items you're
+  involved in: assigned to you, created by you, or last changed by you. `A` narrows it to the
+  selected sprint, so `[`/`]` step through sprints. Both toggles are remembered in the config.
+- **Acting on entries.** Feed rows are ordinary work items. `D` or `enter` opens the details
+  view, and the change keys (`s`, `a`, `e`, `m`, …) and `space` selection work as on the other
+  tabs. An edit you make moves the item to the top, since it is now the newest change. On a wide
+  terminal, a preview pane with the description and discussion sits on the right (`z` toggles
+  it).
+
+The feed shows each item's latest change only, not a field-by-field history. "Last changed by
+you" therefore means the most recent change was yours: an earlier edit of yours that someone has
+since overwritten doesn't count towards "involved".
 
 ## Develop
 

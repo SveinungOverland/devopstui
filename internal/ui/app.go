@@ -30,17 +30,18 @@ const (
 	viewSprint
 	viewBoard
 	viewBacklog
+	viewActivity
 	// viewItem is the full-screen view of one work item. It is not a tab:
 	// you drill into it with D and leave it with esc.
 	viewItem
 )
 
 func (v viewID) String() string {
-	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Item"}[v]
+	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Activity", "Item"}[v]
 }
 
 // tabViews are the numbered views shown in the header.
-var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog}
+var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog, viewActivity}
 
 // App is the root model. It is used by pointer so closures in popups can
 // reach it safely.
@@ -85,6 +86,12 @@ type App struct {
 	dashFocusLanes bool // false = kanban focused, true = lanes focused
 	previewDash    bool // side preview pane beside the Dashboard's kanban
 	dashShowDone   bool // show Done/Closed items on the top kanban
+
+	// Activity: the recently changed items feed. activityInvolved and
+	// activitySprint are its two scope toggles, on top of the team filter.
+	activity         *activity
+	activityInvolved bool
+	activitySprint   bool
 
 	// item is the drill-down view; itemStack keeps the trail so esc walks
 	// back out, and itemReturn is the tab to land on at the bottom.
@@ -140,6 +147,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		board:     newBoard(),
 		dashBoard: newBoard(),
 		dashLanes: newLanes(),
+		activity:  newActivity(),
 		spin:      sp,
 		loading:   map[viewID]bool{},
 		cmd:       newCmdbar(),
@@ -161,6 +169,9 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	a.ctx.FilterTeam = cfg.FilterTeam
 	a.refreshEvery = cfg.RefreshSeconds
 	a.dashShowDone = cfg.DashShowDone
+	a.activityInvolved = cfg.ActivityInvolved
+	a.activitySprint = cfg.ActivitySprint
+	a.activity.include = a.activityInclude()
 	return a
 }
 
@@ -184,7 +195,64 @@ func (a *App) applyTeamFilter() {
 	}
 	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, inc)
 	a.refreshDashboard()
+	a.refreshActivity()
 	a.refreshDetail()
+}
+
+// activityInclude is the Activity feed's scope: the team filter, plus the
+// selected sprint and "items I'm involved in" when those toggles are on.
+func (a *App) activityInclude() func(*model.WorkItem) bool {
+	team := a.include()
+	iter := ""
+	if a.activitySprint {
+		iter = a.ctx.Iteration.Path
+	}
+	involved := a.activityInvolved
+	if team == nil && iter == "" && !involved {
+		return nil
+	}
+	return func(w *model.WorkItem) bool {
+		if team != nil && !team(w) {
+			return false
+		}
+		if iter != "" && w.IterationPath != iter {
+			return false
+		}
+		return !involved || a.involves(w)
+	}
+}
+
+// involves reports whether the current user is involved in w: assigned to
+// it, created it, or made its latest change. Only the latest change is
+// known, so an earlier edit someone has since overwritten doesn't count.
+func (a *App) involves(w *model.WorkItem) bool {
+	if a.me == "" {
+		return false
+	}
+	for _, who := range []string{w.AssignedTo, w.CreatedBy, w.ChangedBy} {
+		if strings.EqualFold(who, a.me) {
+			return true
+		}
+	}
+	return false
+}
+
+// refreshActivity re-applies the Activity feed's scope to what is loaded.
+func (a *App) refreshActivity() {
+	a.activity.include = a.activityInclude()
+	a.activity.rebuild()
+}
+
+// activityScope describes the active Activity toggles for the header.
+func (a *App) activityScope() string {
+	var parts []string
+	if a.activityInvolved {
+		parts = append(parts, "involved")
+	}
+	if a.activitySprint && a.ctx.Iteration.Name != "" {
+		parts = append(parts, a.ctx.Iteration.Name)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // refreshDashboard rebuilds the Dashboard's kanban and lanes from whatever
@@ -513,13 +581,21 @@ func (a *App) loadView(v viewID) tea.Cmd {
 			m.items, m.err = a.client.Backlog(ctx, c.Project, c.Team)
 		case viewDash:
 			m.items, m.err = a.client.MyItems(ctx, c.Project)
+		case viewActivity:
+			m.items, m.err = a.client.Activity(ctx, c.Project)
 		}
 		return m
 	}
 }
 
 func (a *App) reloadAll() tea.Cmd {
-	return tea.Batch(a.loadView(viewSprint), a.loadView(viewDash), a.loadView(viewBacklog))
+	cmds := []tea.Cmd{a.loadView(viewSprint), a.loadView(viewDash), a.loadView(viewBacklog)}
+	// The feed is only fetched once its tab has been opened, so startup
+	// doesn't pay for a tab you may never look at.
+	if a.activity.loaded {
+		cmds = append(cmds, a.loadView(viewActivity))
+	}
+	return tea.Batch(cmds...)
 }
 
 // loadDashLanes bulk-fetches children for the current "my PBIs" set, for
@@ -637,6 +713,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.myItems = msg.items
 			a.refreshDashboard()
 			cmd = a.loadDashLanes()
+		case viewActivity:
+			a.activity.setItems(msg.items)
 		}
 		a.syncItemView()
 		if a.pendingJump != 0 {
@@ -651,6 +729,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.pendingJump = 0
 			} else if a.view == viewDash {
 				a.dashBoard.jumpTo(a.pendingJump)
+				a.pendingJump = 0
+			} else if a.view == viewActivity && a.activity.jumpTo(a.pendingJump) {
 				a.pendingJump = 0
 			}
 		}
@@ -751,8 +831,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.item.setComments(msg.comments)
 			}
 		}
-		if it := a.currentItem(); it != nil && it.ID == msg.id &&
-			(a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog) {
+		if it := a.currentItem(); it != nil && it.ID == msg.id && a.previewShowsComments() {
 			a.refreshDetail()
 		}
 		return a, nil
@@ -1035,6 +1114,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.switchView(viewBoard)
 	case key.Matches(msg, keys.Backlog):
 		return a.switchView(viewBacklog)
+	case key.Matches(msg, keys.Activity):
+		return a.switchView(viewActivity)
 	case key.Matches(msg, keys.PrevSprint):
 		return a.shiftSprint(-1)
 	case key.Matches(msg, keys.NextSprint):
@@ -1088,7 +1169,59 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return a.onDashKey(msg)
 	}
+	if a.view == viewActivity {
+		if msg.String() == "enter" { // enter drills in from a feed entry
+			return a.openItem(a.currentItem())
+		}
+		return a.onActivityKey(msg)
+	}
 	return a.onListKey(msg, a.activeList())
+}
+
+func (a *App) onActivityKey(msg tea.KeyMsg) tea.Cmd {
+	f := a.activity
+	switch {
+	case key.Matches(msg, keys.Down):
+		f.move(1)
+	case key.Matches(msg, keys.Up):
+		f.move(-1)
+	case key.Matches(msg, keys.Top):
+		f.move(-len(f.rows))
+	case key.Matches(msg, keys.Bottom):
+		f.move(len(f.rows))
+	case key.Matches(msg, keys.PageDown):
+		f.move(a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PageUp):
+		f.move(-a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PreviewDown):
+		if a.scrollPreview(true) {
+			return nil
+		}
+		f.move(a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PreviewUp):
+		if a.scrollPreview(false) {
+			return nil
+		}
+		f.move(-a.bodyHeight() / 2)
+	case key.Matches(msg, keys.Select):
+		f.toggleSelect()
+	case key.Matches(msg, keys.ClearSel):
+		f.selected = map[int]bool{}
+	case key.Matches(msg, keys.Involved):
+		a.activityInvolved = !a.activityInvolved
+		a.cfg.ActivityInvolved = a.activityInvolved
+		a.persist()
+		a.refreshActivity()
+	case key.Matches(msg, keys.SprintOnly):
+		a.activitySprint = !a.activitySprint
+		a.cfg.ActivitySprint = a.activitySprint
+		a.persist()
+		a.refreshActivity()
+	default:
+		return a.onActionKey(msg)
+	}
+	a.refreshDetail()
+	return a.loadPreviewComments(false)
 }
 
 // dashOverride handles the keys the Dashboard's layout redefines: Tab
@@ -1373,6 +1506,8 @@ func (a *App) runCommand(c string) tea.Cmd {
 		return a.switchView(viewBacklog)
 	case "dash", "dashboard", "d":
 		return a.switchView(viewDash)
+	case "activity", "feed":
+		return a.switchView(viewActivity)
 	case "refresh", "r":
 		return a.reloadAll()
 	case "auto":
@@ -1401,16 +1536,38 @@ func (a *App) runCommand(c string) tea.Cmd {
 }
 
 func (a *App) switchView(v viewID) tea.Cmd {
+	from := a.view
+	if from == viewItem {
+		from = a.itemReturn // walking back out of a drill-down is not a new visit
+	}
 	if v != viewItem {
 		a.item, a.itemStack = nil, nil
 	}
 	a.view = v
 	a.focusDetail = false
+	if v == viewActivity && from != viewActivity {
+		return a.visitActivity()
+	}
 	a.refreshDetail()
 	if a.needsLoad(v) {
 		return a.loadView(v)
 	}
 	return a.loadPreviewComments(false)
+}
+
+// visitActivity starts a visit to the Activity tab: the marker moves to
+// where the last visit began, the new visit is remembered in the config,
+// and the feed is refetched, since a stale "what changed" is no use. The
+// marker then holds for the whole visit, auto refresh included.
+func (a *App) visitActivity() tea.Cmd {
+	a.activity.since = a.cfg.LastSeenActivity
+	a.cfg.LastSeenActivity = time.Now()
+	a.persist()
+	a.refreshDetail()
+	if a.loading[viewActivity] {
+		return nil
+	}
+	return a.loadView(viewActivity)
 }
 
 func (a *App) needsLoad(v viewID) bool {
@@ -1421,6 +1578,8 @@ func (a *App) needsLoad(v viewID) bool {
 		return a.backlog.all == nil && !a.loading[viewBacklog]
 	case viewDash:
 		return a.myItems == nil && !a.loading[viewDash]
+	case viewActivity:
+		return !a.activity.loaded && !a.loading[viewActivity]
 	}
 	return false
 }
@@ -1449,6 +1608,7 @@ func (a *App) setIteration(it model.Iteration) tea.Cmd {
 	// lanes' children since the qualifying set of "my PBIs" may have
 	// changed.
 	a.refreshDashboard()
+	a.refreshActivity()
 	a.refreshDetail()
 	return tea.Batch(a.loadView(viewSprint), a.loadDashLanes())
 }
@@ -1466,6 +1626,7 @@ func (a *App) pickProject() tea.Cmd {
 		a.sprint, a.backlog = newList("sprint is empty"), newList("backlog is empty")
 		a.dashBoard, a.dashLanes = newBoard(), newLanes()
 		a.myItems, a.dashChildren = nil, nil
+		a.activity = newActivity()
 		a.wireLists()
 		a.sprint.showDone = !a.cfg.HideDone
 		return a.loadContext()
@@ -1562,6 +1723,8 @@ func (a *App) currentItem() *model.WorkItem {
 			return a.dashLanes.current()
 		}
 		return a.dashBoard.current()
+	case a.view == viewActivity:
+		return a.activity.current()
 	}
 	if l := a.activeList(); l != nil {
 		return l.current()
@@ -1584,6 +1747,8 @@ func (a *App) targetItems() []*model.WorkItem {
 			return a.dashLanes.targetItems()
 		}
 		return a.dashBoard.targetItems()
+	case a.view == viewActivity:
+		return a.activity.targetItems()
 	}
 	if l := a.activeList(); l != nil {
 		return l.targetItems()
@@ -1598,6 +1763,8 @@ func (a *App) clearSelection() {
 	case viewDash:
 		a.dashBoard.selected = map[int]bool{}
 		a.dashLanes.selected = map[int]bool{}
+	case viewActivity:
+		a.activity.selected = map[int]bool{}
 	default:
 		if l := a.activeList(); l != nil {
 			l.clearSelection()
@@ -1627,6 +1794,11 @@ func (a *App) lookup(id int) *model.WorkItem {
 			}
 		}
 	}
+	for _, it := range a.activity.all {
+		if it.ID == id {
+			return it
+		}
+	}
 	return nil
 }
 
@@ -1647,6 +1819,7 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 	}
 	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
 	a.refreshDashboard()
+	a.activity.apply(it)
 	// The drill-down can hold items no list has (children fetched for it),
 	// so swap those pointers too or they keep a superseded revision.
 	if a.item != nil {
@@ -1706,6 +1879,12 @@ func (a *App) childItems(id int) []*model.WorkItem {
 			out = append(out, c)
 		}
 	}
+	for _, it := range a.activity.all {
+		if it.ParentID == id && !seen[it.ID] {
+			seen[it.ID] = true
+			out = append(out, it)
+		}
+	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Kind != out[j].Kind {
 			return out[i].Kind < out[j].Kind
@@ -1726,11 +1905,7 @@ func (a *App) refreshDetail() {
 	if it != nil {
 		parent = a.lookup(it.ParentID)
 		children = a.childItems(it.ID)
-		// Only the Board, Sprint and Backlog previews show the discussion:
-		// they are the panes tall enough (full terminal height) to fit it
-		// alongside the children and description without the rest becoming
-		// unreadable.
-		if a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog {
+		if a.previewShowsComments() {
 			comments = a.comments[it.ID]
 		}
 	}
@@ -1749,11 +1924,23 @@ func (a *App) refreshDetail() {
 	a.detail.GotoTop()
 }
 
+// previewShowsComments reports whether the active view's preview pane shows
+// the discussion. Only the Board, Sprint, Backlog and Activity previews do:
+// they are the panes tall enough (full terminal height) to fit it alongside
+// the children and description without the rest becoming unreadable.
+func (a *App) previewShowsComments() bool {
+	switch a.view {
+	case viewBoard, viewSprint, viewBacklog, viewActivity:
+		return true
+	}
+	return false
+}
+
 // loadPreviewComments fetches the discussion for the currently selected
-// item on the Board, Sprint or Backlog, for the preview pane. A no-op on
-// other views. force bypasses the cache, for an explicit refresh.
+// item for the preview pane, on the views whose preview shows it. A no-op
+// on other views. force bypasses the cache, for an explicit refresh.
 func (a *App) loadPreviewComments(force bool) tea.Cmd {
-	if a.view != viewBoard && a.view != viewSprint && a.view != viewBacklog {
+	if !a.previewShowsComments() {
 		return nil
 	}
 	if it := a.currentItem(); it != nil {
@@ -2226,6 +2413,8 @@ func (a *App) renderHeader() string {
 			focus += " · " + h
 		}
 		summary = sMuted.Render(focus)
+	case a.view == viewActivity:
+		summary = a.activity.summary(a.activityScope())
 	default:
 		if l := a.activeList(); l != nil {
 			summary = l.summary()
@@ -2283,12 +2472,16 @@ func (a *App) renderBody() string {
 	if a.view == viewDash {
 		return a.renderDash(a.w, h)
 	}
-	l := a.activeList()
 	lw := a.w - 2
 	if dw > 0 {
 		lw = a.w - dw - 4
 	}
-	content := l.view(lw, h-2)
+	var content string
+	if a.view == viewActivity {
+		content = a.activity.view(lw, h-2)
+	} else {
+		content = a.activeList().view(lw, h-2)
+	}
 	left := listStyle.Width(lw).Height(h - 2).Render(content)
 	if dw == 0 {
 		return left
@@ -2361,6 +2554,8 @@ func (a *App) renderFooter() string {
 		if a.dashFocusLanes {
 			bindings = footerDashLanes
 		}
+	case a.view == viewActivity:
+		bindings = footerActivity
 	}
 	if a.focusDetail {
 		bindings = []key.Binding{keys.Up, keys.Down, keys.Focus, keys.Edit, keys.Open}

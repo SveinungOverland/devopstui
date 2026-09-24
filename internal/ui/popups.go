@@ -348,10 +348,13 @@ func (helpPopup) View(w, h int) string {
 
 // helpWhere marks the bindings that share a key with another, so the ?
 // overlay says which view each one belongs to. c comments in the details
-// view and hides done items everywhere else.
+// view and hides done items everywhere else. The Activity feed's own
+// toggles are marked too, since they do nothing on the other tabs.
 var helpWhere = map[string]string{
-	keys.Comment.Help().Desc: "details",
-	keys.Closed.Help().Desc:  "elsewhere",
+	keys.Comment.Help().Desc:    "details",
+	keys.Closed.Help().Desc:     "elsewhere",
+	keys.Involved.Help().Desc:   "activity",
+	keys.SprintOnly.Help().Desc: "activity",
 }
 
 func padCol(s string) string { return lipgloss.NewStyle().MarginRight(3).Render(s) }

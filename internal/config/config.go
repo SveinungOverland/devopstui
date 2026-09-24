@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,6 +30,14 @@ type Config struct {
 	HideDone bool `yaml:"hide_done,omitempty"`
 	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
 	DashShowDone bool `yaml:"dash_show_done,omitempty"`
+	// LastSeenActivity is when the Activity tab was last opened; entries
+	// changed after it are marked as new on the next visit.
+	LastSeenActivity time.Time `yaml:"last_seen_activity,omitempty"`
+	// ActivityInvolved narrows the Activity feed to items assigned to,
+	// created by or last changed by the current user.
+	ActivityInvolved bool `yaml:"activity_involved,omitempty"`
+	// ActivitySprint narrows the Activity feed to the selected sprint.
+	ActivitySprint bool `yaml:"activity_sprint,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
 	// then the built-in editor. "inline" forces the built-in one.
 	Editor string `yaml:"editor,omitempty"`

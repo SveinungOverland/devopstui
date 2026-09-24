@@ -60,6 +60,7 @@ type WorkItem struct {
 	ParentID           int    // 0 when no parent
 	ChangedDate        time.Time
 	ChangedBy          string
+	CreatedBy          string
 	URL                string // browser URL
 }
 
@@ -304,6 +305,7 @@ const (
 	FieldWorkItemType       = "System.WorkItemType"
 	FieldChangedDate        = "System.ChangedDate"
 	FieldChangedBy          = "System.ChangedBy"
+	FieldCreatedBy          = "System.CreatedBy"
 	FieldPriority           = "Microsoft.VSTS.Common.Priority"
 	FieldEffort             = "Microsoft.VSTS.Scheduling.Effort"
 	FieldStoryPoints        = "Microsoft.VSTS.Scheduling.StoryPoints"
