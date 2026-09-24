@@ -100,6 +100,10 @@ func (h *harness) keys(ks ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlU}
 		case "ctrl+d":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlD}
+		case "ctrl+o":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlO}
+		case "ctrl+n":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlN}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -370,6 +374,11 @@ func TestViewsAndPopups(t *testing.T) {
 	h.dump("11-backlog")
 	h.keys("2", "?")
 	h.dump("12-help")
+	for _, want := range []string{"gg", "ctrl+o", "ctrl+n", "gd", "gs", "gb", "gB", "gp"} {
+		if !strings.Contains(h.app.View(), want) {
+			t.Errorf("help should list %q", want)
+		}
+	}
 	h.keys("esc", ":")
 	h.keys("s", "p", "r", "i", "n", "t", "enter")
 	if _, ok := h.app.popup.(*picker); !ok {
