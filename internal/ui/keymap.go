@@ -12,12 +12,12 @@ type keymap struct {
 	Focus, Preview, Details                  key.Binding
 	Comments, Comment                        key.Binding
 	// views
-	Dashboard, Sprint, Board, Backlog key.Binding
-	PrevSprint, NextSprint, CurSprint key.Binding
-	TeamFilter                        key.Binding
-	Command, Filter, Help, Refresh    key.Binding
-	AutoRefresh                       key.Binding
-	Back, Quit                        key.Binding
+	Dashboard, Sprint, Board, Backlog, Activity key.Binding
+	PrevSprint, NextSprint, CurSprint           key.Binding
+	TeamFilter                                  key.Binding
+	Command, Filter, Help, Refresh              key.Binding
+	AutoRefresh                                 key.Binding
+	Back, Quit                                  key.Binding
 	// selection
 	Select, Visual, SelectAll, ClearSel key.Binding
 	// actions
@@ -25,6 +25,8 @@ type keymap struct {
 	NewBug                                                             key.Binding
 	Move, MoveNext, MoveBacklog, Parent                                key.Binding
 	Open, Yank, Flat, Closed                                           key.Binding
+	// activity
+	Involved, SprintOnly key.Binding
 	// board
 	Left, Right, ColLeft, ColRight key.Binding
 }
@@ -56,6 +58,7 @@ var keys = keymap{
 	Sprint:      b("sprint", "2"),
 	Board:       b("board", "3"),
 	Backlog:     b("backlog", "4"),
+	Activity:    b("activity", "5"),
 	PrevSprint:  b("prev sprint", "["),
 	NextSprint:  b("next sprint", "]"),
 	CurSprint:   b("current sprint", "S"),
@@ -94,6 +97,9 @@ var keys = keymap{
 	Flat:   b("flat/tree", "f"),
 	Closed: b("hide done", "c"),
 
+	Involved:   b("involved only", "I"),
+	SprintOnly: b("this sprint only", "A"),
+
 	Left:     b("left", "h", "left"),
 	Right:    b("right", "l", "right"),
 	ColLeft:  b("move column left", "H"),
@@ -103,14 +109,15 @@ var keys = keymap{
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Details, keys.Comments, keys.Comment},
-	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
+	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.Activity, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.NewBug, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
-	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Help, keys.Quit},
+	{keys.Open, keys.Yank, keys.Flat, keys.Closed, keys.Involved, keys.SprintOnly, keys.Help, keys.Quit},
 }
 
 var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New, keys.NewBug, keys.Edit, keys.Desc, keys.State, keys.Assign, keys.Move, keys.Parent, keys.Filter, keys.PreviewUp, keys.PreviewDown, keys.Help}
+var footerActivity = []key.Binding{keys.Involved, keys.SprintOnly, keys.Select, keys.Details, keys.Edit, keys.State, keys.Assign, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 // footerDashKanban and footerDashLanes are the two focus modes of the

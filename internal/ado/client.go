@@ -8,6 +8,9 @@ import (
 	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
+// ActivityDays is how far back the Activity feed looks.
+const ActivityDays = 14
+
 // Client is everything the UI needs from Azure DevOps.
 type Client interface {
 	// Me returns the display name of the authenticated user.
@@ -42,6 +45,9 @@ type Client interface {
 	// MyItems returns items assigned to the current user in the project,
 	// excluding only Removed ones; the UI hides Done/Closed by default.
 	MyItems(ctx context.Context, project string) ([]*model.WorkItem, error)
+	// Activity returns the project's items changed in the last ActivityDays
+	// days, newest change first, excluding Removed ones.
+	Activity(ctx context.Context, project string) ([]*model.WorkItem, error)
 	// Parents returns candidate parents (Epics and Features) in the project.
 	Parents(ctx context.Context, project string) ([]*model.WorkItem, error)
 	// Children returns the direct children of a work item.

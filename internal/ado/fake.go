@@ -125,6 +125,21 @@ func NewFake() *Fake {
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"
 	}
+	// Spread the last changes over the past few days, by different people,
+	// so the Activity feed has a realistic mix: most items edited a few
+	// times, a handful only just created. Changes land every 5 hours, newest
+	// on the highest id.
+	people := []string{"Alex Kim", "Priya Natarajan", "Sveinung Øverland"}
+	for id, it := range f.items {
+		it.ChangedDate = now.Add(-time.Duration(1030-id) * 5 * time.Hour)
+		it.ChangedBy = people[id%len(people)]
+		it.CreatedBy = people[(id/2)%len(people)]
+		it.Rev = 2 + id%4
+	}
+	for _, id := range []int{1022, 1027, 1029} {
+		f.items[id].Rev = 1
+		f.items[id].ChangedBy = f.items[id].CreatedBy
+	}
 	f.comments = map[int][]model.Comment{
 		1003: demoComments(now, "Priya Natarajan", "Should the magic link expire after first use, or stay valid for the full 7 days?",
 			"Sveinung Øverland", "First use only — otherwise a leaked email thread keeps working forever.\n\nWorth calling out in the acceptance criteria."),
@@ -319,7 +334,7 @@ func (f *Fake) Create(ctx context.Context, project string, n model.NewItem) (*mo
 	it := &model.WorkItem{
 		ID: id, Rev: 1, Type: n.Type, Kind: KindOf(n.Type), Title: n.Title, State: state, BoardColumn: state,
 		IterationPath: n.IterationPath, AreaPath: n.AreaPath, ParentID: n.ParentID,
-		ChangedDate: time.Now(), ChangedBy: f.me,
+		ChangedDate: time.Now(), ChangedBy: f.me, CreatedBy: f.me,
 		URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
 	}
 	patches := []model.Patch{{Field: model.FieldTitle, Value: n.Title}, {Field: model.FieldWorkItemType, Value: n.Type}}
@@ -444,6 +459,18 @@ func (f *Fake) MyItems(ctx context.Context, project string) ([]*model.WorkItem, 
 	return f.snapshot(func(w *model.WorkItem) bool {
 		return w.AssignedTo == f.me && w.State != "Removed"
 	}), nil
+}
+
+func (f *Fake) Activity(ctx context.Context, project string) ([]*model.WorkItem, error) {
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	since := time.Now().AddDate(0, 0, -ActivityDays)
+	items := f.snapshot(func(w *model.WorkItem) bool {
+		return w.State != "Removed" && !w.ChangedDate.Before(since)
+	})
+	sort.SliceStable(items, func(i, j int) bool { return items[i].ChangedDate.After(items[j].ChangedDate) })
+	return items, nil
 }
 
 func (f *Fake) Parents(ctx context.Context, project string) ([]*model.WorkItem, error) {

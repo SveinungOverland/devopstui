@@ -65,7 +65,7 @@ func NewSDK(ctx context.Context, orgURL, pat string) (*SDK, error) {
 var fields = []string{
 	"System.Id", "System.Rev", model.FieldWorkItemType, model.FieldTitle, model.FieldState, model.FieldAssignedTo,
 	model.FieldIterationPath, model.FieldAreaPath, model.FieldBoardColumn, model.FieldTags, model.FieldPriority,
-	model.FieldEffort, model.FieldStoryPoints, model.FieldRemainingWork, model.FieldChangedDate, model.FieldChangedBy, "System.Parent",
+	model.FieldEffort, model.FieldStoryPoints, model.FieldRemainingWork, model.FieldChangedDate, model.FieldChangedBy, model.FieldCreatedBy, "System.Parent",
 	model.FieldDescription, model.FieldReproSteps, model.FieldAcceptanceCriteria,
 }
 
@@ -511,6 +511,19 @@ func (s *SDK) MyItems(ctx context.Context, project string) ([]*model.WorkItem, e
 		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me AND [System.State] <> 'Removed' ORDER BY [System.ChangedDate] DESC")
 }
 
+func (s *SDK) Activity(ctx context.Context, project string) ([]*model.WorkItem, error) {
+	return s.query(ctx, project, activityWIQL(ActivityDays))
+}
+
+// activityWIQL is the Activity feed's query: everything in the project
+// changed in the last days days, newest first. The date bound keeps a busy
+// project from pulling its whole history through fetch on every refresh.
+func activityWIQL(days int) string {
+	return fmt.Sprintf(
+		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.State] <> 'Removed' AND [System.ChangedDate] >= @Today - %d ORDER BY [System.ChangedDate] DESC",
+		days)
+}
+
 func (s *SDK) Parents(ctx context.Context, project string) ([]*model.WorkItem, error) {
 	return s.query(ctx, project,
 		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] IN ('Epic','Feature') AND [System.State] NOT IN ('Removed','Closed','Done') ORDER BY [System.WorkItemType], [System.Title]")
@@ -690,6 +703,7 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	m.AssignedTo = identityName(f[model.FieldAssignedTo])
 	m.AssignedToUnique = identityUnique(f[model.FieldAssignedTo])
 	m.ChangedBy = identityName(f[model.FieldChangedBy])
+	m.CreatedBy = identityName(f[model.FieldCreatedBy])
 	if t, ok := f[model.FieldChangedDate].(azuredevops.Time); ok {
 		m.ChangedDate = t.Time
 	} else if ts := str(f[model.FieldChangedDate]); ts != "" {

@@ -380,6 +380,9 @@ func (a *App) knownPeople() []model.Person {
 	for _, it := range a.myItems {
 		add(it.AssignedTo)
 	}
+	for _, it := range a.activity.all {
+		add(it.AssignedTo)
+	}
 	for _, children := range a.dashChildren {
 		for _, c := range children {
 			add(c.AssignedTo)
