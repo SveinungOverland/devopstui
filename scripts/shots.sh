@@ -45,6 +45,7 @@ shot 09-discussion "j,D,C"
 shot 10-comment-composer "j,D,C,c,i,type:Looks good to me,esc,ctrl+s"
 shot 11-help "?"
 shot 12-related "j,j,j,j,j,j,j,j,j,j,D,x,wait:0.5"
+shot 13-attention ":,type:attention,Enter"
 
 if [ "$failed" = 1 ]; then
 	printf '%s\n' "shots: at least one scene failed — see above" >&2

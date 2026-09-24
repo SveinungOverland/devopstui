@@ -46,6 +46,11 @@ confirm_writes: false
 # the value is written back here.
 refresh_seconds: 0
 
+# Flag an active item as stale (◷) once neither it nor any of its tasks has
+# changed for this many days. 0 turns the flag off. Set at runtime with
+# :stale 7 — the value is written back here.
+stale_days: 5
+
 # Hide Done/Closed/Removed/Resolved/Completed items in the Sprint view.
 # Default false: they show, and `c` hides them. Toggling `c` writes the
 # choice back here.
@@ -54,6 +59,11 @@ hide_done: false
 # Show Done/Closed items on the Dashboard's kanban. Toggle at runtime
 # with c — the value is written back here.
 dash_show_done: false
+
+# Show a details view's children as a kanban of their states instead of a
+# list grouped by state. Toggle at runtime with f — the value is written
+# back here.
+item_kanban: false
 
 # Editor for descriptions. Leave empty to use $VISUAL, then $EDITOR,
 # then the built-in vim-style editor. Set "inline" to always use the

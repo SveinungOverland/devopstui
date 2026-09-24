@@ -129,6 +129,16 @@ type App struct {
 	flashErr bool
 
 	pendingJump int // item to select once the next load lands (after create)
+
+	// jumps is the ctrl+o/ctrl+n history. jumpIdx == len(jumps) means the
+	// current position is newer than every entry and not recorded yet.
+	jumps   []jump
+	jumpIdx int
+	// pendingGoto is set by the g leader; the next key completes it.
+	pendingGoto bool
+
+	// health holds the staleness threshold every view flags items by.
+	health *health
 }
 
 // New builds the app. The client may be a Fake for demo mode.
@@ -155,6 +165,8 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		previewList:  true,
 		previewBoard: true,
 		previewDash:  true,
+
+		health: &health{staleAfter: cfg.StaleAfter()},
 	}
 	a.wireLists()
 	a.sprint.showDone = !cfg.HideDone
@@ -323,6 +335,7 @@ func (a *App) pickTeamFilter() tea.Cmd {
 func (a *App) wireLists() {
 	for _, l := range []*list{a.sprint, a.backlog} {
 		l.taskLevel = func(w *model.WorkItem) bool { return a.ctx.Backlog.TaskLevel(w) }
+		l.health = a.health
 		l.parentTitle = func(id int) string {
 			if p := a.lookup(id); p != nil {
 				return p.Title
@@ -330,6 +343,7 @@ func (a *App) wireLists() {
 			return ""
 		}
 	}
+	a.board.health, a.dashBoard.health, a.dashLanes.health = a.health, a.health, a.health
 	// Tasks already show in the PBI's detail preview and progress badge, so
 	// the flat sprint view drops them. Backlog's query never returns
 	// task-level items in the first place, flat or not.
@@ -820,6 +834,9 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.busy = ""
 		return a, a.setFlash(msg.err.Error(), true)
 
+	case openItemMsg:
+		return a, a.openItem(msg.item)
+
 	case flashMsg:
 		return a, a.setFlash(msg.text, false)
 
@@ -1023,7 +1040,9 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	if a.focusDetail {
 		switch {
-		case key.Matches(msg, keys.Focus), key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
+		case key.Matches(msg, keys.Quit):
+			return tea.Quit
+		case key.Matches(msg, keys.Focus), key.Matches(msg, keys.Back):
 			a.focusDetail = false
 			return nil
 		}
@@ -1032,9 +1051,23 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 
+	if a.pendingGoto {
+		a.pendingGoto = false
+		return a.onGotoKey(msg)
+	}
+	switch {
+	case key.Matches(msg, keys.Goto):
+		a.pendingGoto = true
+		return nil
+	case key.Matches(msg, keys.JumpBack):
+		return a.jumpBack()
+	case key.Matches(msg, keys.JumpFwd):
+		return a.jumpForward()
+	}
+
 	if a.view == viewItem && a.item != nil {
 		if cmd, handled := a.itemOverride(msg); handled {
-			return cmd
+			return tea.Batch(cmd, a.loadItemPreview())
 		}
 	}
 	if a.view == viewDash {
@@ -1046,13 +1079,6 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	// Global keys.
 	switch {
 	case key.Matches(msg, keys.Quit):
-		if l := a.activeList(); l != nil && len(l.selected) > 0 {
-			l.clearSelection()
-			return nil
-		}
-		if a.view == viewItem {
-			return a.closeItem() // q walks out of the drill-down first
-		}
 		return tea.Quit
 	case key.Matches(msg, keys.Help):
 		a.popup = helpPopup{}
@@ -1066,13 +1092,13 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.AutoRefresh):
 		return a.toggleAutoRefresh()
 	case key.Matches(msg, keys.Dashboard):
-		return a.switchView(viewDash)
+		return a.jumpView(viewDash)
 	case key.Matches(msg, keys.Sprint):
-		return a.switchView(viewSprint)
+		return a.jumpView(viewSprint)
 	case key.Matches(msg, keys.Board):
-		return a.switchView(viewBoard)
+		return a.jumpView(viewBoard)
 	case key.Matches(msg, keys.Backlog):
-		return a.switchView(viewBacklog)
+		return a.jumpView(viewBacklog)
 	case key.Matches(msg, keys.PrevSprint):
 		return a.shiftSprint(-1)
 	case key.Matches(msg, keys.NextSprint):
@@ -1109,7 +1135,7 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.createBug()
 	}
 	if a.view == viewItem {
-		return a.onItemKey(msg)
+		return tea.Batch(a.onItemKey(msg), a.loadItemPreview())
 	}
 	if key.Matches(msg, keys.Details) {
 		return a.openItem(a.currentItem())
@@ -1408,9 +1434,9 @@ func (a *App) runCommand(c string) tea.Cmd {
 	case "board", "b":
 		return a.pickBoard()
 	case "backlog":
-		return a.switchView(viewBacklog)
+		return a.jumpView(viewBacklog)
 	case "dash", "dashboard", "d":
-		return a.switchView(viewDash)
+		return a.jumpView(viewDash)
 	case "refresh", "r":
 		return a.reloadAll()
 	case "auto":
@@ -1431,11 +1457,68 @@ func (a *App) runCommand(c string) tea.Cmd {
 			return a.setFlash("auto: give a number of seconds (5 or more), on, or off", true)
 		}
 		return a.setAutoRefresh(sec)
+	case "attention", "att":
+		return a.toggleAttention()
+	case "stale":
+		if arg == "" {
+			if d := a.cfg.Stale(); d > 0 {
+				return a.setFlash(fmt.Sprintf("stale after %d days without a change", d), false)
+			}
+			return a.setFlash("stale flag off", false)
+		}
+		days, err := strconv.Atoi(arg)
+		if arg == "off" {
+			days, err = 0, nil
+		}
+		if err != nil || days < 0 {
+			return a.setFlash("stale: give a number of days, or off", true)
+		}
+		return a.setStale(days)
 	case "help", "h":
 		a.popup = helpPopup{}
 		return nil
 	}
 	return a.setFlash("unknown command: "+word, true)
+}
+
+// toggleAttention narrows the Sprint tree, Backlog and Board to items
+// with a health signal. It applies to all three at once, so switching view
+// keeps the same question answered.
+func (a *App) toggleAttention() tea.Cmd {
+	on := !a.sprint.attention
+	a.sprint.attention, a.backlog.attention, a.board.attention = on, on, on
+	a.rehealth()
+	if on {
+		return a.setFlash("showing only items that need attention", false)
+	}
+	return a.setFlash("showing all items", false)
+}
+
+// setStale changes the staleness threshold and writes it to the config.
+func (a *App) setStale(days int) tea.Cmd {
+	a.cfg.StaleDays = &days
+	a.health.staleAfter = a.cfg.StaleAfter()
+	a.persist()
+	a.rehealth()
+	if days == 0 {
+		return a.setFlash("stale flag off", false)
+	}
+	return a.setFlash(fmt.Sprintf("stale after %d days without a change", days), false)
+}
+
+// rehealth recomputes every view's cached health signals.
+func (a *App) rehealth() {
+	for _, l := range []*list{a.sprint, a.backlog} {
+		if l.all != nil {
+			l.rebuild()
+		}
+	}
+	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	a.refreshDashboard()
+	if a.item != nil {
+		a.item.buildColumns()
+	}
+	a.refreshDetail()
 }
 
 func (a *App) switchView(v viewID) tea.Cmd {
@@ -1647,10 +1730,8 @@ func (a *App) clearSelection() {
 // data (myItems and the last ChildrenOf fetch for "my PBIs").
 func (a *App) lookup(id int) *model.WorkItem {
 	for _, l := range []*list{a.sprint, a.backlog} {
-		if l.tree != nil {
-			if n, ok := l.tree.Get(id); ok {
-				return n.Item
-			}
+		if it, ok := l.get(id); ok {
+			return it
 		}
 	}
 	for _, it := range a.myItems {
@@ -1783,7 +1864,7 @@ func (a *App) refreshDetail() {
 	}
 	a.detail.Width = w
 	a.detail.Height = height
-	a.detail.SetContent(renderDetail(it, parent, children, comments, w, a.ctx.Backlog))
+	a.detail.SetContent(renderDetail(it, parent, children, comments, w, a.ctx.Backlog, a.health))
 	a.detail.GotoTop()
 }
 
@@ -1860,6 +1941,7 @@ func (a *App) yank() tea.Cmd {
 func (a *App) showItem(id int) tea.Cmd {
 	if it := a.lookup(id); it != nil {
 		if l := a.activeList(); l != nil {
+			a.pushJump()
 			l.jumpTo(id)
 			a.refreshDetail()
 			return nil
@@ -1870,7 +1952,7 @@ func (a *App) showItem(id int) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, nil, 70, a.ctx.Backlog), "\n")}}
+		return popupMsg{&report{title: fmt.Sprintf("#%d", id), lines: strings.Split(renderDetail(it, nil, nil, nil, 70, a.ctx.Backlog, a.health), "\n")}}
 	}
 }
 
@@ -1891,6 +1973,7 @@ func (a *App) openItem(it *model.WorkItem) tea.Cmd {
 	if it == nil {
 		return nil
 	}
+	a.pushJump()
 	if a.view != viewItem || a.item == nil {
 		a.itemReturn = a.view
 		a.itemStack, a.itemPanes = nil, nil
@@ -1904,7 +1987,13 @@ func (a *App) openItem(it *model.WorkItem) tea.Cmd {
 }
 
 func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
-	v := newItemView(it, a.ctx.Backlog)
+	v := newItemView(it, a.ctx.Backlog, a.health)
+	v.kanban = a.cfg.ItemKanban
+	v.src = itemSource{
+		lookup:     a.lookup,
+		childrenOf: a.childItems,
+		commentsOf: func(id int) []model.Comment { return a.comments[id] },
+	}
 	v.parent = a.lookup(it.ParentID)
 	v.focusKan = len(a.childItems(it.ID)) > 0
 	v.setChildren(a.childItems(it.ID), nil)
@@ -2074,6 +2163,7 @@ func dominantType(items []*model.WorkItem) string {
 
 // closeItem walks one step back out of the drill-down.
 func (a *App) closeItem() tea.Cmd {
+	a.pushJump()
 	if len(a.itemStack) > 1 {
 		a.itemStack = a.itemStack[:len(a.itemStack)-1]
 		cmd := a.showItemView(a.itemStack[len(a.itemStack)-1])
@@ -2152,6 +2242,12 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, keys.Comments):
 		v.showComments = !v.showComments
 		return nil, true
+	case key.Matches(msg, keys.ChildLayout):
+		v.kanban = !v.kanban
+		v.clamp()
+		a.cfg.ItemKanban = v.kanban
+		a.persist()
+		return nil, true
 	case key.Matches(msg, keys.Related):
 		// A jump straight to Related, and back out to the description.
 		if v.focusRel {
@@ -2196,6 +2292,12 @@ func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 		case key.Matches(msg, keys.Bottom):
 			v.moveRelated(1 << 20)
 			return nil
+		case key.Matches(msg, keys.PreviewDown):
+			v.preview.HalfViewDown()
+			return nil
+		case key.Matches(msg, keys.PreviewUp):
+			v.preview.HalfViewUp()
+			return nil
 		}
 		return a.onActionKey(msg)
 	}
@@ -2232,16 +2334,32 @@ func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.Right):
 		v.move(1, 0)
 	case key.Matches(msg, keys.Top):
-		v.row = 0
-		v.clamp()
+		// The top of the column on the kanban, the first child in the list.
+		v.move(0, -1<<20)
 	case key.Matches(msg, keys.Bottom):
 		v.move(0, 1<<20)
+	case key.Matches(msg, keys.PreviewDown):
+		v.preview.HalfViewDown()
+	case key.Matches(msg, keys.PreviewUp):
+		v.preview.HalfViewUp()
 	case key.Matches(msg, keys.ColLeft):
 		return a.moveChildState(-1)
 	case key.Matches(msg, keys.ColRight):
 		return a.moveChildState(1)
 	default:
 		return a.onActionKey(msg)
+	}
+	return nil
+}
+
+// loadItemPreview fetches the discussion of the item the drill-down is
+// previewing, so it can show under the preview's description.
+func (a *App) loadItemPreview() tea.Cmd {
+	if a.view != viewItem || a.item == nil {
+		return nil
+	}
+	if it := a.item.previewed(); it != nil {
+		return a.loadComments(it, false)
 	}
 	return nil
 }
@@ -2389,7 +2507,7 @@ func (a *App) renderHeader() string {
 		focus := strings.ToLower(narrativeTitle(a.item.item, narrativeSections(a.item.item)))
 		switch {
 		case a.item.focusKan:
-			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
+			focus = fmt.Sprintf("children %d/%d", a.item.childIndex()+1, len(a.item.children))
 		case a.item.focusRel:
 			focus = "related"
 			if n := len(a.item.related()); n > 0 {

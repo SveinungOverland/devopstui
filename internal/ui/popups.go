@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
 // popup is a modal layer that receives keys before the active view.
@@ -342,16 +344,55 @@ func (helpPopup) View(w, h int) string {
 		rowW += cw
 	}
 	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
-	body := sTitle.Render("Keys") + "\n\n" + strings.Join(rows, "\n\n") + "\n\n" + sMuted.Render("any key to close")
+	body := sTitle.Render("Keys") + "\n\n" + strings.Join(rows, "\n\n") + "\n\n" + flagLegend(avail) + "\n\n" + sMuted.Render("any key to close")
 	return sPopup.Render(body)
+}
+
+// flagLegend explains the health glyphs, packed into as few lines as fit
+// in w. No line may be wider than w, or it stretches the popup past the
+// screen on a narrow terminal; what doesn't fit is truncated.
+func flagLegend(w int) string {
+	var entries []string
+	for _, s := range model.AllSignals() {
+		e := signalStyle(s).Render(signalGlyphs[s]) + " " + s.Name() + sMuted.Render(" – "+signalHelp[s])
+		entries = append(entries, trunc(e, w))
+	}
+	lines := []string{sTitle.Render("Flags")}
+	for _, h := range []string{":attention shows only flagged items", ":stale <days> sets the threshold"} {
+		entries = append(entries, trunc(sMuted.Render(h), w))
+	}
+	line := ""
+	for _, e := range entries {
+		switch {
+		case line == "":
+			line = e
+		case lipgloss.Width(line)+3+lipgloss.Width(e) <= w:
+			line += "   " + e
+		default:
+			lines = append(lines, line)
+			line = e
+		}
+	}
+	return strings.Join(append(lines, line), "\n")
+}
+
+var signalHelp = map[model.Signal]string{
+	model.SignalOpenTasks:    "done, but tasks still open",
+	model.SignalReadyToClose: "every task done, item still open",
+	model.SignalStale:        "active, unchanged for a while; amber at 2×",
+	model.SignalUnassigned:   "active, but nobody is assigned",
+	model.SignalOrphan:       "PBI without a parent Feature",
 }
 
 // helpWhere marks the bindings that share a key with another, so the ?
 // overlay says which view each one belongs to. c comments in the details
-// view and hides done items everywhere else.
+// view and hides done items everywhere else; f switches the details
+// view's children layout and flattens the Sprint and Backlog trees.
 var helpWhere = map[string]string{
-	keys.Comment.Help().Desc: "details",
-	keys.Closed.Help().Desc:  "elsewhere",
+	keys.Comment.Help().Desc:     "details",
+	keys.Closed.Help().Desc:      "elsewhere",
+	keys.Flat.Help().Desc:        "lists",
+	keys.ChildLayout.Help().Desc: "details",
 }
 
 func padCol(s string) string { return lipgloss.NewStyle().MarginRight(3).Render(s) }
@@ -388,7 +429,7 @@ type cmdbar struct {
 func newCmdbar() cmdbar {
 	in := textinput.New()
 	in.Prompt = ":"
-	in.SetSuggestions([]string{"sprint", "team", "filter", "project", "board", "backlog", "dash", "refresh", "auto", "quit"})
+	in.SetSuggestions([]string{"sprint", "team", "filter", "project", "board", "backlog", "dash", "refresh", "auto", "attention", "stale", "quit"})
 	in.ShowSuggestions = true
 	return cmdbar{input: in}
 }

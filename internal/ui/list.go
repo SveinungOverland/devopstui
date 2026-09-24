@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
@@ -46,12 +47,25 @@ type list struct {
 	progressItems func() []*model.WorkItem
 	progress      map[int]progress // parent id → task progress
 	parents       map[int]int      // item id → parent id, kept when flattening
+	// originals maps an id to the loaded item. Flat and filtered rows hold
+	// copies with ParentID cleared so the tree renders flat; anything that
+	// leaves the list (details, drill-down, actions) must get the original,
+	// or it sees an item with no parent.
+	originals map[int]*model.WorkItem
+
+	health *health
+	// flags holds the health of every flagged item, computed once per
+	// rebuild so rendering and typing in the filter don't redo it.
+	flags map[int]model.Health
+	// attention shows only flagged items (and, dimmed, their parents).
+	attention bool
 }
 
 // progress summarises the task-level children of an item.
 type progress struct {
 	done, total int
 	remaining   float64
+	latest      time.Time // newest ChangedDate among the tasks
 }
 
 func (p progress) text() string {
@@ -94,11 +108,20 @@ func (l *list) rebuild() {
 	}
 	l.progress = computeProgress(src, l.taskLevel)
 	l.parents = make(map[int]int, len(l.all))
+	l.originals = make(map[int]*model.WorkItem, len(l.all)+len(l.external))
+	for _, it := range l.external {
+		l.originals[it.ID] = it
+	}
 	for _, it := range l.all {
 		l.parents[it.ID] = it.ParentID
+		l.originals[it.ID] = it
 	}
+	l.flags = l.health.assessAll(l.all, l.progress)
 	if l.include != nil {
 		items, ext = applyTeamFilter(items, ext, l.include)
+	}
+	if l.attention {
+		items, ext = applyTeamFilter(items, ext, func(w *model.WorkItem) bool { return l.flags[w.ID].Signals != 0 })
 	}
 	q := strings.ToLower(l.filter.Value())
 	if !l.showDone || q != "" {
@@ -177,6 +200,9 @@ func computeProgress(items []*model.WorkItem, taskLevel func(*model.WorkItem) bo
 		}
 		p := out[it.ParentID]
 		p.total++
+		if it.ChangedDate.After(p.latest) {
+			p.latest = it.ChangedDate
+		}
 		if isDone(it.State) {
 			p.done++
 		} else {
@@ -213,20 +239,34 @@ func dropTaskLevel(items []*model.WorkItem, taskLevel func(*model.WorkItem) bool
 	return out
 }
 
-func isDone(state string) bool {
-	switch state {
-	case "Done", "Closed", "Removed", "Resolved", "Completed":
-		return true
-	}
-	return false
-}
+func isDone(state string) bool { return model.IsDone(state) }
 
 // current returns the highlighted item, nil when the list is empty.
 func (l *list) current() *model.WorkItem {
 	if l.cursor < 0 || l.cursor >= len(l.rows) {
 		return nil
 	}
-	return l.rows[l.cursor].Item
+	return l.original(l.rows[l.cursor].Item)
+}
+
+// original returns the loaded item behind a row's (possibly flattened) copy.
+func (l *list) original(it *model.WorkItem) *model.WorkItem {
+	if o, ok := l.originals[it.ID]; ok {
+		return o
+	}
+	return it
+}
+
+// get returns the loaded item for id when it is in the list's tree.
+func (l *list) get(id int) (*model.WorkItem, bool) {
+	if l.tree == nil {
+		return nil, false
+	}
+	n, ok := l.tree.Get(id)
+	if !ok {
+		return nil, false
+	}
+	return l.original(n.Item), true
 }
 
 func (l *list) currentNode() *model.Node {
@@ -265,8 +305,8 @@ func (l *list) targets() []int {
 func (l *list) targetItems() []*model.WorkItem {
 	var out []*model.WorkItem
 	for _, id := range l.targets() {
-		if n, ok := l.tree.Get(id); ok {
-			out = append(out, n.Item)
+		if it, ok := l.get(id); ok {
+			out = append(out, it)
 		}
 	}
 	return out
@@ -422,8 +462,11 @@ const (
 func (l *list) view(width, height int) string {
 	if len(l.rows) == 0 {
 		msg := l.empty
-		if l.filter.Value() != "" {
+		switch {
+		case l.filter.Value() != "":
 			msg = "no items match the filter"
+		case l.attention:
+			msg = "nothing needs attention"
 		}
 		return sMuted.Render(msg)
 	}
@@ -433,7 +476,7 @@ func (l *list) view(width, height int) string {
 	if l.cursor >= l.offset+height {
 		l.offset = l.cursor - height + 1
 	}
-	// Column widths: marker(2) indent tag(5) id(6) title(*) state(12) who(3) effort(4)
+	// Column widths: marker(2) flag(2) indent tag(5) id(6) title(*) state(12) who(3) effort(4)
 	stateW, whoW, effW := 12, 3, 4
 	iterW := 0
 	if l.showIter {
@@ -480,7 +523,7 @@ func (l *list) view(width, height int) string {
 		}
 		tag := st(kindStyle(it.Kind)).Render(pad(it.Kind.Tag(), 4))
 		id := muted.Render(fmt.Sprintf("%5d", it.ID))
-		titleW := width - 2 - len(indent) - 2 - 5 - 6 - stateW - whoW - effW - iterW - 4
+		titleW := width - 2 - len(indent) - 2 - 5 - 6 - 2 - stateW - whoW - effW - iterW - 4
 		if prioW > 0 {
 			titleW -= prioW + changedW + 2
 		}
@@ -520,7 +563,13 @@ func (l *list) view(width, height int) string {
 			iter = plain.Render(" ") + muted.Render(pad(trunc(lastSeg(it.IterationPath), iterW-1), iterW-1))
 		}
 		sp := plain.Render(" ")
-		line := marker + plain.Render(indent+arrow) + tag + sp + id + sp + title + sp + state + sp + who + sp + eff + iter
+		flag := l.health.glyph(l.flags[it.ID], st)
+		if n.External {
+			flag = plain.Render(" ") // context, not part of this view
+		}
+		// The flag sits at a fixed column, before the indent, so flags
+		// line up at every depth of the tree.
+		line := marker + flag + sp + plain.Render(indent+arrow) + tag + sp + id + sp + title + sp + state + sp + who + sp + eff + iter
 		if prioW > 0 {
 			prio := ""
 			if it.Priority > 0 {
@@ -555,6 +604,9 @@ func (l *list) summary() string {
 	}
 	if q := l.filter.Value(); q != "" {
 		s += sMuted.Render(" · /" + q)
+	}
+	if l.attention {
+		s += sSelected.Render(" · attention")
 	}
 	return s
 }

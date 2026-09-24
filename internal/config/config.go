@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,9 +25,15 @@ type Config struct {
 	ConfirmWrites *bool `yaml:"confirm_writes,omitempty"`
 	// RefreshSeconds enables auto refresh when > 0.
 	RefreshSeconds int `yaml:"refresh_seconds,omitempty"`
+	// StaleDays is how long an active item may go unchanged before it is
+	// flagged as stale. Unset means DefaultStaleDays; 0 turns it off.
+	StaleDays *int `yaml:"stale_days,omitempty"`
 	// HideDone hides Done/Closed/Removed/Resolved/Completed items in the
 	// Sprint view. Default false: they show, and `c` toggles them away.
 	HideDone bool `yaml:"hide_done,omitempty"`
+	// ItemKanban shows a drill-down's children as a kanban of their
+	// states instead of a list grouped by state; `f` toggles it.
+	ItemKanban bool `yaml:"item_kanban,omitempty"`
 	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
 	DashShowDone bool `yaml:"dash_show_done,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
@@ -54,6 +61,22 @@ func (c Config) EditorCommand() string {
 	default:
 		return os.Getenv("EDITOR")
 	}
+}
+
+// DefaultStaleDays applies when stale_days is not set.
+const DefaultStaleDays = 5
+
+// Stale returns the staleness threshold in days, 0 when off.
+func (c Config) Stale() int {
+	if c.StaleDays == nil {
+		return DefaultStaleDays
+	}
+	return max(*c.StaleDays, 0)
+}
+
+// StaleAfter is Stale as a duration.
+func (c Config) StaleAfter() time.Duration {
+	return time.Duration(c.Stale()) * 24 * time.Hour
 }
 
 // Confirm returns whether single-item writes need confirmation.

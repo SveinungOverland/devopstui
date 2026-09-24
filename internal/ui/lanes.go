@@ -29,6 +29,8 @@ type lanes struct {
 	offsetCol      int // first visible column, horizontal scroll
 
 	selected map[int]bool
+	health   *health
+	flags    map[int]model.Health
 
 	// sprint is the iteration path the Dashboard is scoped to, "" when
 	// none is selected. Children planned for another sprint still show
@@ -79,12 +81,16 @@ func (ln *lanes) setLanes(parents []*model.WorkItem, childrenOf map[int][]*model
 	ln.states = order
 
 	ln.ls = nil
+	ln.flags = map[int]model.Health{}
 	for _, p := range parents {
 		children := relevant[p.ID]
 		if len(children) == 0 {
 			continue
 		}
 		cols := make([][]*model.WorkItem, len(order))
+		for id, f := range ln.health.assessAll(children, nil) {
+			ln.flags[id] = f
+		}
 		for _, c := range children {
 			i := index[c.State]
 			cols[i] = append(cols[i], c)
@@ -497,6 +503,9 @@ func (ln *lanes) renderCard(it *model.WorkItem, w int, cur bool) string {
 	idS := muted.Render(fmt.Sprintf("%d", it.ID))
 	who := muted.Render(initials(it.AssignedTo))
 	line := mark + tag + plain.Render(" ") + idS + plain.Render(" ")
+	if f, ok := ln.flags[it.ID]; ok {
+		line += ln.health.glyph(f, st) + plain.Render(" ")
+	}
 	titleW := w - lipgloss.Width(line) - lipgloss.Width(who) - 1
 	title := plain
 	if !ln.inSprint(it) {

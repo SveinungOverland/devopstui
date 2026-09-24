@@ -72,7 +72,7 @@ func NewFake() *Fake {
 			RemainingWork: remaining, AssignedToUnique: unique,
 			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
-			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
+			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id%24) * time.Hour), ChangedBy: "Alex Kim",
 			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id), Project: "Platform",
 		}
 		// Real Azure DevOps Bugs carry Repro Steps/Acceptance Criteria instead
@@ -129,6 +129,8 @@ func NewFake() *Fake {
 	// the Dashboard's lanes to dim. Unassigned, so it stays out of MyItems
 	// and the kanban's progress badges.
 	add(1029, 1003, "Task", "Localise the invite email", "To Do", "", next, 0, 0)
+	// A task that has sat In Progress for over a week, for the stale flag.
+	f.items[1018].ChangedDate = now.AddDate(0, 0, -8)
 	// A sub-team owns part of the area tree.
 	for _, id := range []int{1014, 1018, 1019, 1021, 1022} {
 		f.items[id].AreaPath = "Platform\\Green"

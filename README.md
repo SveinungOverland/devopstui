@@ -80,8 +80,10 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `filter_team`        |            | Show only this team's area paths in every view (`T` at runtime)      |
 | `confirm_writes`     | `false`    | Ask before single-item edits too (bulk and re-parent always ask)     |
 | `refresh_seconds`    | `0`        | Auto-reload interval, 0 = off (`R` toggles, `:auto 30` sets)         |
+| `stale_days`         | `5`        | Days an active item may go unchanged before it's flagged ◷, 0 = off  |
 | `hide_done`          | `false`    | Hide Done items in the Sprint view (`c` toggles)                     |
 | `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
+| `item_kanban`        | `false`    | Show a details view's children as a kanban, not a list (`f` toggles) |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
@@ -144,7 +146,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | Navigate          |                       | Views   |                     | Change  |                 | Move |                     |
 | ----------------- | --------------------- | ------- | ------------------- | ------- | --------------- | ---- | ------------------- |
 | `j` `k`           | down / up             | `1`     | dashboard           | `e`     | edit form       | `m`  | move to iteration…  |
-| `g` `G`           | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
+| `gg` `G`          | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
 | `l` `h`           | expand / collapse     | `3`     | board               | `d`     | description     | `B`  | move to backlog     |
 | `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
 | `tab`             | focus detail pane     | `[` `]` | prev / next sprint  | `a`     | assign          |      |                     |
@@ -159,6 +161,24 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `ctrl+a`          | select all            | `R`     | auto refresh on/off | `y`     | yank id         |      |                     |
 |                   |                       | `f`     | flat / tree         |         |                 |      |                     |
 | `esc`             | clear selection       | `c`     | hide done           | `?` `q` | help / quit     |      |                     |
+
+### Jumping around
+
+| Keys              |                                                     |
+| ----------------- | --------------------------------------------------- |
+| `ctrl+o` `ctrl+n` | jump back / forward                                 |
+| `gd` `gs`         | show the highlighted item in the dashboard / sprint |
+| `gb` `gB`         | show the highlighted item on the board / backlog    |
+| `gp`              | go to (open) the parent                             |
+| `esc`             | close one level of the item details view            |
+| `q`               | quit, from anywhere                                 |
+
+`ctrl+o` and `ctrl+n` work like vim's jump list. Switching tabs (`1`-`4`, `:backlog`,
+`:dash`), `:<id>`, opening an item (`D`/`enter`), leaving one with `esc`, and every `g`
+motion are recorded. `ctrl+o` goes back through them, and that includes going back into an
+item details view and its drill-down trail. `ctrl+n` goes forward again. It isn't `ctrl+i`
+as in vim, because terminals send `ctrl+i` as `tab`. `gp` only navigates; `p` sets an
+item's parent.
 
 Any change key acts on the **selection** when there is one, otherwise on the highlighted
 item. Bulk changes and re-parenting ask for confirmation. Moving a Feature or Epic offers
@@ -193,7 +213,12 @@ members, so you can assign to anyone regardless of which team owns the sprint.
 
 Press `D` on any item (or `enter` on a board card) to open it full screen: its metadata across
 the top, the rendered Markdown description on the left, and on the right its related items above
-a kanban of its children, one column per state.
+its children, listed under a heading per state.
+
+While the related items or the children have focus, the left side splits: the description
+shrinks to what it needs (up to 2/5 of the height) and a **preview** of the highlighted row
+takes the rest, with its fields, its own children, description and discussion. `ctrl+d` and
+`ctrl+u` scroll the preview without moving the cursor.
 
 ```
  Product Backlog Item #1013  Propagate trace id through queue workers
@@ -202,30 +227,37 @@ a kanban of its children, one column per state.
 ╭─────────────────────────────────────╮╭──────────────────────────────────────────╮
 │Description                          ││Related (3)                               │
 │  Propagate trace id through queue…  ││Related                                   │
-│                                     ││ BUG  1020   Spans lost when re… Approved │
-│  Acceptance criteria                ││Successors                                │
-│  ▪ trace id survives the queue      ││ PBI  1014   Trace dashboard i… Committed │
-│                                     ││Mentioned                                 │
-│                                     ││ TASK 1015   Add trace header t…    To Do │
-│                                     │╰──────────────────────────────────────────╯
-│                                     │╭──────────────────────────────────────────╮
+╰─────────────────────────────────────╯│ BUG  1020   Spans lost when re… Approved │
+╭─────────────────────────────────────╮│Successors                                │
+│Preview #1015                        ││ PBI  1014   Trace dashboard i… Committed │
+│Task  #1015                          │╰──────────────────────────────────────────╯
+│Add trace header to publisher        │╭──────────────────────────────────────────╮
 │                                     ││Children (3)                              │
-│                                     ││To Do 2         In Progress 0     Done 1  │
-│                                     ││──────────────  ──────────────  ────────  │
-│                                     ││▌TASK 1015 2h SØ                TASK 1016 │
-│                                     ││ Add trace hea…                  Read tr… │
+│State      To Do                     ││To Do 2                                   │
+│Assigned   Sveinung Øverland         ││▌TASK 1015   Add trace header to…   2h SØ │
+│Remaining  2h                        ││ TASK 1017   Load test with trac…   4h    │
+│Parent     PBI 1013 Propagate trace… ││Done 1                                    │
+│─────────────────────────────────    ││ TASK 1016   Read trace header i…      SØ │
 ╰─────────────────────────────────────╯╰──────────────────────────────────────────╯
 ```
 
+`f` switches the children between that list and a kanban with one column per state, and the
+choice is saved as `item_kanban`. In the kanban a state with no children only takes the width
+of its heading, leaving the room to the columns that have cards.
+
 | Key             |                                                                        |
 | --------------- | ---------------------------------------------------------------------- |
-| `tab`           | move focus: description, related items, kanban                         |
+| `tab`           | move focus: description, related items, children                       |
 | `x`             | jump to the related items, and back to the description                 |
-| `j` `k` `h` `l` | scroll the description, or move between rows, cards and columns        |
-| `H` `L`         | move the highlighted child to the neighbouring column (sets its state) |
+| `j` `k` `h` `l` | scroll the description, or move between rows and states                |
+| `ctrl+d` `ctrl+u` | scroll the preview of the highlighted related item or child          |
+| `f`             | show the children as a list grouped by state, or as a kanban           |
+| `H` `L`         | move the highlighted child to the previous or next state               |
 | `n`             | add a child; on a highlighted child it adds a sibling                  |
 | `D` `enter`     | drill into the highlighted related item or child                       |
-| `esc` `q`       | walk back out, one level at a time                                     |
+| `esc`           | walk back out, one level at a time                                     |
+| `ctrl+o`        | jump back, like `esc` but through the whole jump list                  |
+| `gp`            | open the item's parent                                                 |
 | `z`             | give the description the full width, hiding the right-hand side        |
 | `C`             | swap the left pane between the description and the discussion          |
 | `c`             | add a comment to the discussion                                        |
@@ -234,7 +266,7 @@ a kanban of its children, one column per state.
 Every action key works here too and applies to whatever has focus: the item itself while the
 description is focused, otherwise the highlighted related item or child. So `s` sets a child's state, `d` edits
 the item's description, `a` assigns, and so on. Children are fetched for the item you open, so
-the kanban is complete even in views that do not load tasks, such as the backlog.
+the list is complete even in views that do not load tasks, such as the backlog.
 
 `C` toggles the left pane to the item's Azure DevOps comments (oldest first) and back. `c` opens
 the same Markdown composer used for `d` — the built-in editor, or `$EDITOR` when configured — to
@@ -247,7 +279,7 @@ with no toggle needed.
 The **Related** panel lists the item's work item links (Related, Predecessors, Successors,
 Duplicates, Duplicate of) followed by every `#1234` mentioned in the description, repro steps,
 acceptance criteria or the discussion. Parent and child links are left out, since the header and
-the kanban already show them, and an item that is both linked and mentioned is listed once, under
+the children already show them, and an item that is both linked and mentioned is listed once, under
 its link. The panel is as tall as its rows, up to about 2/5 of the column, and grows while it has
 focus; with nothing related it is a single line and `tab` skips it. `j` `k` move the cursor, and
 `D` or `enter` drills into the highlighted item; `esc` walks back and puts you on the row you left
@@ -289,6 +321,34 @@ choice is saved as `filter_team` in the config.
   parent-resolution rules as `n`. Pressing it where the highlighted level doesn't match the
   team's bug behaviour, or where bugs are switched off entirely, is a no-op with a flash
   explaining why.
+
+## Flags: items that need attention
+
+Every view marks items that probably need a hand with a small glyph. There is no separate
+view for this. Each glyph is a distinct shape, so they read without colour too:
+
+| Glyph | Flag           | When                                                                          |
+| ----- | -------------- | ----------------------------------------------------------------------------- |
+| `✗`   | open tasks     | The item is Done but some of its tasks aren't                                 |
+| `✓`   | ready to close | Every task is Done but the item isn't                                         |
+| `◷`   | stale          | Active, and neither it nor any of its tasks has changed for `stale_days`      |
+| `?`   | unassigned     | Active, but nobody is assigned                                                |
+| `↑`   | orphan         | An open PBI with no parent Feature                                            |
+
+- The stale glyph fades in with age: it's grey at first and turns amber once the item has sat
+  for twice the threshold. Activity on any of a PBI's tasks counts as activity on the PBI.
+- An unassigned item in `New` is ordinary backlog and isn't flagged. The assignee check only
+  applies once work has started. Removed items are never flagged.
+- The open-tasks and ready-to-close flags need the tasks to be loaded, so they show in the
+  Sprint tree, on the Board and in the details, but not in the Backlog, which doesn't fetch
+  tasks.
+- A row or card has room for one glyph, the first in the table above. The details pane
+  (`Flags`) and the item view's header list every flag, and say how long a stale item has sat.
+- **`:attention`** (or `:att`) narrows the Sprint tree, Backlog and Board to flagged items.
+  Parents stay visible, dimmed. Run it again to show everything.
+- **`:stale 7`** sets the threshold in days and saves it as `stale_days`. `:stale off` turns
+  the flag off, and `:stale` on its own shows the current value.
+- The `?` help lists the glyphs too.
 
 ## Dashboard
 
@@ -334,7 +394,7 @@ header shows `↻60s` while it is on, and the interval is whatever `refresh_seco
 seconds by default. `:auto 30` sets a different interval. Reloads are skipped while a dialog
 is open or a write is in flight, so nothing shifts under you mid-edit.
 
-Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
+Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:attention`, `:stale [days|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
 
 ## Develop

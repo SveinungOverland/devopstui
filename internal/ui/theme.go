@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -98,17 +99,7 @@ func kindStyle(k model.Kind) lipgloss.Style {
 	}
 }
 
-// isActiveState reports whether state means "currently being worked on",
-// across the process templates' differing names for that stage (Scrum's
-// task-level "In Progress" vs. its requirement-level "Committed", etc).
-func isActiveState(state string) bool {
-	switch state {
-	case "In Progress", "Active", "Committed", "Doing":
-		return true
-	default:
-		return false
-	}
-}
+func isActiveState(state string) bool { return model.IsActive(state) }
 
 func stateStyle(state string) lipgloss.Style {
 	switch state {
@@ -122,4 +113,91 @@ func stateStyle(state string) lipgloss.Style {
 		}
 		return lipgloss.NewStyle().Foreground(cText)
 	}
+}
+
+// health is the App's staleness setting, shared by pointer with every view
+// so :stale reaches them all. A nil *health uses the default.
+type health struct {
+	staleAfter time.Duration
+}
+
+func (h *health) rules() model.HealthRules {
+	r := model.HealthRules{Now: time.Now(), StaleAfter: defaultStaleAfter}
+	if h != nil {
+		r.StaleAfter = h.staleAfter
+	}
+	return r
+}
+
+const defaultStaleAfter = 5 * 24 * time.Hour
+
+// assess is model.Assess with the task tally taken from a progress badge.
+func (h *health) assess(it *model.WorkItem, p progress) model.Health {
+	return model.Assess(it, model.TaskTally{Done: p.done, Total: p.total, Latest: p.latest}, h.rules())
+}
+
+// assessAll assesses every item, keeping only the flagged ones.
+func (h *health) assessAll(items []*model.WorkItem, prog map[int]progress) map[int]model.Health {
+	out := map[int]model.Health{}
+	for _, it := range items {
+		if hh := h.assess(it, prog[it.ID]); hh.Signals != 0 {
+			out[it.ID] = hh
+		}
+	}
+	return out
+}
+
+// signalGlyphs are one cell wide each and never the only cue: every one
+// is a distinct shape, so they read without colour too.
+var signalGlyphs = map[model.Signal]string{
+	model.SignalOpenTasks:    "✗",
+	model.SignalReadyToClose: "✓",
+	model.SignalStale:        "◷",
+	model.SignalUnassigned:   "?",
+	model.SignalOrphan:       "↑",
+}
+
+func signalStyle(s model.Signal) lipgloss.Style {
+	switch s {
+	case model.SignalOpenTasks:
+		return lipgloss.NewStyle().Foreground(cErr).Bold(true)
+	case model.SignalReadyToClose:
+		return lipgloss.NewStyle().Foreground(cOK).Bold(true)
+	case model.SignalUnassigned:
+		return lipgloss.NewStyle().Foreground(cSelect).Bold(true)
+	default:
+		return lipgloss.NewStyle().Foreground(cMuted)
+	}
+}
+
+// glyphStyle is signalStyle, except that staleness fades in: muted at
+// first, amber once the item has sat for twice the threshold.
+func (h *health) glyphStyle(s model.Signal, hh model.Health) lipgloss.Style {
+	if s == model.SignalStale {
+		if after := h.rules().StaleAfter; after > 0 && hh.Idle >= 2*after {
+			return lipgloss.NewStyle().Foreground(cSelect)
+		}
+	}
+	return signalStyle(s)
+}
+
+// glyph renders the item's top signal in one cell, or a space. st adds the
+// cursor background.
+func (h *health) glyph(hh model.Health, st func(lipgloss.Style) lipgloss.Style) string {
+	top := hh.Signals.Top()
+	if top == 0 {
+		return st(lipgloss.NewStyle()).Render(" ")
+	}
+	return st(h.glyphStyle(top, hh)).Render(signalGlyphs[top])
+}
+
+// flags renders every signal as glyph plus description, for the places
+// with room for all of them.
+func (h *health) flags(hh model.Health) []string {
+	var out []string
+	desc := hh.Describe()
+	for i, s := range hh.Signals.List() {
+		out = append(out, h.glyphStyle(s, hh).Render(signalGlyphs[s])+" "+desc[i])
+	}
+	return out
 }
