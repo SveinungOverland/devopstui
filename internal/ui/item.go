@@ -23,7 +23,8 @@ type itemView struct {
 	col, row int
 
 	desc     viewport.Model
-	focusKan bool // kanban has focus
+	focusKan bool // the children pane has focus
+	kanban   bool // children as state columns instead of a grouped list
 	focusRel bool // Related has focus; with neither, the description
 	descOnly bool // z: hide the kanban and use the full width
 	loading  bool
@@ -43,6 +44,13 @@ type itemView struct {
 	linksLoading bool
 	relRow       int
 
+	// preview shows the highlighted child or related item in the left
+	// pane while one of the lists has focus. src looks up what it needs
+	// from the app's caches; any of its funcs may be nil.
+	preview  viewport.Model
+	lastPrev previewKey
+	src      itemSource
+
 	cfg      model.BacklogConfig
 	health   *health
 	flags    map[int]model.Health // children's, from buildColumns
@@ -50,8 +58,25 @@ type itemView struct {
 	lastW    int
 }
 
+// itemSource is how the drill-down reads what the app already knows about
+// items other than its own, for the preview.
+type itemSource struct {
+	lookup     func(id int) *model.WorkItem
+	childrenOf func(id int) []*model.WorkItem
+	commentsOf func(id int) []model.Comment
+}
+
+// previewKey is what the preview pane was last rendered from; any change
+// re-renders it, and a different item also scrolls it back to the top.
+type previewKey struct {
+	it             *model.WorkItem
+	kids, comments int
+	width          int
+}
+
 func newItemView(it *model.WorkItem, cfg model.BacklogConfig, h *health) *itemView {
-	return &itemView{item: it, cfg: cfg, health: h, desc: viewport.New(40, 10), loading: true, commentsLoading: true, linksLoading: true}
+	return &itemView{item: it, cfg: cfg, health: h, desc: viewport.New(40, 10), preview: viewport.New(40, 10),
+		loading: true, commentsLoading: true, linksLoading: true}
 }
 
 // itemPane is the part of a drill-down level that esc restores when it
@@ -220,7 +245,27 @@ func (v *itemView) clamp() {
 		return
 	}
 	v.col = min(max(v.col, 0), len(v.cols)-1)
+	if !v.kanban && len(v.cols[v.col]) == 0 {
+		// The list has no row for an empty state, so the cursor moves to
+		// the nearest state that has one, forwards first.
+		if c := v.nonEmpty(v.col, 1); c >= 0 {
+			v.col = c
+		} else if c := v.nonEmpty(v.col, -1); c >= 0 {
+			v.col = c
+		}
+	}
 	v.row = min(max(v.row, 0), max(len(v.cols[v.col])-1, 0))
+}
+
+// nonEmpty is the first column from c, stepping by d, that has cards; -1
+// when there is none.
+func (v *itemView) nonEmpty(c, d int) int {
+	for ; c >= 0 && c < len(v.cols); c += d {
+		if len(v.cols[c]) > 0 {
+			return c
+		}
+	}
+	return -1
 }
 
 func (v *itemView) jumpTo(id int) {
@@ -259,6 +304,10 @@ func (v *itemView) current() *model.WorkItem {
 }
 
 func (v *itemView) move(dc, dr int) {
+	if !v.kanban {
+		v.moveList(dc, dr)
+		return
+	}
 	if dc != 0 && len(v.cols) > 0 {
 		// Moving between columns keeps roughly the same row, but never
 		// lands past the end of a shorter column.
@@ -266,6 +315,61 @@ func (v *itemView) move(dc, dr int) {
 	}
 	v.row += dr
 	v.clamp()
+}
+
+// moveList is move for the grouped list, where the states run top to
+// bottom: j and k walk every row in order, across the state headings, and
+// h and l jump to the first row of the previous or next state.
+func (v *itemView) moveList(dc, dr int) {
+	if len(v.cols) == 0 {
+		return
+	}
+	v.clamp()
+	if dc != 0 {
+		if c := v.nonEmpty(v.col+dc, dc); c >= 0 {
+			v.col, v.row = c, 0
+		}
+	}
+	for ; dr > 0; dr-- {
+		if v.row+1 < len(v.cols[v.col]) {
+			v.row++
+		} else if c := v.nonEmpty(v.col+1, 1); c >= 0 {
+			v.col, v.row = c, 0
+		} else {
+			break
+		}
+	}
+	for ; dr < 0; dr++ {
+		if v.row > 0 {
+			v.row--
+		} else if c := v.nonEmpty(v.col-1, -1); c >= 0 {
+			v.col, v.row = c, len(v.cols[c])-1
+		} else {
+			break
+		}
+	}
+}
+
+// childIndex is the highlighted child's position in reading order: down
+// the list, or column by column across the kanban.
+func (v *itemView) childIndex() int {
+	n := v.row
+	for c := 0; c < v.col && c < len(v.cols); c++ {
+		n += len(v.cols[c])
+	}
+	return n
+}
+
+// previewed is the item the left pane previews: the highlighted row of
+// whichever list has focus, nil when the description has it.
+func (v *itemView) previewed() *model.WorkItem {
+	switch {
+	case v.focusRel:
+		return v.currentRelated()
+	case v.focusKan:
+		return v.currentChild()
+	}
+	return nil
 }
 
 // adjacentState returns the state of the column dc away, if any.
@@ -311,15 +415,19 @@ func (v *itemView) view(w, h int, spin string) string {
 	case w >= 110:
 		// The kanban wants about 22 cells per state column; give it that
 		// when the screen allows, never less than 9/20 of the width, and
-		// always leave the description at least 80 to read in.
-		rightW = max(w*9/20, min(len(v.states)*22+4, w-80))
+		// always leave the description at least 80 to read in. The list
+		// fits its rows to any width, so it keeps to the 9/20.
+		rightW = w * 9 / 20
+		if v.kanban {
+			rightW = max(rightW, min(len(v.states)*22+4, w-80))
+		}
 		descW = w - rightW
 	default:
 		stacked = true
 	}
 
 	if v.descOnly {
-		return head + "\n" + v.renderLeft(descW, paneH)
+		return head + "\n" + v.renderLeft(descW, paneH, false)
 	}
 	if stacked {
 		dh := max(paneH*3/5, 5)
@@ -328,10 +436,10 @@ func (v *itemView) view(w, h int, spin string) string {
 			// the room more than the description does.
 			dh = max(paneH/3, 4)
 		}
-		return head + "\n" + v.renderLeft(w, dh) + "\n" + v.renderRight(w, paneH-dh, spin)
+		return head + "\n" + v.renderLeft(w, dh, true) + "\n" + v.renderRight(w, paneH-dh, spin)
 	}
 	return head + "\n" + lipgloss.JoinHorizontal(lipgloss.Top,
-		v.renderLeft(descW, paneH), v.renderRight(rightW, paneH, spin))
+		v.renderLeft(descW, paneH, false), v.renderRight(rightW, paneH, spin))
 }
 
 // renderRight stacks the Related panel over the kanban. Related takes the
@@ -352,15 +460,84 @@ func (v *itemView) renderRight(w, h int, spin string) string {
 	if relH < 5 {
 		relH = 3 // a single row out of context reads worse than just the count
 	}
-	return v.renderRelated(w, relH) + "\n" + v.renderKanban(w, h-relH, spin)
+	return v.renderRelated(w, relH) + "\n" + v.renderChildren(w, h-relH, spin)
 }
 
-// renderLeft is the left-hand pane: the description or (C) the discussion.
-func (v *itemView) renderLeft(w, h int) string {
-	if v.showComments {
-		return v.renderDiscussion(w, h)
+// renderLeft is the left-hand pane: the description or (C) the discussion,
+// and under it, while a list has focus, a preview of its highlighted row.
+// The description then shrinks to what it needs, up to 2/5 of the pane,
+// so the item drilled into stays in view while its neighbours are read.
+func (v *itemView) renderLeft(w, h int, stacked bool) string {
+	it := v.previewed()
+	if it == nil || v.descOnly {
+		return v.renderNarrativePane(w, h)
 	}
-	return v.renderDesc(w, h)
+	if stacked {
+		// Stacked, the left pane is only a third of the screen: too
+		// little to split, so the preview has it alone.
+		return v.renderPreview(it, w, h)
+	}
+	v.syncLeft(max(w-4, 20))
+	top := min(max(v.desc.TotalLineCount()+3, 5), max(h*2/5, 5))
+	if h-top < 8 {
+		return v.renderPreview(it, w, h)
+	}
+	return v.renderNarrativePane(w, top) + "\n" + v.renderPreview(it, w, h-top)
+}
+
+// syncLeft puts the description or the discussion into the viewport,
+// re-rendering only when the text or the width has changed.
+func (v *itemView) syncLeft(inner int) {
+	if v.showComments {
+		switch {
+		case v.commentsLoading:
+			v.desc.SetContent(sMuted.Render("loading discussion…"))
+			v.lastDesc, v.lastW = "", inner
+		case len(v.comments) == 0:
+			v.desc.SetContent(sMuted.Render("no comments yet"))
+			v.lastDesc, v.lastW = "", inner
+		default:
+			if body := formatComments(v.comments); body != v.lastDesc || inner != v.lastW {
+				v.lastDesc, v.lastW = body, inner
+				v.desc.SetContent(markdown.Render(body, inner))
+				v.desc.GotoTop()
+			}
+		}
+		return
+	}
+	sections := narrativeSections(v.item)
+	if len(sections) == 0 {
+		noun := "description"
+		if v.item.Kind == model.KindBug {
+			noun = "repro steps"
+		}
+		v.desc.SetContent(sMuted.Render("no " + noun + " — press " + sKey.Render("d") + sMuted.Render(" to write one")))
+		v.lastDesc, v.lastW = "", inner
+	} else if key := narrativeKey(sections); key != v.lastDesc || inner != v.lastW {
+		v.lastDesc, v.lastW = key, inner
+		v.desc.SetContent(renderNarrative(sections, inner))
+		v.desc.GotoTop()
+	}
+}
+
+// renderNarrativePane frames the description or the discussion.
+func (v *itemView) renderNarrativePane(w, h int) string {
+	style := sPanel
+	if v.focusDesc() {
+		style = sPanelFocus
+	}
+	inner := max(w-4, 20)
+	v.syncLeft(inner)
+	v.desc.Width = inner
+	v.desc.Height = max(h-3, 1)
+	title := sMuted.Render(narrativeTitle(v.item, narrativeSections(v.item)))
+	if v.showComments {
+		title = sMuted.Render(fmt.Sprintf("Discussion (%d)", len(v.comments)))
+	}
+	if v.desc.TotalLineCount() > v.desc.Height {
+		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
+	}
+	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
 }
 
 func (v *itemView) renderHead(w int) string {
@@ -409,61 +586,41 @@ func (v *itemView) renderHead(w int) string {
 	return head
 }
 
-func (v *itemView) renderDesc(w, h int) string {
-	style := sPanel
-	if v.focusDesc() {
-		style = sPanelFocus
-	}
+// renderPreview is the highlighted child or related item as the other
+// views' detail pane shows it: its fields, its own children, description
+// and whatever of its discussion has loaded. ctrl+d and ctrl+u scroll it.
+func (v *itemView) renderPreview(it *model.WorkItem, w, h int) string {
 	inner := max(w-4, 20)
-	sections := narrativeSections(v.item)
-	if len(sections) == 0 {
-		noun := "description"
-		if v.item.Kind == model.KindBug {
-			noun = "repro steps"
-		}
-		v.desc.SetContent(sMuted.Render("no " + noun + " — press " + sKey.Render("d") + sMuted.Render(" to write one")))
-		v.lastDesc, v.lastW = "", inner
-	} else if key := narrativeKey(sections); key != v.lastDesc || inner != v.lastW {
-		v.lastDesc, v.lastW = key, inner
-		v.desc.SetContent(renderNarrative(sections, inner))
-		v.desc.GotoTop()
+	var parent *model.WorkItem
+	var kids []*model.WorkItem
+	var comments []model.Comment
+	if it.ParentID == v.item.ID {
+		parent = v.item
+	} else if v.src.lookup != nil {
+		parent = v.src.lookup(it.ParentID)
 	}
-	v.desc.Width = inner
-	v.desc.Height = max(h-3, 1)
-	title := sMuted.Render(narrativeTitle(v.item, sections))
-	if v.desc.TotalLineCount() > v.desc.Height {
-		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
+	if v.src.childrenOf != nil {
+		kids = v.src.childrenOf(it.ID)
 	}
-	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
-}
-
-func (v *itemView) renderDiscussion(w, h int) string {
-	style := sPanel
-	if v.focusDesc() {
-		style = sPanelFocus
+	if v.src.commentsOf != nil {
+		comments = v.src.commentsOf(it.ID)
 	}
-	inner := max(w-4, 20)
-	switch {
-	case v.commentsLoading:
-		v.desc.SetContent(sMuted.Render("loading discussion…"))
-		v.lastDesc, v.lastW = "", inner
-	case len(v.comments) == 0:
-		v.desc.SetContent(sMuted.Render("no comments yet"))
-		v.lastDesc, v.lastW = "", inner
-	default:
-		if body := formatComments(v.comments); body != v.lastDesc || inner != v.lastW {
-			v.lastDesc, v.lastW = body, inner
-			v.desc.SetContent(markdown.Render(body, inner))
-			v.desc.GotoTop()
+	key := previewKey{it, len(kids), len(comments), inner}
+	if key != v.lastPrev {
+		moved := v.lastPrev.it == nil || v.lastPrev.it.ID != it.ID
+		v.lastPrev = key
+		v.preview.SetContent(renderDetail(it, parent, kids, comments, inner, v.cfg, v.health))
+		if moved {
+			v.preview.GotoTop()
 		}
 	}
-	v.desc.Width = inner
-	v.desc.Height = max(h-3, 1)
-	title := sMuted.Render(fmt.Sprintf("Discussion (%d)", len(v.comments)))
-	if v.desc.TotalLineCount() > v.desc.Height {
-		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.desc.ScrollPercent()*100)))
+	v.preview.Width = inner
+	v.preview.Height = max(h-3, 1)
+	title := sMuted.Render(fmt.Sprintf("Preview #%d", it.ID))
+	if v.preview.TotalLineCount() > v.preview.Height {
+		title += sMuted.Render(fmt.Sprintf("  %d%%", int(v.preview.ScrollPercent()*100)))
 	}
-	return style.Width(w - 2).Height(h - 2).Render(title + "\n" + v.desc.View())
+	return sPanel.Width(w - 2).Height(h - 2).Render(title + "\n" + v.preview.View())
 }
 
 // renderRelated lists linked and mentioned items, grouped under their
@@ -548,17 +705,17 @@ func formatComments(comments []model.Comment) string {
 	return b.String()
 }
 
-func (v *itemView) renderKanban(w, h int, spin string) string {
+// renderChildren is the Children panel, as a list grouped by state or (f)
+// as a kanban.
+func (v *itemView) renderChildren(w, h int, spin string) string {
 	style := sPanel
 	if v.focusKan {
 		style = sPanelFocus
 	}
-	inner := max(w-4, 16)
 	head := sMuted.Render(fmt.Sprintf("Children (%d)", len(v.children)))
 	if v.loading {
 		head += "  " + spin
 	}
-
 	if len(v.children) == 0 && !v.loading {
 		child := v.cfg.ChildType(v.item)
 		msg := sMuted.Render("no children yet")
@@ -567,32 +724,153 @@ func (v *itemView) renderKanban(w, h int, spin string) string {
 		}
 		return style.Width(w - 2).Height(h - 2).Render(head + "\n\n" + msg)
 	}
-
-	colW := max(inner/max(len(v.cols), 1), 14)
-	visible := max(inner/colW, 1)
-	colW = max(inner/min(visible, max(len(v.cols), 1)), colW) // share leftover width when scrolling
-	start := 0
-	if v.col >= visible {
-		start = v.col - visible + 1
+	var body string
+	if v.kanban {
+		head, body = v.renderKanban(head, max(w-4, 16), h)
+	} else {
+		head, body = v.renderChildList(head, max(w-4, 20), h-3)
 	}
+	return style.Width(w - 2).Height(h - 2).Render(head + "\n" + body)
+}
+
+// renderChildList lists the children under a heading per state, in state
+// order, one full-width row each. States with no children are left out;
+// H and L still move a child through them.
+func (v *itemView) renderChildList(head string, w, h int) (string, string) {
+	var lines []string
+	curLine := 0
+	for ci, col := range v.cols {
+		if len(col) == 0 {
+			continue
+		}
+		name := stateStyle(v.states[ci]).Render(v.states[ci])
+		lines = append(lines, name+sMuted.Render(fmt.Sprintf(" %d", len(col))))
+		for ri, it := range col {
+			cur := v.focusKan && ci == v.col && ri == v.row
+			if cur {
+				curLine = len(lines)
+			}
+			lines = append(lines, v.renderChildRow(it, w, cur))
+		}
+	}
+	if h <= 0 {
+		return head, ""
+	}
+	start := 0
+	if curLine >= h {
+		start = curLine - h + 1
+	}
+	if start > 0 && curLine == start {
+		start-- // keep a group's first row with its heading
+	}
+	end := min(start+h, len(lines))
+	if len(lines) > h {
+		head += sMuted.Render(fmt.Sprintf("  %d-%d of %d lines", start+1, end, len(lines)))
+	}
+	return head, strings.Join(lines[start:end], "\n")
+}
+
+// renderChildRow is one child in the list: the card's facts on one line,
+// with the title given all the room the others leave.
+func (v *itemView) renderChildRow(it *model.WorkItem, w int, cur bool) string {
+	st := rowStyler(cur)
+	plain := st(lipgloss.NewStyle())
+	muted := st(sMuted)
+	mark := plain.Render(" ")
+	if cur {
+		mark = st(sKey).Render(cursorMark)
+	}
+	var right []string
+	if v.cfg.TaskLevel(it) && it.RemainingWork > 0 && !isDone(it.State) {
+		right = append(right, muted.Render(padLeft(fmtEffort(it.RemainingWork)+"h", 4)))
+	} else if it.Effort > 0 {
+		right = append(right, muted.Render(padLeft(fmtEffort(it.Effort), 4)))
+	}
+	right = append(right, muted.Render(initials(it.AssignedTo)))
+	// The flag sits right after the id, as on a card; the pair is padded
+	// so titles line up whether or not a row has one.
+	left := mark + st(kindStyle(it.Kind)).Render(fmt.Sprintf("%-4s", it.Kind.Tag())) +
+		muted.Render(fmt.Sprintf(" %d", it.ID))
+	if f, ok := v.flags[it.ID]; ok {
+		left += plain.Render(" ") + v.health.glyph(f, st)
+	}
+	left += fill(plain, 12-lipgloss.Width(left))
+	rw := 0
+	for _, r := range right {
+		rw += lipgloss.Width(r) + 1
+	}
+	left += plain.Render(" " + trunc(it.Title, max(w-lipgloss.Width(left)-rw-2, 4)))
+	return spread(plain, left, w, right...)
+}
+
+// kanbanWidths picks the columns the kanban shows, [start, end), and their
+// widths. A state with no cards only needs room for its heading, so the
+// width it would have wasted goes to the columns with titles to show.
+func (v *itemView) kanbanWidths(inner int) (start, end int, widths []int) {
+	const minW = 15
+	if len(v.cols) == 0 {
+		return 0, 0, nil
+	}
+	want := func(i int) int {
+		if len(v.cols[i]) == 0 {
+			return min(lipgloss.Width(v.states[i])+4, 10)
+		}
+		return minW
+	}
+	fit := func(s int) int {
+		e, used := s, 0
+		for e < len(v.cols) && (e == s || used+want(e) <= inner) {
+			used += want(e)
+			e++
+		}
+		return e
+	}
+	for end = fit(start); v.col >= end; end = fit(start) {
+		start++
+	}
+	widths = make([]int, end-start)
+	used, grow := 0, 0
+	for i := start; i < end; i++ {
+		widths[i-start] = want(i)
+		used += want(i)
+		if len(v.cols[i]) > 0 {
+			grow++
+		}
+	}
+	extra := max(inner-used, 0)
+	for i := start; i < end && extra > 0; i++ {
+		if len(v.cols[i]) == 0 && grow > 0 {
+			continue
+		}
+		n := max(grow, 1)
+		if grow == 0 {
+			n = end - start
+		}
+		add := extra / n
+		widths[i-start] += add
+	}
+	return start, end, widths
+}
+
+func (v *itemView) renderKanban(head string, inner, h int) (string, string) {
+	start, end, widths := v.kanbanWidths(inner)
 	// Two title lines per card when every visible column still fits,
 	// same rule as the Board.
 	lines := 2
-	for i := start; i < len(v.cols) && i < start+visible; i++ {
+	for i := start; i < end; i++ {
 		if len(v.cols[i])*(2+lines) > h-5 {
 			lines = 1
 			break
 		}
 	}
 	var cols []string
-	for i := start; i < len(v.cols) && i < start+visible; i++ {
-		cols = append(cols, v.renderColumn(i, colW, h-3, lines))
+	for i := start; i < end; i++ {
+		cols = append(cols, v.renderColumn(i, widths[i-start], h-3, lines))
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
-	if start > 0 || start+visible < len(v.cols) {
-		head += sMuted.Render(fmt.Sprintf("   %d-%d of %d columns", start+1, min(start+visible, len(v.cols)), len(v.cols)))
+	if start > 0 || end < len(v.cols) {
+		head += sMuted.Render(fmt.Sprintf("   %d-%d of %d columns", start+1, end, len(v.cols)))
 	}
-	return style.Width(w - 2).Height(h - 2).Render(head + "\n" + body)
+	return head, lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 }
 
 func (v *itemView) renderColumn(ci, colW, h, titleLines int) string {

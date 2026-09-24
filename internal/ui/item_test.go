@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/sveinungoverland/devopstui/internal/model"
 )
 
 // cardIDs returns the child ids per kanban column.
@@ -254,4 +256,136 @@ func TestItemViewWithoutChildren(t *testing.T) {
 	if v.current().ID != 1021 {
 		t.Error("actions should target the item itself")
 	}
+}
+
+func TestItemViewChildListWalksAcrossStates(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1013) // tasks 1015 To Do, 1017 To Do, 1016 Done
+	h.keys("D")
+	v := h.app.item
+	if v.kanban {
+		t.Fatal("children should default to the grouped list")
+	}
+	out := h.app.View()
+	for _, want := range []string{"To Do 2", "Done 1", "Load test with tracing on"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("child list missing %q", want)
+		}
+	}
+	// In Progress has no children, so it gets no heading.
+	if strings.Contains(out, "In Progress 0") {
+		t.Error("an empty state should not get a heading in the list")
+	}
+	// j runs off the end of To Do into Done, and stops at the last row.
+	h.keys("j", "j")
+	if v.current().ID != 1016 {
+		t.Fatalf("j should cross into the next state, got %d", v.current().ID)
+	}
+	if !strings.Contains(h.app.View(), "children 3/3") {
+		t.Error("header should count the child's place across all states")
+	}
+	h.keys("j")
+	if v.current().ID != 1016 {
+		t.Errorf("j past the last row should stay put, got %d", v.current().ID)
+	}
+	// k crosses back to the last row of the previous state.
+	h.keys("k")
+	if v.current().ID != 1017 {
+		t.Errorf("k should cross back, got %d", v.current().ID)
+	}
+	// h and l jump to the first row of the neighbouring state with children.
+	h.keys("l")
+	if v.current().ID != 1016 {
+		t.Errorf("l should jump to Done, got %d", v.current().ID)
+	}
+	h.keys("h")
+	if v.current().ID != 1015 {
+		t.Errorf("h should jump to the top of To Do, got %d", v.current().ID)
+	}
+}
+
+func TestItemViewPreviewsHighlightedChild(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1013)
+	h.keys("D")
+
+	out := h.app.View()
+	if !strings.Contains(out, "Preview #1015") {
+		t.Fatalf("the focused child should be previewed:\n%s", out)
+	}
+	// The item's own description keeps its place above the preview.
+	if !strings.Contains(out, "Propagate trace id through queue workers.") {
+		t.Error("description should stay in view beside the preview")
+	}
+	if !strings.Contains(out, "Parent     PBI 1013") {
+		t.Error("preview should show the child's fields")
+	}
+	h.keys("j")
+	if !strings.Contains(h.app.View(), "Preview #1017") {
+		t.Error("preview should follow the cursor")
+	}
+	// With the description focused there is nothing to preview.
+	h.keys("tab")
+	if strings.Contains(h.app.View(), "Preview #") {
+		t.Error("focusing the description should drop the preview")
+	}
+	// Related rows are previewed the same way.
+	h.keys("tab")
+	if !strings.Contains(h.app.View(), "Preview #1020") {
+		t.Error("the highlighted related item should be previewed")
+	}
+}
+
+func TestItemViewTogglesKanban(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1013)
+	h.keys("D", "j", "f")
+	v := h.app.item
+	if !v.kanban || !h.app.cfg.ItemKanban {
+		t.Fatal("f should switch the children to a kanban and remember it")
+	}
+	if v.current().ID != 1017 {
+		t.Errorf("switching layout should keep the cursor, got %d", v.current().ID)
+	}
+	// Drilling into another item keeps the chosen layout.
+	h.keys("esc")
+	h.app.sprint.jumpTo(1002)
+	h.keys("D")
+	if !h.app.item.kanban {
+		t.Error("the layout should carry over to the next drill-down")
+	}
+	h.keys("f")
+	if h.app.item.kanban || h.app.cfg.ItemKanban {
+		t.Error("f should switch back to the list")
+	}
+}
+
+func TestKanbanNarrowsEmptyColumns(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	h.app.sprint.jumpTo(1013) // To Do 2, In Progress 0, Done 1
+	h.keys("D", "f")
+	v := h.app.item
+	start, end, widths := v.kanbanWidths(70)
+	if start != 0 || end < 3 {
+		t.Fatalf("all three columns should fit in 70, got %d-%d", start, end)
+	}
+	if widths[1] >= widths[0] || widths[1] >= widths[2] {
+		t.Errorf("empty In Progress should be narrower than the others: %v", widths)
+	}
+	sum := 0
+	for _, w := range widths {
+		sum += w
+	}
+	if sum > 70 {
+		t.Errorf("widths %v overflow 70", widths)
+	}
+}
+
+func TestKanbanWhileChildrenLoad(t *testing.T) {
+	v := newItemView(&model.WorkItem{ID: 1}, model.BacklogConfig{}, nil)
+	v.kanban = true
+	if start, end, widths := v.kanbanWidths(60); start != 0 || end != 0 || len(widths) != 0 {
+		t.Fatalf("no columns yet should lay out nothing, got %d-%d %v", start, end, widths)
+	}
+	_ = v.view(160, 40, "")
 }
