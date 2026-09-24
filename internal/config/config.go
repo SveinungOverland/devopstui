@@ -34,6 +34,9 @@ type Config struct {
 	// ItemKanban shows a drill-down's children as a kanban of their
 	// states instead of a list grouped by state; `f` toggles it.
 	ItemKanban bool `yaml:"item_kanban,omitempty"`
+	// BoardList shows the Board as a list grouped by column instead of a
+	// kanban, a compact layout for narrow terminals; `f` toggles it.
+	BoardList bool `yaml:"board_list,omitempty"`
 	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
 	DashShowDone bool `yaml:"dash_show_done,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
