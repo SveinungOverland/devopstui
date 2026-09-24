@@ -764,6 +764,16 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case itemParentMsg:
+		if a.item == nil || a.item.item.ID != msg.id {
+			return a, nil
+		}
+		if msg.err != nil {
+			return a, a.setFlash("parent: "+msg.err.Error(), true)
+		}
+		a.item.parent = msg.parent
+		return a, nil
+
 	case linksLoadedMsg:
 		if a.item == nil || a.item.item.ID != msg.id {
 			return a, nil
@@ -1995,13 +2005,43 @@ func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 		commentsOf: func(id int) []model.Comment { return a.comments[id] },
 	}
 	v.parent = a.lookup(it.ParentID)
-	v.focusKan = len(a.childItems(it.ID)) > 0
-	v.setChildren(a.childItems(it.ID), nil)
+	if v.siblings {
+		// The siblings are context for the item, not what it is about:
+		// the description keeps focus.
+		if it.ParentID != 0 {
+			v.setChildren(a.childItems(it.ParentID), nil)
+		}
+	} else {
+		v.focusKan = len(a.childItems(it.ID)) > 0
+		v.setChildren(a.childItems(it.ID), nil)
+	}
 	if c, ok := a.comments[it.ID]; ok {
 		v.setComments(c)
 	}
 	a.item = v
-	return tea.Batch(a.loadItemChildren(it), a.loadComments(it, false), a.loadLinks(it.ID))
+	return tea.Batch(a.loadItemChildren(it), a.loadComments(it, false), a.loadLinks(it.ID), a.loadItemParent())
+}
+
+type itemParentMsg struct {
+	id     int // the item drilled into
+	parent *model.WorkItem
+	err    error
+}
+
+// loadItemParent fetches the parent of the item drilled into when no list
+// has it, for the parent card a task-level item shows.
+func (a *App) loadItemParent() tea.Cmd {
+	v := a.item
+	if v == nil || !v.siblings || v.item.ParentID == 0 || (v.parent != nil && v.parent.ID == v.item.ParentID) {
+		return nil
+	}
+	id, pid := v.item.ID, v.item.ParentID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		p, err := a.client.Get(ctx, pid)
+		return itemParentMsg{id: id, parent: p, err: err}
+	}
 }
 
 type linksLoadedMsg struct {
@@ -2090,13 +2130,23 @@ func mentionRows(ids []int, items map[int]*model.WorkItem) []model.RelatedItem {
 	return out
 }
 
+// loadItemChildren fetches what the drill-down's kanban lists: the item's
+// children, or for a task-level item the children of its parent. The
+// reply is keyed by the item, so one for an item since left is dropped.
 func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
 	project, id, cfg := a.projectOf(it), it.ID, a.ctx.Backlog
-	known := a.childItems(id)
+	owner := id
+	if cfg.TaskLevel(it) {
+		owner = it.ParentID
+		if owner == 0 {
+			return func() tea.Msg { return itemLoadedMsg{id: id} } // no parent, no siblings
+		}
+	}
+	known := a.childItems(owner)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		children, err := a.client.Children(ctx, project, id)
+		children, err := a.client.Children(ctx, project, owner)
 		if err != nil {
 			return itemLoadedMsg{id: id, err: err}
 		}
@@ -2105,6 +2155,9 @@ func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
 		typ := dominantType(children)
 		if typ == "" {
 			typ = dominantType(known)
+		}
+		if typ == "" && owner != id {
+			typ = it.Type // siblings share the item's type, near enough
 		}
 		if typ == "" {
 			typ = cfg.ChildType(&model.WorkItem{Kind: it.Kind, Type: it.Type})
@@ -2188,7 +2241,7 @@ func (a *App) syncItemView() {
 		a.itemStack[len(a.itemStack)-1] = fresh
 	}
 	byID := map[int]*model.WorkItem{}
-	for _, c := range a.childItems(a.item.item.ID) {
+	for _, c := range a.childItems(a.item.listOwner()) {
 		byID[c.ID] = c
 	}
 	merged := make([]*model.WorkItem, 0, len(a.item.children))
@@ -2208,7 +2261,9 @@ func (a *App) syncItemView() {
 	}
 	sortItems(merged)
 	a.item.setChildren(merged, nil)
-	a.item.parent = a.lookup(a.item.item.ParentID)
+	if p := a.lookup(a.item.item.ParentID); p != nil || a.item.parent == nil || a.item.parent.ID != a.item.item.ParentID {
+		a.item.parent = p // keep a fetched parent no list has
+	}
 }
 
 func sortItems(items []*model.WorkItem) {
@@ -2263,9 +2318,9 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		v.commentsLoading = true
 		v.linksLoading = true
 		v.mentionIDs = nil // re-resolve mentions once the links are back
-		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item, true), a.loadLinks(v.item.ID)), true
+		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item, true), a.loadLinks(v.item.ID), a.loadItemParent()), true
 	case key.Matches(msg, keys.Details), msg.String() == "enter":
-		if c := v.currentChild(); v.focusKan && c != nil {
+		if c := v.currentChild(); v.focusKan && c != nil && !v.isSelf(c) {
 			return a.openItem(c), true
 		}
 		if r := v.currentRelated(); v.focusRel && r != nil {
@@ -2507,7 +2562,11 @@ func (a *App) renderHeader() string {
 		focus := strings.ToLower(narrativeTitle(a.item.item, narrativeSections(a.item.item)))
 		switch {
 		case a.item.focusKan:
-			focus = fmt.Sprintf("children %d/%d", a.item.childIndex()+1, len(a.item.children))
+			noun := "children"
+			if a.item.siblings {
+				noun = "siblings"
+			}
+			focus = fmt.Sprintf("%s %d/%d", noun, a.item.childIndex()+1, len(a.item.children))
 		case a.item.focusRel:
 			focus = "related"
 			if n := len(a.item.related()); n > 0 {
@@ -2662,6 +2721,15 @@ func (a *App) renderFooter() string {
 			bindings = footerItemKanban
 		case a.item.focusRel:
 			bindings = footerItemRelated
+		}
+		if a.item.siblings {
+			// n on a task adds to its parent, beside it.
+			bindings = slices.Clone(bindings)
+			for i, k := range bindings {
+				if k.Help() == keys.New.Help() {
+					bindings[i] = b("new sibling", "n")
+				}
+			}
 		}
 	case a.view == viewBoard:
 		bindings = footerBoard

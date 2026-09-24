@@ -127,7 +127,12 @@ func (a *App) newItem(forceBug bool) tea.Cmd {
 		}
 	}
 	if parent != nil && cfg.TaskLevel(parent) {
-		parent = a.lookup(parent.ParentID) // new sibling task
+		pid := parent.ParentID
+		parent = a.lookup(pid) // new sibling task
+		if parent == nil && pid != 0 && a.view == viewItem && a.item != nil && a.item.siblings &&
+			a.item.parent != nil && a.item.parent.ID == pid {
+			parent = a.item.parent // a parent no list has, fetched for the drill-down
+		}
 	}
 	typ := cfg.ChildType(parent)
 	if typ == "" {

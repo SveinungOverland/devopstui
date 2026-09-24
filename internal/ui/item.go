@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -12,11 +13,17 @@ import (
 )
 
 // itemView is the full-screen view of one work item: its metadata and
-// description on one side, a kanban of its children on the other.
+// description on one side, a kanban of its children on the other. A
+// task-level item has no children, so its kanban holds its siblings
+// instead, with a card for the parent they share above them.
 type itemView struct {
 	item     *model.WorkItem
 	parent   *model.WorkItem
-	children []*model.WorkItem
+	children []*model.WorkItem // the kanban's items: siblings when siblings is set
+
+	// siblings is set for task-level items: children then holds every
+	// child of the parent, the item itself among them.
+	siblings bool
 
 	states   []string // kanban column order
 	cols     [][]*model.WorkItem
@@ -76,7 +83,22 @@ type previewKey struct {
 
 func newItemView(it *model.WorkItem, cfg model.BacklogConfig, h *health) *itemView {
 	return &itemView{item: it, cfg: cfg, health: h, desc: viewport.New(40, 10), preview: viewport.New(40, 10),
-		loading: true, commentsLoading: true, linksLoading: true}
+		siblings: cfg.TaskLevel(it), loading: true, commentsLoading: true, linksLoading: true}
+}
+
+// listOwner is the item whose children fill the kanban: the parent for a
+// task-level item, 0 when that has none; otherwise the item itself.
+func (v *itemView) listOwner() int {
+	if v.siblings {
+		return v.item.ParentID
+	}
+	return v.item.ID
+}
+
+// isSelf reports whether it is the item drilled into, which the sibling
+// list holds among the others.
+func (v *itemView) isSelf(it *model.WorkItem) bool {
+	return v.siblings && it != nil && it.ID == v.item.ID
 }
 
 // itemPane is the part of a drill-down level that esc restores when it
@@ -202,6 +224,15 @@ func (v *itemView) apply(it *model.WorkItem) {
 // setChildren rebuilds the kanban, keeping the cursor on the same child.
 func (v *itemView) setChildren(children []*model.WorkItem, states []string) {
 	cur := v.currentChild()
+	if v.siblings && v.item.ParentID != 0 && !slices.ContainsFunc(children, v.isSelf) {
+		// Lists that have not loaded the item itself still show it among
+		// its siblings: it is what the rest are read against.
+		children = append(slices.Clone(children), v.item)
+		sortItems(children)
+	}
+	if cur == nil && v.siblings {
+		cur = v.item // a first fill lands on the item drilled into
+	}
 	v.children = children
 	if len(states) > 0 {
 		v.states = states
@@ -361,13 +392,16 @@ func (v *itemView) childIndex() int {
 }
 
 // previewed is the item the left pane previews: the highlighted row of
-// whichever list has focus, nil when the description has it.
+// whichever list has focus, nil when the description has it or the row is
+// the item itself, whose description is already on screen.
 func (v *itemView) previewed() *model.WorkItem {
 	switch {
 	case v.focusRel:
 		return v.currentRelated()
 	case v.focusKan:
-		return v.currentChild()
+		if c := v.currentChild(); !v.isSelf(c) {
+			return c
+		}
 	}
 	return nil
 }
@@ -381,7 +415,18 @@ func (v *itemView) adjacentState(dc int) (string, bool) {
 	return v.states[i], true
 }
 
+// progress is the item's own: its task-level children. A task-level item
+// has none; the siblings in its kanban are the parent's work, not its own.
 func (v *itemView) progress() progress {
+	if v.siblings {
+		return progress{}
+	}
+	return v.listProgress()
+}
+
+// listProgress summarises the task-level items in the kanban, whether they
+// are the item's children or its siblings.
+func (v *itemView) listProgress() progress {
 	var p progress
 	for _, c := range v.children {
 		if !v.cfg.TaskLevel(c) {
@@ -447,6 +492,15 @@ func (v *itemView) view(w, h int, spin string) string {
 // so the kanban keeps most of the room and an item with no links only
 // costs it three lines.
 func (v *itemView) renderRight(w, h int, spin string) string {
+	// A task-level item's parent card sits on top, when there is room for
+	// it and for the two panels under it.
+	card := ""
+	if v.siblings && v.item.ParentID != 0 {
+		if cardH := min(v.parentCardHeight(max(w-4, 20)), h-11); cardH >= 4 {
+			card = v.renderParentCard(w, cardH) + "\n"
+			h -= cardH
+		}
+	}
 	lines, _ := v.relatedLines(max(w-4, 20))
 	relH := 3 // title and borders
 	if len(lines) > 0 {
@@ -460,7 +514,87 @@ func (v *itemView) renderRight(w, h int, spin string) string {
 	if relH < 5 {
 		relH = 3 // a single row out of context reads worse than just the count
 	}
-	return v.renderRelated(w, relH) + "\n" + v.renderChildren(w, h-relH, spin)
+	return card + v.renderRelated(w, relH) + "\n" + v.renderChildren(w, h-relH, spin)
+}
+
+// parentCardLines is the most of the parent's acceptance criteria (or,
+// without those, its description) the parent card shows.
+const parentCardLines = 4
+
+// parentCardBody is the parent's acceptance criteria, or its description
+// when it has none, rendered to width: the heading and the lines.
+func parentCardBody(p *model.WorkItem, w int) (string, []string) {
+	heading, body := "Acceptance criteria", p.AcceptanceCriteria
+	if strings.TrimSpace(body) == "" {
+		heading, body = "Description", p.Description
+	}
+	if strings.TrimSpace(body) == "" {
+		return "", nil
+	}
+	var lines []string
+	for _, l := range strings.Split(markdown.Render(body, w), "\n") {
+		if strings.TrimSpace(l) == "" && (len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) == "") {
+			continue // no leading or doubled blank lines in so little room
+		}
+		lines = append(lines, l)
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return heading, lines
+}
+
+// parentCardHeight is the height the parent card wants, borders included.
+func (v *itemView) parentCardHeight(inner int) int {
+	h := 2 + 3 // borders, title, the parent's row and its facts
+	if v.parent == nil {
+		return 2 + 2
+	}
+	if _, lines := parentCardBody(v.parent, inner); len(lines) > 0 {
+		h += 1 + min(len(lines), parentCardLines)
+	}
+	return h
+}
+
+// renderParentCard is the parent a task-level item belongs to, and the
+// start of its acceptance criteria: for a task, usually the real spec.
+func (v *itemView) renderParentCard(w, h int) string {
+	inner := max(w-4, 20)
+	title := sMuted.Render("Parent  ") + sKey.Render(keys.GotoParent.Help().Key) + sMuted.Render(" to open")
+	p := v.parent
+	if p == nil {
+		body := sMuted.Render(fmt.Sprintf("loading #%d…", v.item.ParentID))
+		return sPanel.Width(w - 2).Height(h - 2).Render(title + "\n" + body)
+	}
+	state := stateStyle(p.State).Render(trunc(p.State, 14))
+	left := kindStyle(p.Kind).Render(p.Kind.Tag()) + sMuted.Render(fmt.Sprintf(" %d ", p.ID))
+	left += sTitle.Render(trunc(p.Title, max(inner-lipgloss.Width(left)-lipgloss.Width(state)-2, 4)))
+	lines := []string{title, spread(lipgloss.NewStyle(), left, inner, state)}
+
+	facts := []string{p.Assignee()}
+	if pr := v.listProgress(); pr.total > 0 {
+		f := pr.style().Render(fmt.Sprintf("%d/%d tasks", pr.done, pr.total))
+		if pr.remaining > 0 {
+			f += sMuted.Render(fmt.Sprintf(" · %sh left", fmtEffort(pr.remaining)))
+		}
+		facts = append(facts, f)
+	}
+	if p.Effort > 0 {
+		facts = append(facts, fmtEffort(p.Effort)+" pts")
+	}
+	lines = append(lines, trunc(strings.Join(facts, sMuted.Render(" · ")), inner))
+
+	if heading, body := parentCardBody(p, inner); len(body) > 0 {
+		if room := h - 2 - len(lines) - 1; room > 0 {
+			if more := len(body) - room; more > 0 {
+				body = body[:room]
+				heading += fmt.Sprintf("  +%d lines", more)
+			}
+			lines = append(lines, sMuted.Render(heading))
+			lines = append(lines, body...)
+		}
+	}
+	return sPanel.Width(w - 2).Height(h - 2).MaxHeight(h).Render(strings.Join(lines, "\n"))
 }
 
 // renderLeft is the left-hand pane: the description or (C) the discussion,
@@ -596,6 +730,8 @@ func (v *itemView) renderPreview(it *model.WorkItem, w, h int) string {
 	var comments []model.Comment
 	if it.ParentID == v.item.ID {
 		parent = v.item
+	} else if v.parent != nil && it.ParentID == v.parent.ID {
+		parent = v.parent // a sibling's
 	} else if v.src.lookup != nil {
 		parent = v.src.lookup(it.ParentID)
 	}
@@ -713,8 +849,16 @@ func (v *itemView) renderChildren(w, h int, spin string) string {
 		style = sPanelFocus
 	}
 	head := sMuted.Render(fmt.Sprintf("Children (%d)", len(v.children)))
+	if v.siblings {
+		head = v.siblingsTitle()
+	}
 	if v.loading {
 		head += "  " + spin
+	}
+	if v.siblings && v.item.ParentID == 0 {
+		msg := sMuted.Render("no parent, so no siblings") + "\n\n" +
+			sMuted.Render("press ") + sKey.Render(keys.Parent.Help().Key) + sMuted.Render(" to set one")
+		return style.Width(w - 2).Height(h - 2).Render(head + "\n\n" + msg)
 	}
 	if len(v.children) == 0 && !v.loading {
 		child := v.cfg.ChildType(v.item)
@@ -731,6 +875,22 @@ func (v *itemView) renderChildren(w, h int, spin string) string {
 		head, body = v.renderChildList(head, max(w-4, 20), h-3)
 	}
 	return style.Width(w - 2).Height(h - 2).Render(head + "\n" + body)
+}
+
+// siblingsTitle heads the kanban of a task-level item: whose children
+// the siblings are, and how far along they are together.
+func (v *itemView) siblingsTitle() string {
+	if v.item.ParentID == 0 {
+		return sMuted.Render("Siblings")
+	}
+	head := sMuted.Render(fmt.Sprintf("Siblings of #%d (%d)", v.item.ParentID, len(v.children)))
+	if p := v.listProgress(); p.total > 0 {
+		head += sMuted.Render(" · ") + p.style().Render(fmt.Sprintf("%d/%d done", p.done, p.total))
+		if p.remaining > 0 {
+			head += sMuted.Render(fmt.Sprintf(" · %sh left", fmtEffort(p.remaining)))
+		}
+	}
+	return head
 }
 
 // renderChildList lists the children under a heading per state, in state
@@ -776,10 +936,7 @@ func (v *itemView) renderChildRow(it *model.WorkItem, w int, cur bool) string {
 	st := rowStyler(cur)
 	plain := st(lipgloss.NewStyle())
 	muted := st(sMuted)
-	mark := plain.Render(" ")
-	if cur {
-		mark = st(sKey).Render(cursorMark)
-	}
+	mark := v.rowMark(it, cur, st)
 	var right []string
 	if v.cfg.TaskLevel(it) && it.RemainingWork > 0 && !isDone(it.State) {
 		right = append(right, muted.Render(padLeft(fmtEffort(it.RemainingWork)+"h", 4)))
@@ -799,8 +956,28 @@ func (v *itemView) renderChildRow(it *model.WorkItem, w int, cur bool) string {
 	for _, r := range right {
 		rw += lipgloss.Width(r) + 1
 	}
-	left += plain.Render(" " + trunc(it.Title, max(w-lipgloss.Width(left)-rw-2, 4)))
+	left += v.titleStyle(it, plain).Render(" " + trunc(it.Title, max(w-lipgloss.Width(left)-rw-2, 4)))
 	return spread(plain, left, w, right...)
+}
+
+// rowMark is the cell in front of a kanban row or card: the cursor, the
+// marker for the item drilled into among its siblings, or a blank.
+func (v *itemView) rowMark(it *model.WorkItem, cur bool, st func(lipgloss.Style) lipgloss.Style) string {
+	switch {
+	case cur:
+		return st(sKey).Render(cursorMark)
+	case v.isSelf(it):
+		return st(sKey).Render(selfMark)
+	}
+	return st(lipgloss.NewStyle()).Render(" ")
+}
+
+// titleStyle sets the item drilled into apart from its siblings.
+func (v *itemView) titleStyle(it *model.WorkItem, plain lipgloss.Style) lipgloss.Style {
+	if v.isSelf(it) {
+		return plain.Bold(true)
+	}
+	return plain
 }
 
 // kanbanWidths picks the columns the kanban shows, [start, end), and their
@@ -908,10 +1085,7 @@ func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool, lines int) []
 	st := rowStyler(cur)
 	plain := st(lipgloss.NewStyle())
 	muted := st(sMuted)
-	mark := plain.Render(" ")
-	if cur {
-		mark = st(sKey).Render(cursorMark)
-	}
+	mark := v.rowMark(it, cur, st)
 	var right []string
 	if v.cfg.TaskLevel(it) && it.RemainingWork > 0 && !isDone(it.State) {
 		right = append(right, muted.Render(fmtEffort(it.RemainingWork)+"h"))
@@ -928,7 +1102,7 @@ func (v *itemView) renderCard(it *model.WorkItem, w int, cur bool, lines int) []
 	l1 = spread(plain, l1, w, right...)
 	out := []string{l1}
 	for _, t := range titleLines(it.Title, w-1, lines) {
-		l := plain.Render(" " + t)
+		l := v.titleStyle(it, plain).Render(" " + t)
 		out = append(out, l+fill(plain, w-lipgloss.Width(l)))
 	}
 	if lines > 1 {
