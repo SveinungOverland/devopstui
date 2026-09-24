@@ -51,6 +51,12 @@ type Client interface {
 	ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error)
 
 	Get(ctx context.Context, id int) (*model.WorkItem, error)
+	// Items batch-fetches work items by id across the organisation, in the
+	// order given. Ids that do not exist or are not visible are dropped.
+	Items(ctx context.Context, ids []int) ([]*model.WorkItem, error)
+	// Links returns an item's Related, Predecessor/Successor and Duplicate
+	// links, resolved to their targets. Hierarchy links are not included.
+	Links(ctx context.Context, project string, id int) ([]model.RelatedItem, error)
 	// Comments returns a work item's discussion, oldest first.
 	Comments(ctx context.Context, project string, id int) ([]model.Comment, error)
 	// AddComment posts a new comment to a work item's discussion.

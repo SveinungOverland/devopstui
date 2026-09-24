@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,8 +89,10 @@ type App struct {
 
 	// item is the drill-down view; itemStack keeps the trail so esc walks
 	// back out, and itemReturn is the tab to land on at the bottom.
+	// itemPanes[i] is how level i was showing when the next one was opened.
 	item         *itemView
 	itemStack    []*model.WorkItem
+	itemPanes    []itemPane
 	itemReturn   viewID
 	detail       viewport.Model
 	focusDetail  bool
@@ -592,6 +595,17 @@ func nonBugChildren(items []*model.WorkItem) []*model.WorkItem {
 // ------------------------------------------------------------ update
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m, cmd := a.handle(msg)
+	// Mentions come from the item's text and its discussion, which many
+	// messages can change (a load, a save, a posted comment); re-scanning
+	// after each is cheaper than remembering every path that edits them.
+	if mcmd := a.resolveMentions(); mcmd != nil {
+		cmd = tea.Batch(cmd, mcmd)
+	}
+	return m, cmd
+}
+
+func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.w, a.h = msg.Width, msg.Height
@@ -704,7 +718,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.view == viewItem && a.item != nil {
 			// Show it in the kanban straight away, then reconcile.
 			a.item.setChildren(append(a.item.children, msg.item), nil)
-			a.item.focusKan = true
+			a.item.focusKan, a.item.focusRel = true, false
 			a.item.jumpTo(msg.item.ID)
 			return a, tea.Batch(a.reloadAll(), a.loadItemChildren(a.item.item), flash)
 		}
@@ -731,6 +745,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.children) == 0 {
 			a.item.focusKan = false
 		}
+		return a, nil
+
+	case linksLoadedMsg:
+		if a.item == nil || a.item.item.ID != msg.id {
+			return a, nil
+		}
+		if msg.err != nil {
+			a.item.setLinks(nil)
+			return a, a.setFlash("links: "+msg.err.Error(), true)
+		}
+		a.item.setLinks(msg.links)
+		return a, nil
+
+	case mentionsLoadedMsg:
+		if a.item == nil || a.item.item.ID != msg.id || !slices.Equal(a.item.mentionIDs, msg.ids) {
+			return a, nil // superseded by a newer scan
+		}
+		if msg.err != nil {
+			return a, a.setFlash("mentions: "+msg.err.Error(), true)
+		}
+		a.item.setMentions(msg.ids, mentionRows(msg.ids, msg.items))
 		return a, nil
 
 	case commentsLoadedMsg:
@@ -1402,7 +1437,7 @@ func (a *App) runCommand(c string) tea.Cmd {
 
 func (a *App) switchView(v viewID) tea.Cmd {
 	if v != viewItem {
-		a.item, a.itemStack = nil, nil
+		a.item, a.itemStack, a.itemPanes = nil, nil, nil
 	}
 	a.view = v
 	a.focusDetail = false
@@ -1833,9 +1868,11 @@ func (a *App) openItem(it *model.WorkItem) tea.Cmd {
 	if it == nil {
 		return nil
 	}
-	if a.view != viewItem {
+	if a.view != viewItem || a.item == nil {
 		a.itemReturn = a.view
-		a.itemStack = nil
+		a.itemStack, a.itemPanes = nil, nil
+	} else {
+		a.itemPanes = append(a.itemPanes[:len(a.itemStack)-1], a.item.pane())
 	}
 	a.itemStack = append(a.itemStack, it)
 	a.view = viewItem
@@ -1852,7 +1889,94 @@ func (a *App) showItemView(it *model.WorkItem) tea.Cmd {
 		v.setComments(c)
 	}
 	a.item = v
-	return tea.Batch(a.loadItemChildren(it), a.loadComments(it.ID, false))
+	return tea.Batch(a.loadItemChildren(it), a.loadComments(it.ID, false), a.loadLinks(it.ID))
+}
+
+type linksLoadedMsg struct {
+	id    int
+	links []model.RelatedItem
+	err   error
+}
+
+func (a *App) loadLinks(id int) tea.Cmd {
+	project := a.ctx.Project
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		links, err := a.client.Links(ctx, project, id)
+		return linksLoadedMsg{id: id, links: links, err: err}
+	}
+}
+
+type mentionsLoadedMsg struct {
+	id    int
+	ids   []int // the scan this resolves, in order of appearance
+	items map[int]*model.WorkItem
+	err   error
+}
+
+// resolveMentions re-scans the open item for #1234 mentions and resolves
+// any new set: from the loaded lists where it can, fetching the rest. It
+// waits for the links so an item that is both linked and mentioned only
+// shows once, under its link.
+func (a *App) resolveMentions() tea.Cmd {
+	v := a.item
+	if a.view != viewItem || v == nil || v.linksLoading {
+		return nil
+	}
+	exclude := make([]int, 0, len(v.links))
+	for _, l := range v.links {
+		exclude = append(exclude, l.Item.ID)
+	}
+	ids := model.Mentions(v.item, v.comments, exclude...)
+	if slices.Equal(ids, v.mentionIDs) {
+		return nil
+	}
+	v.mentionIDs = ids
+	known := map[int]*model.WorkItem{}
+	for _, c := range v.children {
+		known[c.ID] = c
+	}
+	for _, m := range v.mentions {
+		known[m.Item.ID] = m.Item
+	}
+	found := map[int]*model.WorkItem{}
+	var missing []int
+	for _, id := range ids {
+		if it := known[id]; it != nil {
+			found[id] = it
+		} else if it := a.lookup(id); it != nil {
+			found[id] = it
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		v.setMentions(ids, mentionRows(ids, found))
+		return nil
+	}
+	id := v.item.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		items, err := a.client.Items(ctx, missing)
+		for _, it := range items {
+			found[it.ID] = it
+		}
+		return mentionsLoadedMsg{id: id, ids: ids, items: found, err: err}
+	}
+}
+
+// mentionRows keeps the order the mentions appear in, dropping ids that
+// did not resolve (deleted, or not visible to this user).
+func mentionRows(ids []int, items map[int]*model.WorkItem) []model.RelatedItem {
+	var out []model.RelatedItem
+	for _, id := range ids {
+		if it := items[id]; it != nil {
+			out = append(out, model.RelatedItem{Kind: model.RelMention, Item: it})
+		}
+	}
+	return out
 }
 
 func (a *App) loadItemChildren(it *model.WorkItem) tea.Cmd {
@@ -1929,9 +2053,14 @@ func dominantType(items []*model.WorkItem) string {
 func (a *App) closeItem() tea.Cmd {
 	if len(a.itemStack) > 1 {
 		a.itemStack = a.itemStack[:len(a.itemStack)-1]
-		return a.showItemView(a.itemStack[len(a.itemStack)-1])
+		cmd := a.showItemView(a.itemStack[len(a.itemStack)-1])
+		if n := len(a.itemStack); len(a.itemPanes) >= n {
+			a.item.restore(a.itemPanes[n-1])
+			a.itemPanes = a.itemPanes[:n-1]
+		}
+		return cmd
 	}
-	a.itemStack = nil
+	a.itemStack, a.itemPanes = nil, nil
 	a.item = nil
 	return a.switchView(a.itemReturn)
 }
@@ -1988,27 +2117,40 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return a.closeItem(), true
 	case key.Matches(msg, keys.Focus):
 		if !v.descOnly {
-			v.focusKan = !v.focusKan
+			v.cycleFocus()
 		}
 		return nil, true
 	case key.Matches(msg, keys.Preview):
 		v.descOnly = !v.descOnly
 		if v.descOnly {
-			v.focusKan = false // the kanban is gone; focus follows
+			v.focusKan, v.focusRel = false, false // the right side is gone; focus follows
 		}
 		return nil, true
 	case key.Matches(msg, keys.Comments):
 		v.showComments = !v.showComments
+		return nil, true
+	case key.Matches(msg, keys.Related):
+		// A jump straight to Related, and back out to the description.
+		if v.focusRel {
+			v.focusRel = false
+		} else {
+			v.focusRel, v.focusKan, v.descOnly = true, false, false
+		}
 		return nil, true
 	case key.Matches(msg, keys.Comment):
 		return a.addComment(v.current()), true
 	case key.Matches(msg, keys.Refresh):
 		v.loading = true
 		v.commentsLoading = true
-		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item.ID, true)), true
+		v.linksLoading = true
+		v.mentionIDs = nil // re-resolve mentions once the links are back
+		return tea.Batch(a.loadItemChildren(v.item), a.loadComments(v.item.ID, true), a.loadLinks(v.item.ID)), true
 	case key.Matches(msg, keys.Details), msg.String() == "enter":
 		if c := v.currentChild(); v.focusKan && c != nil {
 			return a.openItem(c), true
+		}
+		if r := v.currentRelated(); v.focusRel && r != nil {
+			return a.openItem(r), true
 		}
 		return nil, true
 	}
@@ -2017,6 +2159,23 @@ func (a *App) itemOverride(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 	v := a.item
+	if v.focusRel {
+		switch {
+		case key.Matches(msg, keys.Down):
+			v.moveRelated(1)
+			return nil
+		case key.Matches(msg, keys.Up):
+			v.moveRelated(-1)
+			return nil
+		case key.Matches(msg, keys.Top):
+			v.relRow = 0
+			return nil
+		case key.Matches(msg, keys.Bottom):
+			v.moveRelated(1 << 20)
+			return nil
+		}
+		return a.onActionKey(msg)
+	}
 	if !v.focusKan {
 		switch {
 		case key.Matches(msg, keys.Down):
@@ -2205,8 +2364,14 @@ func (a *App) renderHeader() string {
 		}
 		tabs = append(tabs, sCrumbSep.Render("▸ ")+strings.Join(trail, sCrumbSep.Render(" ▸ ")))
 		focus := strings.ToLower(narrativeTitle(a.item.item, narrativeSections(a.item.item)))
-		if a.item.focusKan {
+		switch {
+		case a.item.focusKan:
 			focus = fmt.Sprintf("children %d/%d", a.item.row+1, len(a.item.children))
+		case a.item.focusRel:
+			focus = "related"
+			if n := len(a.item.related()); n > 0 {
+				focus = fmt.Sprintf("related %d/%d", a.item.relIndex()+1, n)
+			}
 		}
 		summary = sMuted.Render(focus)
 	case a.view == viewBoard:
@@ -2351,8 +2516,11 @@ func (a *App) renderFooter() string {
 	switch {
 	case a.view == viewItem && a.item != nil:
 		bindings = footerItemDesc
-		if a.item.focusKan {
+		switch {
+		case a.item.focusKan:
 			bindings = footerItemKanban
+		case a.item.focusRel:
+			bindings = footerItemRelated
 		}
 	case a.view == viewBoard:
 		bindings = footerBoard
