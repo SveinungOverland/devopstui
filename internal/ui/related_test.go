@@ -143,3 +143,44 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// A link can lead into another project. The drill-down has to load that
+// item's children and discussion from its own project, and refuse the
+// actions that only make sense inside the current one.
+func TestItemRelatedCrossProject(t *testing.T) {
+	h := newHarness(t, 160, 45)
+	a := h.app
+	a.sprint.jumpTo(1028) // related to #3001 in the Identity project
+	h.keys("D", "x")
+	if got, want := relatedIDs(a.item), []int{3001}; !equalInts(got, want) {
+		t.Fatalf("#1028 related = %v, want %v", got, want)
+	}
+	h.keys("enter")
+	v := a.item
+	if v.item.ID != 3001 || v.item.Project != "Identity" {
+		t.Fatalf("enter should open #3001 in Identity, got #%d in %q", v.item.ID, v.item.Project)
+	}
+	if len(v.children) != 1 || v.children[0].ID != 3002 {
+		t.Errorf("children should load from Identity, got %d", len(v.children))
+	}
+	if len(v.comments) == 0 || a.flashErr {
+		t.Errorf("discussion should load from Identity, got %d comments, flash %q", len(v.comments), a.flash)
+	}
+
+	h.run(a.postComment(v.item, "cross-project note"))
+	if a.flashErr {
+		t.Fatalf("posting a comment should go to Identity, got %q", a.flash)
+	}
+
+	h.keys("tab", "tab", "m") // focus the kanban's task, then try to move it
+	if !a.flashErr || !strings.Contains(a.flash, "#3002 is in project Identity") {
+		t.Errorf("moving another project's item should be refused, got %q", a.flash)
+	}
+	h.keys("n")
+	if !strings.Contains(a.flash, "project Identity") || a.popup != nil {
+		t.Errorf("adding under another project's item should be refused, got %q", a.flash)
+	}
+	if len(h.fake.Updates) != 0 {
+		t.Errorf("no write expected, got %+v", h.fake.Updates)
+	}
+}

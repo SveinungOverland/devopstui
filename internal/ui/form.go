@@ -65,7 +65,7 @@ func fieldsFor(kind model.Kind) []formField {
 
 // openForm loads picker data then shows the form.
 func (a *App) openForm(it *model.WorkItem) tea.Cmd {
-	project := a.ctx.Project
+	project := a.projectOf(it)
 	iters := a.movableIterations()
 	return func() tea.Msg {
 		ctx := context.Background()

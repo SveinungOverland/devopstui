@@ -251,8 +251,11 @@ the kanban already show them, and an item that is both linked and mentioned is l
 its link. The panel is as tall as its rows, up to about 2/5 of the column, and grows while it has
 focus; with nothing related it is a single line and `tab` skips it. `j` `k` move the cursor, and
 `D` or `enter` drills into the highlighted item; `esc` walks back and puts you on the row you left
-from. Links into other projects are included. Mentions are picked up again when comments load,
-when you post one and when you edit the description.
+from. Links into other projects are included, and drilling into one loads its children and
+discussion from its own project. Its state, fields and comments can be edited as usual, but
+moving it to a sprint, re-parenting it or adding children under it needs that project's sprints
+and areas, so those keys say to switch to it with `:project` first. Mentions are picked up again
+when comments load, when you post one and when you edit the description.
 
 ## Team filter
 

@@ -73,7 +73,7 @@ func NewFake() *Fake {
 			ID: id, Rev: 1, Type: typ, Kind: KindOf(typ), Title: title, State: state, AssignedTo: who,
 			IterationPath: iter, AreaPath: "Platform", Effort: effort, Priority: prio, ParentID: parent,
 			BoardColumn: state, ChangedDate: now.Add(-time.Duration(id) * time.Hour), ChangedBy: "Alex Kim",
-			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+			URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id), Project: "Platform",
 		}
 		// Real Azure DevOps Bugs carry Repro Steps/Acceptance Criteria instead
 		// of a Description, so the demo mirrors that split.
@@ -139,10 +139,26 @@ func NewFake() *Fake {
 		1013: demoComments(now, "Alex Kim", "Publisher change is in review, consumer side still needs the header read added.",
 			"Sveinung Øverland", "Picking this up now that #1015 landed."),
 	}
+	// A feature and its task in another project, reachable only through a
+	// link, so the drill-down has to load them against their own project.
+	for _, it := range []*model.WorkItem{
+		{ID: 3001, Type: "Feature", Title: "Single sign-on via Entra ID", State: "In Progress", AssignedTo: "Alex Kim"},
+		{ID: 3002, ParentID: 3001, Type: "Task", Title: "Register the app in Entra ID", State: "To Do", RemainingWork: 3},
+	} {
+		it.Rev, it.Kind, it.BoardColumn, it.Project = 1, KindOf(it.Type), it.State, "Identity"
+		it.AreaPath, it.IterationPath = "Identity", "Identity\\Sprint 7"
+		it.ChangedDate, it.ChangedBy = now.Add(-time.Duration(it.ID-3000)*time.Hour), "Alex Kim"
+		it.Description = demoDescription(it.ID, it.Title)
+		it.URL = fmt.Sprintf("https://dev.azure.com/contoso/Identity/_workitems/edit/%d", it.ID)
+		f.items[it.ID] = it
+	}
+	f.comments[3001] = demoComments(now, "Alex Kim", "Tenant admin consent is approved.", "Priya Natarajan", "Great, the invite flow can link to this.")
+
 	// Links for the Related section: the trace work is related to the bug
 	// it fixes, the dashboard waits on it, and within it the consumer task
-	// waits on the publisher one.
+	// waits on the publisher one. The SSO button relates across projects.
 	f.links = []fakeLink{
+		{1028, 3001, model.RelRelated},
 		{1013, 1020, model.RelRelated},
 		{1013, 1014, model.RelSuccessor},
 		{1015, 1016, model.RelSuccessor},
@@ -338,7 +354,8 @@ func (f *Fake) Create(ctx context.Context, project string, n model.NewItem) (*mo
 		ID: id, Rev: 1, Type: n.Type, Kind: KindOf(n.Type), Title: n.Title, State: state, BoardColumn: state,
 		IterationPath: n.IterationPath, AreaPath: n.AreaPath, ParentID: n.ParentID,
 		ChangedDate: time.Now(), ChangedBy: f.me,
-		URL: fmt.Sprintf("https://dev.azure.com/contoso/Platform/_workitems/edit/%d", id),
+		URL:     fmt.Sprintf("https://dev.azure.com/contoso/%s/_workitems/edit/%d", project, id),
+		Project: project,
 	}
 	patches := []model.Patch{{Field: model.FieldTitle, Value: n.Title}, {Field: model.FieldWorkItemType, Value: n.Type}}
 	if n.AssignedTo != "" {
@@ -452,7 +469,7 @@ func (f *Fake) Backlog(ctx context.Context, project, team string) ([]*model.Work
 	if err := f.wait(ctx); err != nil {
 		return nil, err
 	}
-	return f.snapshot(func(w *model.WorkItem) bool { return w.Kind != model.KindTask }), nil
+	return f.snapshot(func(w *model.WorkItem) bool { return inProject(w, project) && w.Kind != model.KindTask }), nil
 }
 
 func (f *Fake) MyItems(ctx context.Context, project string) ([]*model.WorkItem, error) {
@@ -460,19 +477,29 @@ func (f *Fake) MyItems(ctx context.Context, project string) ([]*model.WorkItem, 
 		return nil, err
 	}
 	return f.snapshot(func(w *model.WorkItem) bool {
-		return w.AssignedTo == f.me && w.State != "Removed"
+		return inProject(w, project) && w.AssignedTo == f.me && w.State != "Removed"
 	}), nil
 }
 
 func (f *Fake) Parents(ctx context.Context, project string) ([]*model.WorkItem, error) {
-	return f.snapshot(func(w *model.WorkItem) bool { return w.Kind == model.KindEpic || w.Kind == model.KindFeature }), nil
+	return f.snapshot(func(w *model.WorkItem) bool {
+		return inProject(w, project) && (w.Kind == model.KindEpic || w.Kind == model.KindFeature)
+	}), nil
+}
+
+// inProject mirrors the SDK's project-scoped routes and WIQL, which never
+// return another project's items.
+func inProject(w *model.WorkItem, project string) bool {
+	return project == "" || w.Project == project
 }
 
 func (f *Fake) Children(ctx context.Context, project string, parentID int) ([]*model.WorkItem, error) {
 	if err := f.wait(ctx); err != nil {
 		return nil, err
 	}
-	return f.snapshot(func(w *model.WorkItem) bool { return w.ParentID == parentID && w.State != "Removed" }), nil
+	return f.snapshot(func(w *model.WorkItem) bool {
+		return inProject(w, project) && w.ParentID == parentID && w.State != "Removed"
+	}), nil
 }
 
 func (f *Fake) ChildrenOf(ctx context.Context, project string, parentIDs []int) (map[int][]*model.WorkItem, error) {
@@ -484,7 +511,7 @@ func (f *Fake) ChildrenOf(ctx context.Context, project string, parentIDs []int) 
 		want[id] = true
 	}
 	out := map[int][]*model.WorkItem{}
-	for _, it := range f.snapshot(func(w *model.WorkItem) bool { return want[w.ParentID] && w.State != "Removed" }) {
+	for _, it := range f.snapshot(func(w *model.WorkItem) bool { return inProject(w, project) && want[w.ParentID] && w.State != "Removed" }) {
 		out[it.ParentID] = append(out[it.ParentID], it)
 	}
 	return out, nil
@@ -517,7 +544,7 @@ func (f *Fake) Items(ctx context.Context, ids []int) ([]*model.WorkItem, error) 
 	return out, nil
 }
 
-func (f *Fake) Links(ctx context.Context, project string, id int) ([]model.RelatedItem, error) {
+func (f *Fake) Links(ctx context.Context, id int) ([]model.RelatedItem, error) {
 	if err := f.wait(ctx); err != nil {
 		return nil, err
 	}
@@ -563,6 +590,9 @@ func (f *Fake) Comments(ctx context.Context, project string, id int) ([]model.Co
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if it, ok := f.items[id]; ok && !inProject(it, project) {
+		return nil, fmt.Errorf("work item %d not found in project %s", id, project)
+	}
 	return append([]model.Comment(nil), f.comments[id]...), nil
 }
 
@@ -572,8 +602,8 @@ func (f *Fake) AddComment(ctx context.Context, project string, id int, text stri
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.items[id]; !ok {
-		return model.Comment{}, fmt.Errorf("work item %d not found", id)
+	if it, ok := f.items[id]; !ok || !inProject(it, project) {
+		return model.Comment{}, fmt.Errorf("work item %d not found in project %s", id, project)
 	}
 	c := model.Comment{ID: len(f.comments[id]) + 1, Author: f.me, CreatedDate: time.Now(), Text: text}
 	f.comments[id] = append(f.comments[id], c)

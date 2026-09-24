@@ -61,6 +61,7 @@ type WorkItem struct {
 	ChangedDate        time.Time
 	ChangedBy          string
 	URL                string // browser URL
+	Project            string // team project, "" when unknown
 }
 
 // Assignee returns a display value for the assignee column.

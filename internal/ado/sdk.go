@@ -559,7 +559,7 @@ func (s *SDK) Items(ctx context.Context, ids []int) ([]*model.WorkItem, error) {
 	return s.fetch(ctx, "", ids)
 }
 
-func (s *SDK) Links(ctx context.Context, project string, id int) ([]model.RelatedItem, error) {
+func (s *SDK) Links(ctx context.Context, id int) ([]model.RelatedItem, error) {
 	// The expand parameter cannot be combined with a field list, so this
 	// fetches the whole item once just for its relations.
 	expand := workitemtracking.WorkItemExpandValues.Relations
@@ -803,6 +803,7 @@ func (s *SDK) convert(wi *workitemtracking.WorkItem, project string) *model.Work
 	if proj == "" && m.AreaPath != "" {
 		proj = strings.SplitN(m.AreaPath, "\\", 2)[0]
 	}
+	m.Project = proj
 	m.URL = fmt.Sprintf("%s/%s/_workitems/edit/%d", s.orgURL, proj, m.ID)
 	return m
 }
