@@ -144,7 +144,7 @@ func (a *App) showIn(v viewID, id int, report bool) tea.Cmd {
 // hasItems reports whether view v has data to select in yet.
 func (a *App) hasItems(v viewID) bool {
 	switch v {
-	case viewSprint, viewBoard:
+	case viewSprint, viewBoard, viewTeam:
 		return a.sprint.all != nil
 	case viewBacklog:
 		return a.backlog.all != nil
@@ -176,6 +176,8 @@ func (a *App) selectIn(v viewID, id int) bool {
 		a.board.jumpTo(id)
 		it := a.board.current()
 		return it != nil && it.ID == id
+	case viewTeam:
+		return a.team.jumpTo(id)
 	case viewDash:
 		a.dashBoard.jumpTo(id)
 		if it := a.dashBoard.current(); it != nil && it.ID == id {
@@ -204,6 +206,8 @@ func (a *App) onGotoKey(msg tea.KeyMsg) tea.Cmd {
 		return a.gotoView(viewBoard)
 	case key.Matches(msg, keys.GotoBacklog):
 		return a.gotoView(viewBacklog)
+	case key.Matches(msg, keys.GotoTeam):
+		return a.gotoView(viewTeam)
 	case key.Matches(msg, keys.GotoParent):
 		return a.gotoParent()
 	}

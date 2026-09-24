@@ -31,17 +31,18 @@ const (
 	viewSprint
 	viewBoard
 	viewBacklog
+	viewTeam
 	// viewItem is the full-screen view of one work item. It is not a tab:
 	// you drill into it with D and leave it with esc.
 	viewItem
 )
 
 func (v viewID) String() string {
-	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Item"}[v]
+	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Team", "Item"}[v]
 }
 
 // tabViews are the numbered views shown in the header.
-var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog}
+var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog, viewTeam}
 
 // App is the root model. It is used by pointer so closures in popups can
 // reach it safely.
@@ -69,6 +70,8 @@ type App struct {
 
 	sprint, backlog *list
 	board           *board
+	// team is the Board's items grouped by assignee, for stand-ups.
+	team *team
 
 	// Dashboard: a kanban of the requirement-level items assigned to @Me
 	// (dashBoard) on top, and below it a kanban-with-swimlanes of those
@@ -98,6 +101,7 @@ type App struct {
 	focusDetail  bool
 	previewList  bool // detail pane beside list views
 	previewBoard bool // detail pane beside the board
+	previewTeam  bool // detail pane beside the Team view
 
 	// comments caches each item's discussion by id, fetched on demand (the
 	// drill-down's C toggle, and the Board's preview pane which has the
@@ -151,6 +155,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		sprint:    newList("sprint is empty"),
 		backlog:   newList("backlog is empty"),
 		board:     newBoard(),
+		team:      newTeam(),
 		dashBoard: newBoard(),
 		dashLanes: newLanes(),
 		spin:      sp,
@@ -164,6 +169,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 
 		previewList:  true,
 		previewBoard: true,
+		previewTeam:  true,
 		previewDash:  true,
 
 		health: &health{staleAfter: cfg.StaleAfter()},
@@ -177,6 +183,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 	a.refreshEvery = cfg.RefreshSeconds
 	a.dashShowDone = cfg.DashShowDone
 	a.board.list = cfg.BoardList
+	a.team.showDone = cfg.TeamShowDone
 	return a
 }
 
@@ -198,9 +205,17 @@ func (a *App) applyTeamFilter() {
 			l.rebuild()
 		}
 	}
-	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, inc)
+	a.rebucket(a.sprint.all)
 	a.refreshDashboard()
 	a.refreshDetail()
+}
+
+// rebucket rebuilds the Board and the Team view, the two views that lay the
+// sprint's items out by board column, from items.
+func (a *App) rebucket(items []*model.WorkItem) {
+	def, inc := a.currentBoard(), a.include()
+	a.board.setItems(def, items, a.ctx.Backlog, inc)
+	a.team.setItems(def, items, a.ctx.Backlog, inc)
 }
 
 // refreshDashboard rebuilds the Dashboard's kanban and lanes from whatever
@@ -345,6 +360,7 @@ func (a *App) wireLists() {
 		}
 	}
 	a.board.health, a.dashBoard.health, a.dashLanes.health = a.health, a.health, a.health
+	a.team.health = a.health
 	// Tasks already show in the PBI's detail preview and progress badge, so
 	// the flat sprint view drops them. Backlog's query never returns
 	// task-level items in the first place, flat or not.
@@ -500,7 +516,7 @@ func (a *App) loadView(v viewID) tea.Cmd {
 	if a.ctx.Project == "" || a.ctx.Team == "" {
 		return nil
 	}
-	if (v == viewSprint || v == viewBoard) && a.ctx.Iteration.Path == "" {
+	if (v == viewSprint || v == viewBoard || v == viewTeam) && a.ctx.Iteration.Path == "" {
 		// Never query with an empty path; the server rejects it and the
 		// message is cryptic. Tell the user what is missing instead.
 		if len(a.iterations) == 0 {
@@ -517,7 +533,7 @@ func (a *App) loadView(v viewID) tea.Cmd {
 		defer cancel()
 		m := itemsLoadedMsg{view: v, gen: gen}
 		switch v {
-		case viewSprint, viewBoard:
+		case viewSprint, viewBoard, viewTeam:
 			m.view = viewSprint
 			if c.Iteration.Path == c.Project {
 				m.items, m.external, m.err = a.client.Unscheduled(ctx, c.Project, c.Team)
@@ -662,7 +678,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.view {
 		case viewSprint:
 			a.sprint.setItems(msg.items, msg.external)
-			a.board.setItems(a.currentBoard(), msg.items, a.ctx.Backlog, a.include())
+			a.rebucket(msg.items)
 		case viewBacklog:
 			a.backlog.setItems(msg.items, nil)
 		case viewDash:
@@ -680,6 +696,9 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if a.view == viewBoard {
 				a.board.jumpTo(a.pendingJump)
+				a.pendingJump = 0
+			} else if a.view == viewTeam {
+				a.team.jumpTo(a.pendingJump)
 				a.pendingJump = 0
 			} else if a.view == viewDash {
 				a.dashBoard.jumpTo(a.pendingJump)
@@ -814,8 +833,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.item.setComments(msg.comments)
 			}
 		}
-		if it := a.currentItem(); it != nil && it.ID == msg.id &&
-			(a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog) {
+		if it := a.currentItem(); it != nil && it.ID == msg.id && a.view.previewsComments() {
 			a.refreshDetail()
 		}
 		return a, nil
@@ -1110,6 +1128,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.jumpView(viewBoard)
 	case key.Matches(msg, keys.Backlog):
 		return a.jumpView(viewBacklog)
+	case key.Matches(msg, keys.Team):
+		return a.jumpView(viewTeam)
 	case key.Matches(msg, keys.PrevSprint):
 		return a.shiftSprint(-1)
 	case key.Matches(msg, keys.NextSprint):
@@ -1126,6 +1146,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		switch a.view {
 		case viewBoard:
 			a.previewBoard = !a.previewBoard
+		case viewTeam:
+			a.previewTeam = !a.previewTeam
 		case viewDash:
 			a.previewDash = !a.previewDash
 		default:
@@ -1156,6 +1178,12 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 			return a.openItem(a.currentItem())
 		}
 		return a.onBoardKey(msg)
+	}
+	if a.view == viewTeam {
+		if msg.String() == "enter" { // enter drills in from a row
+			return a.openItem(a.currentItem())
+		}
+		return a.onTeamKey(msg)
 	}
 	if a.view == viewDash {
 		if msg.String() == "enter" { // enter drills in from a card
@@ -1394,6 +1422,55 @@ func (a *App) onBoardKey(msg tea.KeyMsg) tea.Cmd {
 	return a.loadPreviewComments(false)
 }
 
+func (a *App) onTeamKey(msg tea.KeyMsg) tea.Cmd {
+	t := a.team
+	switch {
+	case key.Matches(msg, keys.PreviewDown):
+		if a.scrollPreview(true) {
+			return nil
+		}
+	case key.Matches(msg, keys.PreviewUp):
+		if a.scrollPreview(false) {
+			return nil
+		}
+	case key.Matches(msg, keys.Down):
+		t.move(1)
+	case key.Matches(msg, keys.Up):
+		t.move(-1)
+	case key.Matches(msg, keys.Left):
+		t.moveColumn(-1)
+	case key.Matches(msg, keys.Right):
+		t.moveColumn(1)
+	case key.Matches(msg, keys.Top):
+		t.move(-1 << 20)
+	case key.Matches(msg, keys.Bottom):
+		t.move(1 << 20)
+	case key.Matches(msg, keys.NextPerson):
+		t.movePerson(1)
+	case key.Matches(msg, keys.PrevPerson):
+		t.movePerson(-1)
+	case key.Matches(msg, keys.FocusPerson):
+		t.focus = !t.focus
+	case key.Matches(msg, keys.Select):
+		t.toggleSelect()
+	case key.Matches(msg, keys.ClearSel):
+		t.selected = map[int]bool{}
+	case key.Matches(msg, keys.ColLeft):
+		return a.moveColumn(-1)
+	case key.Matches(msg, keys.ColRight):
+		return a.moveColumn(1)
+	case key.Matches(msg, keys.Closed):
+		t.showDone = !t.showDone
+		a.cfg.TeamShowDone = t.showDone
+		a.persist()
+		a.rebucket(a.sprint.all)
+	default:
+		return a.onActionKey(msg)
+	}
+	a.refreshDetail()
+	return a.loadPreviewComments(false)
+}
+
 func (a *App) onCmdKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -1497,12 +1574,12 @@ func (a *App) runCommand(c string) tea.Cmd {
 	return a.setFlash("unknown command: "+word, true)
 }
 
-// toggleAttention narrows the Sprint tree, Backlog and Board to items
-// with a health signal. It applies to all three at once, so switching view
-// keeps the same question answered.
+// toggleAttention narrows the Sprint tree, Backlog, Board and Team view to
+// items with a health signal. It applies to all of them at once, so
+// switching view keeps the same question answered.
 func (a *App) toggleAttention() tea.Cmd {
 	on := !a.sprint.attention
-	a.sprint.attention, a.backlog.attention, a.board.attention = on, on, on
+	a.sprint.attention, a.backlog.attention, a.board.attention, a.team.attention = on, on, on, on
 	a.rehealth()
 	if on {
 		return a.setFlash("showing only items that need attention", false)
@@ -1529,7 +1606,7 @@ func (a *App) rehealth() {
 			l.rebuild()
 		}
 	}
-	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	a.rebucket(a.sprint.all)
 	a.refreshDashboard()
 	if a.item != nil {
 		a.item.buildColumns()
@@ -1552,7 +1629,7 @@ func (a *App) switchView(v viewID) tea.Cmd {
 
 func (a *App) needsLoad(v viewID) bool {
 	switch v {
-	case viewSprint, viewBoard:
+	case viewSprint, viewBoard, viewTeam:
 		return a.sprint.all == nil && !a.loading[viewSprint]
 	case viewBacklog:
 		return a.backlog.all == nil && !a.loading[viewBacklog]
@@ -1642,7 +1719,10 @@ func (a *App) pickBoard() tea.Cmd {
 	a.popup = newPicker("Board", items, func(pi pickItem) tea.Cmd {
 		b := pi.Value.(model.Board)
 		a.ctx.Board = b.Name
-		a.board.setItems(b, a.sprint.all, a.ctx.Backlog, a.include())
+		a.rebucket(a.sprint.all)
+		if a.view == viewTeam {
+			return nil // the Team view's columns come from the board too
+		}
 		return a.switchView(viewBoard)
 	})
 	return nil
@@ -1671,14 +1751,21 @@ func (a *App) activeList() *list {
 	return nil
 }
 
-// activeBoard is the kanban a column move (H/L) applies to: the Board tab's
-// board, or the Dashboard's kanban when its lanes don't have focus. Lanes
-// aren't a board (their state is fixed to "In Progress"), so there is no
-// column move for them.
-func (a *App) activeBoard() *board {
+// columns is a view laid out by board column, which H/L move items along.
+type columns interface {
+	adjacentColumn(dc int) (int, model.BoardColumn, bool)
+}
+
+// activeColumns is what a column move (H/L) applies to: the Board tab's
+// board, the Team view, or the Dashboard's kanban when its lanes don't
+// have focus. Lanes aren't a board (their state is fixed to "In
+// Progress"), so there is no column move for them.
+func (a *App) activeColumns() columns {
 	switch a.view {
 	case viewBoard:
 		return a.board
+	case viewTeam:
+		return a.team
 	case viewDash:
 		if !a.dashFocusLanes {
 			return a.dashBoard
@@ -1694,6 +1781,8 @@ func (a *App) currentItem() *model.WorkItem {
 		return a.item.current()
 	case a.view == viewBoard:
 		return a.board.current()
+	case a.view == viewTeam:
+		return a.team.current()
 	case a.view == viewDash:
 		if a.dashFocusLanes {
 			return a.dashLanes.current()
@@ -1716,6 +1805,8 @@ func (a *App) targetItems() []*model.WorkItem {
 		return nil
 	case a.view == viewBoard:
 		return a.board.targetItems()
+	case a.view == viewTeam:
+		return a.team.targetItems()
 	case a.view == viewDash:
 		if a.dashFocusLanes {
 			return a.dashLanes.targetItems()
@@ -1732,6 +1823,8 @@ func (a *App) clearSelection() {
 	switch a.view {
 	case viewBoard:
 		a.board.selected = map[int]bool{}
+	case viewTeam:
+		a.team.selected = map[int]bool{}
 	case viewDash:
 		a.dashBoard.selected = map[int]bool{}
 		a.dashLanes.selected = map[int]bool{}
@@ -1780,7 +1873,7 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 			}
 		}
 	}
-	a.board.setItems(a.currentBoard(), a.sprint.all, a.ctx.Backlog, a.include())
+	a.rebucket(a.sprint.all)
 	a.refreshDashboard()
 	// The drill-down can hold items no list has (children fetched for it),
 	// so swap those pointers too or they keep a superseded revision.
@@ -1861,11 +1954,7 @@ func (a *App) refreshDetail() {
 	if it != nil {
 		parent = a.lookup(it.ParentID)
 		children = a.childItems(it.ID)
-		// Only the Board, Sprint and Backlog previews show the discussion:
-		// they are the panes tall enough (full terminal height) to fit it
-		// alongside the children and description without the rest becoming
-		// unreadable.
-		if a.view == viewBoard || a.view == viewSprint || a.view == viewBacklog {
+		if a.view.previewsComments() {
 			comments = a.comments[it.ID]
 		}
 	}
@@ -1884,11 +1973,23 @@ func (a *App) refreshDetail() {
 	a.detail.GotoTop()
 }
 
+// previewsComments reports whether v's preview pane shows the discussion:
+// only the full-height panes beside the Board, Team, Sprint and Backlog
+// are tall enough to fit it alongside the children and description without
+// the rest becoming unreadable.
+func (v viewID) previewsComments() bool {
+	switch v {
+	case viewBoard, viewTeam, viewSprint, viewBacklog:
+		return true
+	}
+	return false
+}
+
 // loadPreviewComments fetches the discussion for the currently selected
-// item on the Board, Sprint or Backlog, for the preview pane. A no-op on
-// other views. force bypasses the cache, for an explicit refresh.
+// item for the preview pane, on the views whose preview shows it. force
+// bypasses the cache, for an explicit refresh.
 func (a *App) loadPreviewComments(force bool) tea.Cmd {
-	if a.view != viewBoard && a.view != viewSprint && a.view != viewBacklog {
+	if !a.view.previewsComments() {
 		return nil
 	}
 	if it := a.currentItem(); it != nil {
@@ -2445,7 +2546,7 @@ func (a *App) bodyHeight() int { return max(a.h-3, 1) }
 // boardWidth and dashBoardWidth are the widths the Board and the
 // Dashboard's kanban render at: the screen less the preview pane beside them.
 func (a *App) boardWidth() int {
-	if a.view != viewBoard {
+	if a.view != viewBoard && a.view != viewTeam {
 		return a.w
 	}
 	if dw := a.detailWidth(); dw > 0 {
@@ -2475,8 +2576,8 @@ func (a *App) detailWidth() int {
 	if a.w < 110 || a.view == viewItem {
 		return 0 // the drill-down lays out its own panes
 	}
-	if a.view == viewBoard {
-		if !a.previewBoard {
+	if a.view == viewBoard || a.view == viewTeam {
+		if (a.view == viewBoard && !a.previewBoard) || (a.view == viewTeam && !a.previewTeam) {
 			return 0
 		}
 		return min(a.w/3, previewMaxW)
@@ -2589,6 +2690,8 @@ func (a *App) renderHeader() string {
 			name += " · " + h
 		}
 		summary = sMuted.Render(name)
+	case a.view == viewTeam:
+		summary = sMuted.Render(a.team.summary())
 	case a.view == viewDash:
 		// The counts are on the summary line right below; this just says
 		// which half has the keys.
@@ -2651,6 +2754,14 @@ func (a *App) renderBody() string {
 			return a.board.view(a.boardWidth(), h, true)
 		}
 		left := a.board.view(a.boardWidth(), h, !a.focusDetail)
+		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
+	if a.view == viewTeam {
+		if dw == 0 {
+			return a.team.view(a.boardWidth(), h, true)
+		}
+		left := a.team.view(a.boardWidth(), h, !a.focusDetail)
 		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
@@ -2742,6 +2853,8 @@ func (a *App) renderFooter() string {
 		}
 	case a.view == viewBoard:
 		bindings = footerBoard
+	case a.view == viewTeam:
+		bindings = footerTeam
 	case a.view == viewDash:
 		bindings = footerDashKanban
 		if a.dashFocusLanes {

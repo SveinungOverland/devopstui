@@ -15,15 +15,12 @@ const boardColMinW = 26
 
 // board is the Kanban view: items from the current sprint bucketed by column.
 type board struct {
+	cardMarks
 	def      model.Board
 	cols     [][]*model.WorkItem
 	col, row int
 	offsetC  int
 	visible  int // columns on screen at the last render
-	selected map[int]bool
-	progress map[int]progress
-	health   *health
-	flags    map[int]model.Health
 	// attention shows only flagged cards.
 	attention bool
 	// list shows the cards as one list grouped by column instead of
@@ -31,7 +28,46 @@ type board struct {
 	list bool
 }
 
-func newBoard() *board { return &board{selected: map[int]bool{}} }
+// cardMarks is what the Board and the Team view both mark an item's row
+// with: the selection, the task progress badge and the health flag.
+type cardMarks struct {
+	selected map[int]bool
+	progress map[int]progress
+	health   *health
+	flags    map[int]model.Health
+}
+
+func newBoard() *board { return &board{cardMarks: cardMarks{selected: map[int]bool{}}} }
+
+// boardItem reports whether it is a card on a board: the requirement level,
+// with bugs counting as tasks or not as cfg says.
+func boardItem(it *model.WorkItem, cfg model.BacklogConfig) bool {
+	return !cfg.TaskLevel(it) && it.Kind != model.KindEpic && it.Kind != model.KindFeature
+}
+
+// columnIndex maps an item to its column in def: by board column first,
+// then by state, and the first column when neither matches.
+func columnIndex(def model.Board) func(*model.WorkItem) int {
+	stateToCol := map[string]int{}
+	for i, c := range def.Columns {
+		stateToCol[c.Name] = i
+		for _, st := range c.States {
+			if _, ok := stateToCol[st]; !ok {
+				stateToCol[st] = i
+			}
+		}
+	}
+	return func(it *model.WorkItem) int {
+		ci, ok := stateToCol[it.BoardColumn]
+		if !ok {
+			ci, ok = stateToCol[it.State]
+		}
+		if !ok {
+			ci = 0
+		}
+		return ci
+	}
+}
 
 // setItems buckets the requirement-level items into columns. cfg decides
 // whether bugs are cards or tasks; include (nil = all) is the team filter.
@@ -56,27 +92,12 @@ func (b *board) setItems(def model.Board, items []*model.WorkItem, cfg model.Bac
 		items = kept
 	}
 	b.cols = make([][]*model.WorkItem, len(def.Columns))
-	stateToCol := map[string]int{}
-	for i, c := range def.Columns {
-		stateToCol[c.Name] = i
-		for _, st := range c.States {
-			if _, ok := stateToCol[st]; !ok {
-				stateToCol[st] = i
-			}
-		}
-	}
+	colOf := columnIndex(def)
 	for _, it := range items {
-		if cfg.TaskLevel(it) || it.Kind == model.KindEpic || it.Kind == model.KindFeature {
+		if !boardItem(it, cfg) {
 			continue // board shows the requirement level
 		}
-		ci, ok := stateToCol[it.BoardColumn]
-		if !ok {
-			ci, ok = stateToCol[it.State]
-		}
-		if !ok {
-			ci = 0
-		}
-		if ci < len(b.cols) {
+		if ci := colOf(it); ci < len(b.cols) {
 			b.cols[ci] = append(b.cols[ci], it)
 		}
 	}
@@ -418,7 +439,7 @@ func (b *board) renderList(width, height int, focused bool) string {
 			if cur {
 				curLine = len(lines)
 			}
-			lines = append(lines, b.renderRow(it, w, cur && focused))
+			lines = append(lines, b.renderRow(it, w, cur && focused, true))
 		}
 	}
 	if len(lines) == 0 {
@@ -456,8 +477,9 @@ func (b *board) listHeading(ci int) string {
 }
 
 // renderRow is one card in the list: the card's facts on one line, with
-// the title given all the room the others leave.
-func (b *board) renderRow(it *model.WorkItem, w int, cur bool) string {
+// the title given all the room the others leave. who adds the assignee's
+// initials, which the Team view leaves off since its groups are people.
+func (b *cardMarks) renderRow(it *model.WorkItem, w int, cur, who bool) string {
 	st := rowStyler(cur)
 	plain := st(lipgloss.NewStyle())
 	muted := st(sMuted)
@@ -477,7 +499,9 @@ func (b *board) renderRow(it *model.WorkItem, w int, cur bool) string {
 	if it.Effort > 0 {
 		right = append(right, muted.Render(padLeft(fmtEffort(it.Effort), 4)))
 	}
-	right = append(right, muted.Render(padLeft(initials(it.AssignedTo), 2)))
+	if who {
+		right = append(right, muted.Render(padLeft(initials(it.AssignedTo), 2)))
+	}
 	// The flag sits right after the id, as on a card; the pair is padded
 	// so titles line up whether or not a row has one.
 	left := mark + st(kindStyle(it.Kind)).Render(fmt.Sprintf("%-4s", it.Kind.Tag())) +

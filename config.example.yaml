@@ -60,6 +60,11 @@ hide_done: false
 # with c — the value is written back here.
 dash_show_done: false
 
+# Show Done/Closed items in the Team view. Hidden by default (flagged ones,
+# such as a done PBI with open tasks, still show). Toggle at runtime with c —
+# the value is written back here.
+team_show_done: false
+
 # Show a details view's children as a kanban of their states instead of a
 # list grouped by state. Toggle at runtime with f — the value is written
 # back here.

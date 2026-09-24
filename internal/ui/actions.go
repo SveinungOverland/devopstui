@@ -161,7 +161,7 @@ func (a *App) newItem(forceBug bool) tea.Cmd {
 		}
 		title = fmt.Sprintf("New %s under #%d %s", typ, parent.ID, trunc(parent.Title, 30))
 	}
-	if a.view == viewSprint || a.view == viewBoard {
+	if a.view == viewSprint || a.view == viewBoard || a.view == viewTeam {
 		n.IterationPath = a.ctx.Iteration.Path // keep new work in the sprint you are looking at
 	}
 	// A task belongs to whoever owns the requirement above it, so it
@@ -535,7 +535,7 @@ func (a *App) promptNumber(targets []*model.WorkItem, title, field string, curre
 
 // moveColumn changes the board column (via state) of the targets.
 func (a *App) moveColumn(dc int) tea.Cmd {
-	b := a.activeBoard()
+	b := a.activeColumns()
 	if b == nil {
 		return nil
 	}
