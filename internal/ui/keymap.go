@@ -11,6 +11,9 @@ type keymap struct {
 	Collapse, Expand, CollapseAll, ExpandAll key.Binding
 	Focus, Preview, Details                  key.Binding
 	Comments, Comment, Related               key.Binding
+	// jumps: g is a leader; the Goto* bindings match the key after it.
+	Goto, GotoDash, GotoSprint, GotoBoard, GotoBacklog, GotoParent key.Binding
+	JumpBack, JumpFwd                                              key.Binding
 	// views
 	Dashboard, Sprint, Board, Backlog key.Binding
 	PrevSprint, NextSprint, CurSprint key.Binding
@@ -37,7 +40,7 @@ func b(help string, keys ...string) key.Binding {
 var keys = keymap{
 	Up:          b("up", "k", "up"),
 	Down:        b("down", "j", "down"),
-	Top:         b("top", "g", "home"),
+	Top:         key.NewBinding(key.WithKeys("home"), key.WithHelp("gg", "top")), // g g replays as home
 	Bottom:      b("bottom", "G", "end"),
 	PageUp:      b("page up", "pgup"),
 	PageDown:    b("page down", "pgdown"),
@@ -53,6 +56,16 @@ var keys = keymap{
 	Comments:    b("discussion", "C"),
 	Comment:     b("add comment", "c"),
 	Related:     b("focus related", "x"),
+
+	Goto:        b("goto", "g"),
+	GotoDash:    key.NewBinding(key.WithKeys("d"), key.WithHelp("gd", "show in dashboard")),
+	GotoSprint:  key.NewBinding(key.WithKeys("s"), key.WithHelp("gs", "show in sprint")),
+	GotoBoard:   key.NewBinding(key.WithKeys("b"), key.WithHelp("gb", "show on board")),
+	GotoBacklog: key.NewBinding(key.WithKeys("B"), key.WithHelp("gB", "show in backlog")),
+	GotoParent:  key.NewBinding(key.WithKeys("p"), key.WithHelp("gp", "go to parent")),
+	// ctrl+i would be vim's forward, but terminals send it as tab.
+	JumpBack: b("jump back", "ctrl+o"),
+	JumpFwd:  b("jump forward", "ctrl+n"),
 
 	Dashboard:   b("dashboard", "1"),
 	Sprint:      b("sprint", "2"),
@@ -107,6 +120,7 @@ var keys = keymap{
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Details, keys.Comments, keys.Comment, keys.Related},
+	{keys.JumpBack, keys.JumpFwd, keys.GotoDash, keys.GotoSprint, keys.GotoBoard, keys.GotoBacklog, keys.GotoParent},
 	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.NewBug, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
@@ -124,6 +138,6 @@ var footerDashLanes = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, k
 
 // footerItemDesc, footerItemRelated and footerItemKanban are the focus
 // modes of the drill-down view.
-var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.Comments, keys.Related, keys.Comment, keys.New, keys.NewBug, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Back, keys.Help}
-var footerItemRelated = []key.Binding{keys.Up, keys.Down, keys.Details, keys.Related, keys.Focus, keys.PreviewUp, keys.PreviewDown, keys.Comments, keys.Comment, keys.Edit, keys.State, keys.Assign, keys.Back, keys.Help}
-var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.ChildLayout, keys.New, keys.NewBug, keys.Details, keys.Edit, keys.State, keys.Focus, keys.PreviewUp, keys.PreviewDown, keys.Comments, keys.Related, keys.Comment, keys.Back}
+var footerItemDesc = []key.Binding{keys.Focus, keys.Desc, keys.Comments, keys.Related, keys.Comment, keys.New, keys.NewBug, keys.Edit, keys.Title, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Back, keys.JumpBack, keys.Help}
+var footerItemRelated = []key.Binding{keys.Up, keys.Down, keys.Details, keys.Related, keys.Focus, keys.PreviewUp, keys.PreviewDown, keys.Comments, keys.Comment, keys.Edit, keys.State, keys.Assign, keys.Back, keys.JumpBack, keys.Help}
+var footerItemKanban = []key.Binding{keys.Left, keys.Right, keys.Up, keys.Down, keys.ColLeft, keys.ColRight, keys.ChildLayout, keys.New, keys.NewBug, keys.Details, keys.Edit, keys.State, keys.Focus, keys.PreviewUp, keys.PreviewDown, keys.Comments, keys.Related, keys.Comment, keys.Back, keys.JumpBack}
