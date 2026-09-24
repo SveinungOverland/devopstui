@@ -241,6 +241,14 @@ takes the rest, with its fields, its own children, description and discussion. `
 ╰─────────────────────────────────────╯╰──────────────────────────────────────────╯
 ```
 
+A task has no children, so drilling into one (or into a Bug, when the team tracks bugs as tasks)
+shows its **siblings** instead: every task under the same parent, with the one you opened marked
+`◆` and in bold, and a header saying how many of them are done and how many hours are left. `n`
+adds another sibling, and `H` `L` move the highlighted one through the states as they do children.
+Above them a **Parent** card shows the parent's title, state, assignee and the start of its
+acceptance criteria (its description when it has none), since that is usually the spec the task
+is working to; `gp` opens it. A parent no view has loaded is fetched for the card.
+
 `f` switches the children between that list and a kanban with one column per state, and the
 choice is saved as `item_kanban`. In the kanban a state with no children only takes the width
 of its heading, leaving the room to the columns that have cards.

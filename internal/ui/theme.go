@@ -84,6 +84,9 @@ func spread(plain lipgloss.Style, left string, w int, right ...string) string {
 // cursorMark is the left-edge marker of the highlighted row.
 const cursorMark = "▌"
 
+// selfMark flags the item drilled into among its siblings.
+const selfMark = "◆"
+
 func kindStyle(k model.Kind) lipgloss.Style {
 	switch k {
 	case model.KindEpic:
