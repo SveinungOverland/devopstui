@@ -165,3 +165,24 @@ func TestTeamViewInApp(t *testing.T) {
 		t.Errorf("cursor left #%d after the move", id)
 	}
 }
+
+// TestTeamKeepsPersonWhenOrderChanges: when the highlighted item leaves the
+// view (done, so hidden) on the same refresh that reorders the people, the
+// cursor stays with that item's person, not whoever now sits in their slot.
+func TestTeamKeepsPersonWhenOrderChanges(t *testing.T) {
+	tm := newTeam()
+	// Three people from the start, so the rebuild reuses the same backing
+	// array rather than growing a new one.
+	tm.setItems(teamDef, []*model.WorkItem{pbi(1, "Ann", "New"), pbi(2, "Bob", "New"), pbi(3, "Cid", "New")}, model.BacklogConfig{}, nil)
+	tm.jumpTo(2)
+
+	stale := pbi(3, "Cid", "Committed")
+	stale.ChangedDate = time.Now().Add(-30 * 24 * time.Hour) // flagged, so Cid sorts first
+	tm.setItems(teamDef, []*model.WorkItem{pbi(1, "Ann", "New"), pbi(2, "Bob", "Done"), stale}, model.BacklogConfig{}, nil)
+	if got := teamNames(tm); strings.Join(got, ",") != "Cid,Ann,Bob" {
+		t.Fatalf("people = %v, want [Cid Ann Bob]", got)
+	}
+	if got := tm.people[tm.p].label(); got != "Bob" {
+		t.Errorf("cursor on %s, want Bob, whose item was just hidden", got)
+	}
+}

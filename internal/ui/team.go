@@ -61,9 +61,13 @@ func newTeam() *team { return &team{cardMarks: cardMarks{selected: map[int]bool{
 // filter.
 func (t *team) setItems(def model.Board, items []*model.WorkItem, cfg model.BacklogConfig, include func(*model.WorkItem) bool) {
 	cur := t.current()
+	// A copy, not &t.people[t.p].name: the rebuild below reuses the
+	// slice's backing array, so a pointer into it would read whoever lands
+	// in that slot instead.
 	var curPerson *string // nil before the first load
 	if t.p < len(t.people) {
-		curPerson = &t.people[t.p].name
+		name := t.people[t.p].name
+		curPerson = &name
 	}
 	t.def = def
 	t.progress = computeProgress(items, cfg.TaskLevel)
