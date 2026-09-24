@@ -45,11 +45,9 @@ func TestAssess(t *testing.T) {
 		{"stale but tasks moving", pbi(func(w *WorkItem) { w.ChangedDate = old }), TaskTally{Done: 0, Total: 1, Latest: fresh}, 0, nil},
 		{"old but not active", pbi(func(w *WorkItem) { w.State = "New"; w.ChangedDate = old }), TaskTally{}, 0, nil},
 		{"old but removed", pbi(func(w *WorkItem) { w.State = "Removed"; w.ChangedDate = old; w.ParentID = 0 }), TaskTally{}, 0, nil},
-		{"no effort", pbi(func(w *WorkItem) { w.Effort = 0 }), TaskTally{}, SignalMissing, []string{"no effort"}},
-		{"done without effort", pbi(func(w *WorkItem) { w.State = "Done"; w.Effort = 0 }), TaskTally{}, 0, nil},
+		{"no effort is fine", pbi(func(w *WorkItem) { w.Effort = 0 }), TaskTally{}, 0, nil},
 		{"active and unassigned", pbi(func(w *WorkItem) { w.AssignedTo = "" }), TaskTally{}, SignalMissing, []string{"no assignee"}},
 		{"new and unassigned", pbi(func(w *WorkItem) { w.State = "New"; w.AssignedTo = "" }), TaskTally{}, 0, nil},
-		{"bug as requirement without effort", pbi(func(w *WorkItem) { w.Kind = KindBug; w.Effort = 0 }), TaskTally{}, SignalMissing, []string{"no effort"}},
 		{"task healthy", task(nil), TaskTally{}, 0, nil},
 		{"task in progress with 0h", task(func(w *WorkItem) { w.RemainingWork = 0 }), TaskTally{}, SignalMissing, []string{"no remaining work"}},
 		{"task to do with 0h", task(func(w *WorkItem) { w.State = "To Do"; w.RemainingWork = 0 }), TaskTally{}, 0, nil},
@@ -59,8 +57,8 @@ func TestAssess(t *testing.T) {
 		{"done orphan", pbi(func(w *WorkItem) { w.ParentID = 0; w.State = "Done" }), TaskTally{}, 0, nil},
 		{"parentless epic", &WorkItem{Kind: KindEpic, State: "New"}, TaskTally{}, 0, nil},
 		{"parentless bug", pbi(func(w *WorkItem) { w.Kind = KindBug; w.ParentID = 0 }), TaskTally{}, 0, nil},
-		{"several", pbi(func(w *WorkItem) { w.ParentID = 0; w.Effort = 0; w.ChangedDate = old }), TaskTally{Done: 1, Total: 1},
-			SignalReadyToClose | SignalStale | SignalMissing | SignalOrphan, []string{"no effort"}},
+		{"several", pbi(func(w *WorkItem) { w.ParentID = 0; w.AssignedTo = ""; w.ChangedDate = old }), TaskTally{Done: 1, Total: 1},
+			SignalReadyToClose | SignalStale | SignalMissing | SignalOrphan, []string{"no assignee"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -100,8 +98,8 @@ func TestSignalTop(t *testing.T) {
 	if Signal(0).Top() != 0 {
 		t.Error("empty set has a top")
 	}
-	h := Health{Signals: SignalStale | SignalMissing, Missing: []string{"no effort", "no assignee"}, Idle: 9 * 24 * time.Hour}
-	want := []string{"stale: 9 days without a change", "missing info: no effort, no assignee"}
+	h := Health{Signals: SignalStale | SignalMissing, Missing: []string{"no assignee", "no remaining work"}, Idle: 9 * 24 * time.Hour}
+	want := []string{"stale: 9 days without a change", "missing info: no assignee, no remaining work"}
 	if got := h.Describe(); !reflect.DeepEqual(got, want) {
 		t.Errorf("describe = %q", got)
 	}

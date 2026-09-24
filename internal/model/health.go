@@ -111,7 +111,7 @@ type HealthRules struct {
 // Health is what Assess found for one item.
 type Health struct {
 	Signals Signal
-	// Missing names what SignalMissing is about, e.g. "no effort".
+	// Missing names what SignalMissing is about, e.g. "no assignee".
 	Missing []string
 	// Idle is how long since the item (or one of its tasks) last changed,
 	// set when SignalStale is.
@@ -152,7 +152,6 @@ func Assess(it *WorkItem, tasks TaskTally, cfg BacklogConfig, r HealthRules) Hea
 	done := IsDone(it.State)
 	active := IsActive(it.State)
 	task := cfg.TaskLevel(it)
-	requirement := !task && (it.Kind == KindRequirement || it.Kind == KindBug)
 
 	if tasks.Total > 0 {
 		switch {
@@ -178,9 +177,6 @@ func Assess(it *WorkItem, tasks TaskTally, cfg BacklogConfig, r HealthRules) Hea
 	// be working on is not.
 	if active && it.AssignedTo == "" {
 		h.Missing = append(h.Missing, "no assignee")
-	}
-	if requirement && !done && it.Effort == 0 {
-		h.Missing = append(h.Missing, "no effort")
 	}
 	if task {
 		switch {
