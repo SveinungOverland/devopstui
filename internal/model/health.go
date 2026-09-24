@@ -178,13 +178,8 @@ func Assess(it *WorkItem, tasks TaskTally, cfg BacklogConfig, r HealthRules) Hea
 	if active && it.AssignedTo == "" {
 		h.Missing = append(h.Missing, "no assignee")
 	}
-	if task {
-		switch {
-		case active && it.RemainingWork == 0:
-			h.Missing = append(h.Missing, "no remaining work")
-		case done && it.RemainingWork > 0:
-			h.Missing = append(h.Missing, "hours left on a done task")
-		}
+	if task && done && it.RemainingWork > 0 {
+		h.Missing = append(h.Missing, "hours left on a done task")
 	}
 	if len(h.Missing) > 0 {
 		h.Signals |= SignalMissing

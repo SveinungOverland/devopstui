@@ -374,7 +374,7 @@ var signalHelp = map[model.Signal]string{
 	model.SignalOpenTasks:    "done, but tasks still open",
 	model.SignalReadyToClose: "every task done, item still open",
 	model.SignalStale:        "active, no change in a while (amber at twice that)",
-	model.SignalMissing:      "no assignee, or hours don't fit the state",
+	model.SignalMissing:      "active with no assignee, or done with hours left",
 	model.SignalOrphan:       "PBI without a parent Feature",
 }
 

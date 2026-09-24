@@ -278,7 +278,7 @@ view for this. Each glyph is a distinct shape, so they read without colour too:
 | `✗`   | open tasks     | The item is Done but some of its tasks aren't                                 |
 | `✓`   | ready to close | Every task is Done but the item isn't                                         |
 | `◷`   | stale          | Active, and neither it nor any of its tasks has changed for `stale_days`      |
-| `?`   | missing info   | Active item with no assignee; active task with 0h remaining; Done task with hours left |
+| `?`   | missing info   | Active item with no assignee; Done task with hours left |
 | `↑`   | orphan         | An open PBI with no parent Feature                                            |
 
 - The stale glyph fades in with age: it's grey at first and turns amber once the item has sat

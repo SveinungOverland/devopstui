@@ -49,8 +49,7 @@ func TestAssess(t *testing.T) {
 		{"active and unassigned", pbi(func(w *WorkItem) { w.AssignedTo = "" }), TaskTally{}, SignalMissing, []string{"no assignee"}},
 		{"new and unassigned", pbi(func(w *WorkItem) { w.State = "New"; w.AssignedTo = "" }), TaskTally{}, 0, nil},
 		{"task healthy", task(nil), TaskTally{}, 0, nil},
-		{"task in progress with 0h", task(func(w *WorkItem) { w.RemainingWork = 0 }), TaskTally{}, SignalMissing, []string{"no remaining work"}},
-		{"task to do with 0h", task(func(w *WorkItem) { w.State = "To Do"; w.RemainingWork = 0 }), TaskTally{}, 0, nil},
+		{"task in progress with 0h is fine", task(func(w *WorkItem) { w.RemainingWork = 0 }), TaskTally{}, 0, nil},
 		{"done task with hours", task(func(w *WorkItem) { w.State = "Done" }), TaskTally{}, SignalMissing, []string{"hours left on a done task"}},
 		{"task needs no effort", task(func(w *WorkItem) { w.Effort = 0; w.ParentID = 0 }), TaskTally{}, 0, nil},
 		{"orphan", pbi(func(w *WorkItem) { w.ParentID = 0 }), TaskTally{}, SignalOrphan, nil},
@@ -75,9 +74,9 @@ func TestAssess(t *testing.T) {
 
 func TestAssessBugAsTask(t *testing.T) {
 	cfg := BacklogConfig{BugsBehavior: "asTasks"}
-	bug := &WorkItem{Kind: KindBug, State: "Active", AssignedTo: "Ann", RemainingWork: 0}
+	bug := &WorkItem{Kind: KindBug, State: "Closed", AssignedTo: "Ann", RemainingWork: 2}
 	h := Assess(bug, TaskTally{}, cfg, HealthRules{})
-	if want := []string{"no remaining work"}; !reflect.DeepEqual(h.Missing, want) {
+	if want := []string{"hours left on a done task"}; !reflect.DeepEqual(h.Missing, want) {
 		t.Errorf("missing = %q, want %q", h.Missing, want)
 	}
 }
@@ -98,8 +97,8 @@ func TestSignalTop(t *testing.T) {
 	if Signal(0).Top() != 0 {
 		t.Error("empty set has a top")
 	}
-	h := Health{Signals: SignalStale | SignalMissing, Missing: []string{"no assignee", "no remaining work"}, Idle: 9 * 24 * time.Hour}
-	want := []string{"stale: 9 days without a change", "missing info: no assignee, no remaining work"}
+	h := Health{Signals: SignalStale | SignalMissing, Missing: []string{"no assignee", "hours left on a done task"}, Idle: 9 * 24 * time.Hour}
+	want := []string{"stale: 9 days without a change", "missing info: no assignee, hours left on a done task"}
 	if got := h.Describe(); !reflect.DeepEqual(got, want) {
 		t.Errorf("describe = %q", got)
 	}
