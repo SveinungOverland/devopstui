@@ -302,6 +302,15 @@ func TestItemViewChildListWalksAcrossStates(t *testing.T) {
 	if v.current().ID != 1015 {
 		t.Errorf("h should jump to the top of To Do, got %d", v.current().ID)
 	}
+	// G and gg go to the last and first child, across states.
+	h.keys("G")
+	if v.current().ID != 1016 {
+		t.Errorf("G should go to the last child, got %d", v.current().ID)
+	}
+	h.keys("g", "g")
+	if v.current().ID != 1015 {
+		t.Errorf("gg should go to the first child, got %d", v.current().ID)
+	}
 }
 
 func TestItemViewPreviewsHighlightedChild(t *testing.T) {

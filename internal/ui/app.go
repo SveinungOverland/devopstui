@@ -130,6 +130,13 @@ type App struct {
 
 	pendingJump int // item to select once the next load lands (after create)
 
+	// jumps is the ctrl+o/ctrl+n history. jumpIdx == len(jumps) means the
+	// current position is newer than every entry and not recorded yet.
+	jumps   []jump
+	jumpIdx int
+	// pendingGoto is set by the g leader; the next key completes it.
+	pendingGoto bool
+
 	// health holds the staleness threshold every view flags items by.
 	health *health
 }
@@ -824,6 +831,9 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.busy = ""
 		return a, a.setFlash(msg.err.Error(), true)
 
+	case openItemMsg:
+		return a, a.openItem(msg.item)
+
 	case flashMsg:
 		return a, a.setFlash(msg.text, false)
 
@@ -1027,13 +1037,29 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	if a.focusDetail {
 		switch {
-		case key.Matches(msg, keys.Focus), key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
+		case key.Matches(msg, keys.Quit):
+			return tea.Quit
+		case key.Matches(msg, keys.Focus), key.Matches(msg, keys.Back):
 			a.focusDetail = false
 			return nil
 		}
 		var cmd tea.Cmd
 		a.detail, cmd = a.detail.Update(msg)
 		return cmd
+	}
+
+	if a.pendingGoto {
+		a.pendingGoto = false
+		return a.onGotoKey(msg)
+	}
+	switch {
+	case key.Matches(msg, keys.Goto):
+		a.pendingGoto = true
+		return nil
+	case key.Matches(msg, keys.JumpBack):
+		return a.jumpBack()
+	case key.Matches(msg, keys.JumpFwd):
+		return a.jumpForward()
 	}
 
 	if a.view == viewItem && a.item != nil {
@@ -1050,13 +1076,6 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	// Global keys.
 	switch {
 	case key.Matches(msg, keys.Quit):
-		if l := a.activeList(); l != nil && len(l.selected) > 0 {
-			l.clearSelection()
-			return nil
-		}
-		if a.view == viewItem {
-			return a.closeItem() // q walks out of the drill-down first
-		}
 		return tea.Quit
 	case key.Matches(msg, keys.Help):
 		a.popup = helpPopup{}
@@ -1070,13 +1089,13 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.AutoRefresh):
 		return a.toggleAutoRefresh()
 	case key.Matches(msg, keys.Dashboard):
-		return a.switchView(viewDash)
+		return a.jumpView(viewDash)
 	case key.Matches(msg, keys.Sprint):
-		return a.switchView(viewSprint)
+		return a.jumpView(viewSprint)
 	case key.Matches(msg, keys.Board):
-		return a.switchView(viewBoard)
+		return a.jumpView(viewBoard)
 	case key.Matches(msg, keys.Backlog):
-		return a.switchView(viewBacklog)
+		return a.jumpView(viewBacklog)
 	case key.Matches(msg, keys.PrevSprint):
 		return a.shiftSprint(-1)
 	case key.Matches(msg, keys.NextSprint):
@@ -1412,9 +1431,9 @@ func (a *App) runCommand(c string) tea.Cmd {
 	case "board", "b":
 		return a.pickBoard()
 	case "backlog":
-		return a.switchView(viewBacklog)
+		return a.jumpView(viewBacklog)
 	case "dash", "dashboard", "d":
-		return a.switchView(viewDash)
+		return a.jumpView(viewDash)
 	case "refresh", "r":
 		return a.reloadAll()
 	case "auto":
@@ -1899,6 +1918,7 @@ func (a *App) yank() tea.Cmd {
 func (a *App) showItem(id int) tea.Cmd {
 	if it := a.lookup(id); it != nil {
 		if l := a.activeList(); l != nil {
+			a.pushJump()
 			l.jumpTo(id)
 			a.refreshDetail()
 			return nil
@@ -1930,6 +1950,7 @@ func (a *App) openItem(it *model.WorkItem) tea.Cmd {
 	if it == nil {
 		return nil
 	}
+	a.pushJump()
 	if a.view != viewItem || a.item == nil {
 		a.itemReturn = a.view
 		a.itemStack, a.itemPanes = nil, nil
@@ -2119,6 +2140,7 @@ func dominantType(items []*model.WorkItem) string {
 
 // closeItem walks one step back out of the drill-down.
 func (a *App) closeItem() tea.Cmd {
+	a.pushJump()
 	if len(a.itemStack) > 1 {
 		a.itemStack = a.itemStack[:len(a.itemStack)-1]
 		cmd := a.showItemView(a.itemStack[len(a.itemStack)-1])
@@ -2289,8 +2311,8 @@ func (a *App) onItemKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.Right):
 		v.move(1, 0)
 	case key.Matches(msg, keys.Top):
-		v.row = 0
-		v.clamp()
+		// The top of the column on the kanban, the first child in the list.
+		v.move(0, -1<<20)
 	case key.Matches(msg, keys.Bottom):
 		v.move(0, 1<<20)
 	case key.Matches(msg, keys.PreviewDown):
