@@ -85,6 +85,7 @@ devopstui --config ~/.config/devopstui/work.yaml
 | `dash_show_done`     | `false`    | Show Done/Closed items on the Dashboard kanban (`c` toggles)         |
 | `item_kanban`        | `false`    | Show a details view's children as a kanban, not a list (`f` toggles) |
 | `board_list`         | `false`    | Show the Board as a list grouped by column (`f` toggles)             |
+| `team_show_done`     | `false`    | Show Done items in the Team view (`c` toggles)                       |
 | `editor`             |            | Description editor; empty = `$VISUAL`/`$EDITOR`, `inline` = built-in |
 | `description_format` | `markdown` | `markdown` (native) or `html` (convert on save)                      |
 
@@ -150,9 +151,9 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `gg` `G`          | top / bottom          | `2`     | sprint tree         | `t`     | title           | `M`  | move to next sprint |
 | `l` `h`           | expand / collapse     | `3`     | board               | `d`     | description     | `B`  | move to backlog     |
 | `L` `H`           | expand / collapse all | `4`     | backlog             | `s`     | state           | `p`  | set parent          |
-| `tab`             | focus detail pane     | `[` `]` | prev / next sprint  | `a`     | assign          |      |                     |
-| `z`               | toggle preview pane   | `T`     | team filter         | `n`     | new child item  |      |                     |
-| `ctrl+u` `ctrl+d` | scroll preview pane   |         |                     | `N`     | new bug         |      |                     |
+| `tab`             | focus detail pane     | `5`     | team                | `a`     | assign          |      |                     |
+| `z`               | toggle preview pane   | `[` `]` | prev / next sprint  | `n`     | new child item  |      |                     |
+| `ctrl+u` `ctrl+d` | scroll preview pane   | `T`     | team filter         | `N`     | new bug         |      |                     |
 | `D`               | item details view     |         |                     |         |                 |      |                     |
 | `C`               | discussion            |         |                     |         |                 |      |                     |
 | `c`               | add comment           |         |                     |         |                 |      |                     |
@@ -170,11 +171,12 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `ctrl+o` `ctrl+n` | jump back / forward                                 |
 | `gd` `gs`         | show the highlighted item in the dashboard / sprint |
 | `gb` `gB`         | show the highlighted item on the board / backlog    |
+| `gt`              | show the highlighted item in the team view          |
 | `gp`              | go to (open) the parent                             |
 | `esc`             | close one level of the item details view            |
 | `q`               | quit, from anywhere                                 |
 
-`ctrl+o` and `ctrl+n` work like vim's jump list. Switching tabs (`1`-`4`, `:backlog`,
+`ctrl+o` and `ctrl+n` work like vim's jump list. Switching tabs (`1`-`5`, `:backlog`,
 `:dash`), `:<id>`, opening an item (`D`/`enter`), leaving one with `esc`, and every `g`
 motion are recorded. `ctrl+o` goes back through them, and that includes going back into an
 item details view and its drill-down trail. `ctrl+n` goes forward again. It isn't `ctrl+i`
@@ -359,7 +361,8 @@ view for this. Each glyph is a distinct shape, so they read without colour too:
   tasks.
 - A row or card has room for one glyph, the first in the table above. The details pane
   (`Flags`) and the item view's header list every flag, and say how long a stale item has sat.
-- **`:attention`** (or `:att`) narrows the Sprint tree, Backlog and Board to flagged items.
+- **`:attention`** (or `:att`) narrows the Sprint tree, Backlog, Board and Team view to
+  flagged items.
   Parents stay visible, dimmed. Run it again to show everything.
 - **`:stale 7`** sets the threshold in days and saves it as `stale_days`. `:stale off` turns
   the flag off, and `:stale` on its own shows the current value.
@@ -411,6 +414,35 @@ is open or a write is in flight, so nothing shifts under you mid-edit.
 
 Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:attention`, `:stale [days|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
+
+## Team view
+
+The Team view (`5`) is for stand-ups and quick syncs: the current sprint's board items (the
+same PBIs and bugs as the Board, honouring the team filter) grouped by who they are assigned
+to, then by board column, one line each. Tasks are left out; the preview pane beside it
+lists them for the highlighted item.
+
+```
+Dan Berg  4 items · 13 pts · 2 active · 1 done   ◷2 ✓1
+  Committed 2
+  ▌PBI  1003 ◷ Send invite email with magic link              0/1    5
+   PBI  1013 ✓ Propagate trace id through queue workers       3/3    8
+  In Review 1
+   BUG  1020   Spans lost when retry budget exhausted                2
+```
+
+- Each person's heading sums up their sprint: how many items and points, how many are active
+  or done, and a tally of every [flag](#flags-items-that-need-attention) raised on their items.
+- People with the most flagged items come first, so the sync starts where help is needed;
+  ties go alphabetically. Unassigned work is always its own group, last.
+- `J`/`K` jump to the next / previous person, `f` shows only the highlighted person, and
+  `j`/`k` walk every row, `h`/`l` jump between column groups.
+- Done items are hidden, except a done item that is still flagged (open tasks, say). `c`
+  shows them; the choice is saved as `team_show_done`. The heading's counts always include
+  them.
+- Everything else works as on the Board: `H`/`L` move an item to the neighbouring column,
+  `s`, `a`, `e` and the other change keys edit it, `space` selects, `enter`/`D` opens it, and
+  `z` toggles the preview.
 
 ## Develop
 

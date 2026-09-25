@@ -39,6 +39,9 @@ type Config struct {
 	BoardList bool `yaml:"board_list,omitempty"`
 	// DashShowDone shows Done/Closed items on the Dashboard's kanban.
 	DashShowDone bool `yaml:"dash_show_done,omitempty"`
+	// TeamShowDone shows Done/Closed items in the Team view. Hidden by
+	// default, except those still flagged; `c` toggles them.
+	TeamShowDone bool `yaml:"team_show_done,omitempty"`
 	// Editor for descriptions. Empty falls back to $VISUAL, then $EDITOR,
 	// then the built-in editor. "inline" forces the built-in one.
 	Editor string `yaml:"editor,omitempty"`
