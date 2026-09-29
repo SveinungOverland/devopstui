@@ -68,7 +68,7 @@ func (a *App) onActionKey(msg tea.KeyMsg) tea.Cmd {
 		if cmd := a.otherProject(targets, "move it"); cmd != nil {
 			return cmd
 		}
-		next, ok := a.nextIteration()
+		next, ok := a.nextIteration(a.iterationOf(targets))
 		if !ok {
 			return a.setFlash("no next sprint", true)
 		}
@@ -91,13 +91,44 @@ func (a *App) onActionKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (a *App) nextIteration() (model.Iteration, bool) {
+// nextIteration is the sprint after the one at path. The synthetic
+// "Unscheduled" entry is never a target.
+func (a *App) nextIteration(path string) (model.Iteration, bool) {
 	for i, it := range a.iterations {
-		if it.Path == a.ctx.Iteration.Path && i+1 < len(a.iterations) {
-			return a.iterations[i+1], true
+		if it.Path == path && i+1 < len(a.iterations) {
+			if next := a.iterations[i+1]; next.Path != "" && next.Path != a.ctx.Project {
+				return next, true
+			}
 		}
 	}
 	return model.Iteration{}, false
+}
+
+// sharedIteration is the team sprint all targets sit in, if they share one.
+// The backlog root ("Unscheduled") is not a sprint.
+func (a *App) sharedIteration(targets []*model.WorkItem) (string, bool) {
+	path := ""
+	for i, t := range targets {
+		if i > 0 && t.IterationPath != path {
+			return "", false
+		}
+		path = t.IterationPath
+	}
+	for _, it := range a.iterations {
+		if it.Path != "" && it.Path != a.ctx.Project && it.Path == path {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// iterationOf is where "next" counts from: the targets' own sprint, so it
+// follows the item rather than the sprint on screen, else the viewed one.
+func (a *App) iterationOf(targets []*model.WorkItem) string {
+	if path, ok := a.sharedIteration(targets); ok {
+		return path
+	}
+	return a.ctx.Iteration.Path
 }
 
 // ------------------------------------------------------------ create
@@ -421,6 +452,13 @@ func (a *App) pickMoveTarget(targets []*model.WorkItem) tea.Cmd {
 		it := pi.Value.(model.Iteration)
 		return a.moveTo(targets, it.Path, it.Name)
 	})
+	// Open on the item's own sprint so j+enter moves it to the next one;
+	// an item outside any sprint opens on today's.
+	start, ok := a.sharedIteration(targets)
+	if !ok {
+		start = a.currentIteration().Path
+	}
+	a.popup.(*picker).selectValue(func(pi pickItem) bool { return pi.Value.(model.Iteration).Path == start })
 	return nil
 }
 

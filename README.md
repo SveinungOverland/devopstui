@@ -196,6 +196,11 @@ iteration tree, not just the current team's sprints, so an item can be moved to 
 team's sprint or a nested release iteration. Sprint navigation above stays scoped to the
 current team.
 
+Both open with the cursor on the item's own sprint, so `j` `enter` moves it to the next
+one (an item outside any team sprint opens on today's sprint). `M` does that in one key:
+it moves to the sprint after the item's own, not after the one on screen. Selected items
+in different sprints step from the sprint on screen instead.
+
 On the board, `h`/`l` move between columns and `H`/`L` move the card to the neighbouring
 column. A preview of the highlighted card sits on the right; `z` hides or shows it, `ctrl+u`/
 `ctrl+d` scroll it in place when its description doesn't fit, and `tab` focuses it so the

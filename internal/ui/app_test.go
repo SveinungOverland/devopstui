@@ -207,7 +207,7 @@ func TestMoveFeatureOffersChildren(t *testing.T) {
 	h := newHarness(t, 140, 40)
 	h.app.sprint.jumpTo(1012) // feature with 2 PBIs + bug + tasks below
 	h.keys("m")
-	h.keys("enter") // first entry = Backlog
+	h.keys("b", "a", "c", "k", "enter") // filter down to Backlog
 	if _, ok := h.app.popup.(*choice); !ok {
 		t.Fatalf("expected choice popup, got %T", h.app.popup)
 	}
@@ -2147,5 +2147,112 @@ func TestHelpFitsNarrowTerminal(t *testing.T) {
 		if w := lipgloss.Width(l); w > 60 {
 			t.Errorf("help line is %d wide at 60 columns: %q", w, l)
 		}
+	}
+}
+
+// pickerRow is the label of the row the picker's cursor is on.
+func pickerRow(t *testing.T, p popup) string {
+	t.Helper()
+	pk, ok := p.(*picker)
+	if !ok {
+		t.Fatalf("expected picker, got %T", p)
+	}
+	return pk.items[pk.shown[pk.cursor]].Label
+}
+
+func TestMovePopupStartsOnItemsSprint(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	a.sprint.jumpTo(1004)
+	it := a.lookup(1004)
+	want := ""
+	for _, i := range a.iterations {
+		if i.Path == it.IterationPath {
+			want = i.Name
+		}
+	}
+	if want == "" {
+		t.Fatalf("fixture item is not in a team sprint: %q", it.IterationPath)
+	}
+	h.keys("m")
+	if got := pickerRow(t, a.popup); got != want {
+		t.Errorf("cursor on %q, want %q", got, want)
+	}
+	// Filtering after the initial placement still works.
+	h.keys("b", "a", "c", "k")
+	if got := pickerRow(t, a.popup); got != "Backlog" {
+		t.Errorf("filtered cursor on %q, want Backlog", got)
+	}
+}
+
+func TestMovePopupOutsideSprintStartsOnToday(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	a.sprint.jumpTo(1004)
+	a.lookup(1004).IterationPath = a.ctx.Project
+	h.keys("m")
+	if got, want := pickerRow(t, a.popup), a.currentIteration().Name; got != want {
+		t.Errorf("cursor on %q, want %q", got, want)
+	}
+}
+
+func TestMoveNextStepsFromItemsSprint(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	a.sprint.jumpTo(1004)
+	it := a.lookup(1004)
+	next, ok := a.nextIteration(it.IterationPath)
+	if !ok {
+		t.Fatal("fixture item has no next sprint")
+	}
+	// The viewed sprint is not the item's: "next" must still follow the item.
+	a.ctx.Iteration = a.iterations[0]
+	h.keys("M", "y")
+	if len(h.fake.Updates) != 1 || h.fake.Updates[0].Patches[0].Value != next.Path {
+		t.Fatalf("updates = %+v, want move to %s", h.fake.Updates, next.Path)
+	}
+}
+
+func TestMoveNextOnLastSprintFlashes(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	a.sprint.jumpTo(1004)
+	var last model.Iteration
+	for _, i := range a.iterations {
+		if i.Path != "" && i.Path != a.ctx.Project {
+			last = i
+		}
+	}
+	a.lookup(1004).IterationPath = last.Path
+	h.keys("M")
+	if len(h.fake.Updates) != 0 || a.popup != nil {
+		t.Errorf("expected no move, popup=%T updates=%+v", a.popup, h.fake.Updates)
+	}
+}
+
+func TestEditFormIterationStartsOnCurrentValue(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	a.sprint.jumpTo(1004)
+	want := ""
+	for _, i := range a.iterations {
+		if i.Path == a.lookup(1004).IterationPath {
+			want = i.Name
+		}
+	}
+	h.keys("e")
+	f := a.popup.(*form)
+	f.cursor = 3 // Iteration field, see formFields
+	h.keys("l")
+	if got := pickerRow(t, f.child); got != want {
+		t.Errorf("cursor on %q, want %q", got, want)
+	}
+}
+
+func TestPickerSelectValueNoMatch(t *testing.T) {
+	p := newPicker("t", []pickItem{{Label: "a"}, {Label: "b"}}, nil).
+		selectValue(func(pickItem) bool { return false })
+	if p.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", p.cursor)
 	}
 }
