@@ -80,6 +80,18 @@ func (p *picker) searchable(keep int, onSearch func(token int, query string) tea
 	return p
 }
 
+// startAt puts the cursor on the first item whose Value satisfies match, so a
+// picker can open on the likely choice instead of the top of the list.
+func (p *picker) startAt(match func(any) bool) *picker {
+	for pos, i := range p.shown {
+		if match(p.items[i].Value) {
+			p.cursor = pos
+			break
+		}
+	}
+	return p
+}
+
 // search fires a query when the typed text has changed.
 func (p *picker) search() tea.Cmd {
 	q := strings.TrimSpace(p.input.Value())

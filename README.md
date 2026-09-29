@@ -191,6 +191,9 @@ The sprint picker (`:sprint`, or `[`/`]` past either end) also offers an **Unsch
 entry, for items sitting at the team's backlog root instead of any sprint — the Sprint and
 Board tabs switch to those the same way they switch to a sprint.
 
+Both open with the cursor on the current sprint, so a move to it is `m` `enter`;
+`M` moves straight to the next sprint without a popup.
+
 The `m` move popup and the Iteration field in `e`'s edit form list the whole project's
 iteration tree, not just the current team's sprints, so an item can be moved to another
 team's sprint or a nested release iteration. Sprint navigation above stays scoped to the

@@ -421,6 +421,8 @@ func (a *App) pickMoveTarget(targets []*model.WorkItem) tea.Cmd {
 		it := pi.Value.(model.Iteration)
 		return a.moveTo(targets, it.Path, it.Name)
 	})
+	cur := a.todaysIteration()
+	a.popup.(*picker).startAt(func(v any) bool { return v.(model.Iteration).Path == cur })
 	return nil
 }
 

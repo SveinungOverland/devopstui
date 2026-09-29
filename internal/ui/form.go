@@ -182,7 +182,9 @@ func (f *form) openEditor() (cmd tea.Cmd) {
 		for _, it := range f.iters {
 			items = append(items, pickItem{Label: it.Name, Desc: iterDesc(it), Value: it.Path})
 		}
-		f.child = newPicker("Iteration", items, func(pi pickItem) tea.Cmd { return set(fld.ref, pi.Value) })
+		cur := f.app.todaysIteration()
+		f.child = newPicker("Iteration", items, func(pi pickItem) tea.Cmd { return set(fld.ref, pi.Value) }).
+			startAt(func(v any) bool { return v == cur })
 	case model.FieldEffort, model.FieldPriority:
 		f.child = newPrompt(fld.label, cur, func(v string) tea.Cmd {
 			if v == "" {

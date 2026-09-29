@@ -973,6 +973,18 @@ func (a *App) movableIterations() []model.Iteration {
 	return out
 }
 
+// todaysIteration is the sprint Azure DevOps marks current, which is not
+// necessarily the one being viewed; the move pickers open on it because
+// most moves are "to the sprint we are in".
+func (a *App) todaysIteration() string {
+	for _, it := range a.iterations {
+		if it.Timeframe == "current" && it.Path != "" {
+			return it.Path
+		}
+	}
+	return a.currentIteration().Path
+}
+
 // currentIteration picks the sprint to show: the one Azure DevOps marks
 // current, else the one whose dates cover today, else the first future
 // one, else the last known.

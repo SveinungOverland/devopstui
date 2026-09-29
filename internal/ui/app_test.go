@@ -218,6 +218,21 @@ func TestMoveFeatureOffersChildren(t *testing.T) {
 	}
 }
 
+func TestMovePickerStartsOnCurrentSprint(t *testing.T) {
+	h := newHarness(t, 140, 40)
+	a := h.app
+	a.sprint.jumpTo(1004)
+	h.keys("m")
+	mp, ok := a.popup.(*picker)
+	if !ok {
+		t.Fatalf("expected picker, got %T", a.popup)
+	}
+	got := mp.items[mp.shown[mp.cursor]].Value.(model.Iteration).Path
+	if want := a.todaysIteration(); want == "" || got != want {
+		t.Errorf("cursor on %q, want the current sprint %q", got, want)
+	}
+}
+
 func TestQuickStateChange(t *testing.T) {
 	h := newHarness(t, 140, 40)
 	h.app.sprint.jumpTo(1004)
