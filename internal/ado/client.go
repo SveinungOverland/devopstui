@@ -37,11 +37,19 @@ type Client interface {
 	// outside it (returned in the second slice), the same shape as
 	// SprintItems.
 	Unscheduled(ctx context.Context, project, team string) (items, external []*model.WorkItem, err error)
-	// Backlog returns the whole requirement-and-above backlog for the team.
-	Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error)
+	// Backlog returns the project's open requirement-and-above backlog.
+	// With areas (the team filter) only items in those area paths are
+	// read, and their parents outside them come back in the second slice,
+	// the same shape as SprintItems; a large project's backlog is otherwise
+	// cut off before the team's own items are reached.
+	Backlog(ctx context.Context, project, team string, areas []model.TeamArea) (items, external []*model.WorkItem, err error)
 	// MyItems returns items assigned to the current user in the project,
 	// excluding only Removed ones; the UI hides Done/Closed by default.
 	MyItems(ctx context.Context, project string) ([]*model.WorkItem, error)
+	// Changes returns what was done to work items in the query's window:
+	// each revision's field changes, comments and links, newest first,
+	// with the items they belong to.
+	Changes(ctx context.Context, project string, q model.ChangeQuery) (model.ChangeSet, error)
 	// Parents returns candidate parents (Epics and Features) in the project.
 	Parents(ctx context.Context, project string) ([]*model.WorkItem, error)
 	// Children returns the direct children of a work item.

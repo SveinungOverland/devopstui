@@ -47,6 +47,8 @@ shot 11-help "?"
 shot 12-related "j,j,j,j,j,j,j,j,j,j,D,x,wait:0.5"
 shot 13-attention ":,type:attention,Enter"
 shot 14-team "5"
+shot 15-changes "6"
+shot 16-changes-by-person "6,l,f,f"
 
 if [ "$failed" = 1 ]; then
 	printf '%s\n' "shots: at least one scene failed — see above" >&2

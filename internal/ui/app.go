@@ -32,17 +32,19 @@ const (
 	viewBoard
 	viewBacklog
 	viewTeam
+	// viewChanges is what was done to work items over a period.
+	viewChanges
 	// viewItem is the full-screen view of one work item. It is not a tab:
 	// you drill into it with D and leave it with esc.
 	viewItem
 )
 
 func (v viewID) String() string {
-	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Team", "Item"}[v]
+	return [...]string{"Dashboard", "Sprint", "Board", "Backlog", "Team", "Changes", "Item"}[v]
 }
 
 // tabViews are the numbered views shown in the header.
-var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog, viewTeam}
+var tabViews = []viewID{viewDash, viewSprint, viewBoard, viewBacklog, viewTeam, viewChanges}
 
 // App is the root model. It is used by pointer so closures in popups can
 // reach it safely.
@@ -72,6 +74,10 @@ type App struct {
 	board           *board
 	// team is the Board's items grouped by assignee, for stand-ups.
 	team *team
+	// changes is the feed of what was done over a period. changesReq
+	// guards its fetch against a slower, superseded response.
+	changes    *changes
+	changesReq int
 
 	// Dashboard: a kanban of the requirement-level items assigned to @Me
 	// (dashBoard) on top, and below it a kanban-with-swimlanes of those
@@ -102,6 +108,7 @@ type App struct {
 	previewList  bool // detail pane beside list views
 	previewBoard bool // detail pane beside the board
 	previewTeam  bool // detail pane beside the Team view
+	previewChg   bool // detail pane beside the Changes view
 
 	// comments caches each item's discussion by id, fetched on demand (the
 	// drill-down's C toggle, and the Board's preview pane which has the
@@ -119,11 +126,22 @@ type App struct {
 	cmd       cmdbar
 	cmdActive bool
 
-	spin     spinner.Model
-	loading  map[viewID]bool
+	spin    spinner.Model
+	loading map[viewID]bool
+	// loadGen counts the loads started per data set, so a response is
+	// applied only if nothing newer was asked for since: switching sprint
+	// twice in a row must not end on whichever answer happens to be slower.
+	loadGen  map[viewID]int
 	busy     string // label for an in-flight write
 	lastLoad time.Time
-	gen      int
+
+	// ctxReq and filterReq do the same for the context (project, team and
+	// their settings) and the team filter. ctxLoading and filterLoading
+	// drive the header spinner; ctxLoaded is set once a context has landed,
+	// so a refresh knows whether there is anything to refresh yet.
+	ctxReq, filterReq         int
+	ctxLoading, filterLoading bool
+	ctxLoaded                 bool
 	// refreshGen identifies the live auto-refresh timer chain;
 	// refreshEvery remembers the interval across an off/on toggle.
 	refreshGen   int
@@ -156,10 +174,12 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		backlog:   newList("backlog is empty"),
 		board:     newBoard(),
 		team:      newTeam(),
+		changes:   newChanges(),
 		dashBoard: newBoard(),
 		dashLanes: newLanes(),
 		spin:      sp,
 		loading:   map[viewID]bool{},
+		loadGen:   map[viewID]int{},
 		cmd:       newCmdbar(),
 		view:      viewSprint,
 
@@ -170,6 +190,7 @@ func New(client ado.Client, cfg config.Config, cfgPath string, savePAT bool) *Ap
 		previewList:  true,
 		previewBoard: true,
 		previewTeam:  true,
+		previewChg:   true,
 		previewDash:  true,
 
 		health: &health{staleAfter: cfg.StaleAfter()},
@@ -308,25 +329,60 @@ func (a *App) dashLaneParents() []*model.WorkItem {
 }
 
 type teamFilterMsg struct {
+	req   int
 	team  string
 	areas []model.TeamArea
 	err   error
 }
 
 // setTeamFilter resolves the team's areas and applies the filter; an empty
-// team clears it.
+// team clears it. Either way it supersedes a filter still being resolved,
+// so picking one team and then another never ends on the first.
 func (a *App) setTeamFilter(team string) tea.Cmd {
+	a.filterReq++
 	if team == "" {
+		a.filterLoading = false
 		a.ctx.FilterTeam, a.ctx.FilterAreas = "", nil
 		a.applyTeamFilter()
 		a.persist()
-		return a.setFlash("team filter off", false)
+		return tea.Batch(a.reloadFiltered(), a.setFlash("team filter off", false))
 	}
-	project := a.ctx.Project
+	a.filterLoading = true
+	req, project := a.filterReq, a.ctx.Project
 	return func() tea.Msg {
-		areas, err := a.client.TeamAreas(context.Background(), project, team)
-		return teamFilterMsg{team: team, areas: areas, err: err}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		areas, err := a.client.TeamAreas(ctx, project, team)
+		return teamFilterMsg{req: req, team: team, areas: areas, err: err}
 	}
+}
+
+// filterUnresolved reports a filter team whose area paths have not been
+// read: it is named in the config, but the call for its areas failed. The
+// views show everything until a refresh gets through.
+func (a *App) filterUnresolved() bool {
+	return a.ctx.FilterTeam != "" && len(a.ctx.FilterAreas) == 0
+}
+
+// filterAreas is the team filter as the backend takes it, nil when off.
+func (a *App) filterAreas() []model.TeamArea {
+	if a.ctx.FilterTeam == "" {
+		return nil
+	}
+	return a.ctx.FilterAreas
+}
+
+// reloadFiltered refetches what the backend filters by area itself, after
+// the filter changed: the Backlog (too big to read whole and filter here)
+// and the Changes. The Sprint, Board, Team and Dashboard filter what they
+// already hold, so they have followed the change by the time this runs.
+func (a *App) reloadFiltered() tea.Cmd {
+	var cmds []tea.Cmd
+	if a.backlog.all != nil || a.loading[viewBacklog] {
+		cmds = append(cmds, a.loadView(viewBacklog))
+	}
+	cmds = append(cmds, a.refreshChanges(false))
+	return tea.Batch(cmds...)
 }
 
 func (a *App) pickTeamFilter() tea.Cmd {
@@ -343,8 +399,26 @@ func (a *App) pickTeamFilter() tea.Cmd {
 	}
 	a.popup = newPicker("Team filter", items, func(pi pickItem) tea.Cmd {
 		return a.setTeamFilter(pi.Value.(string))
-	})
+	}).selectValue(func(pi pickItem) bool { return pi.Value.(string) == a.ctx.FilterTeam })
 	return nil
+}
+
+// findTeam resolves a typed team name: exactly (ignoring case), or else
+// the one team whose name contains it.
+func (a *App) findTeam(name string) (model.Team, bool) {
+	var partial []model.Team
+	for _, t := range a.teams {
+		if strings.EqualFold(t.Name, name) {
+			return t, true
+		}
+		if strings.Contains(strings.ToLower(t.Name), strings.ToLower(name)) {
+			partial = append(partial, t)
+		}
+	}
+	if len(partial) == 1 {
+		return partial[0], true
+	}
+	return model.Team{}, false
 }
 
 // wireLists gives the lists their callbacks into the app.
@@ -370,6 +444,14 @@ func (a *App) wireLists() {
 // ------------------------------------------------------------ messages
 
 type contextLoadedMsg struct {
+	req int
+	// project and team are the context this was loaded for. They only
+	// become the App's context once this lands without an error.
+	project, team string
+	// refresh marks a reload of the context already on screen, which
+	// refetches every view; a switch reloads only what the switch changed.
+	refresh bool
+
 	me                string
 	projects          []model.Project
 	teams             []model.Team
@@ -377,8 +459,12 @@ type contextLoadedMsg struct {
 	projectIterations []model.Iteration
 	boards            []model.Board
 	backlog           model.BacklogConfig
-	filter            []model.TeamArea // areas of the configured filter team, if any
-	err               error
+	// filterTeam is the team filter asked for, with its areas or the
+	// reason they could not be read.
+	filterTeam string
+	filter     []model.TeamArea
+	filterErr  error
+	err        error
 }
 
 type createdMsg struct {
@@ -415,6 +501,15 @@ type dashLanesLoadedMsg struct {
 	states   []string
 	children map[int][]*model.WorkItem
 	err      error
+}
+
+// changesLoadedMsg carries a Changes fetch. req ties it to the request, as
+// dashLanesLoadedMsg does; key is the query it answers.
+type changesLoadedMsg struct {
+	req int
+	key string
+	set model.ChangeSet
+	err error
 }
 
 type popupMsg struct{ p popup }
@@ -480,15 +575,33 @@ func (a *App) setAutoRefresh(sec int) tea.Cmd {
 	return tea.Batch(a.startTicking(), a.setFlash(fmt.Sprintf("auto refresh every %ds", sec), false))
 }
 
+// loadContext (re)loads the context the App is in.
 func (a *App) loadContext() tea.Cmd {
-	project, team, filterTeam := a.ctx.Project, a.ctx.Team, a.ctx.FilterTeam
+	return a.loadContextFor(a.ctx.Project, a.ctx.Team, true)
+}
+
+// switchContext loads another project or team. The App stays where it is
+// until that lands: a switch that fails must not leave the header naming
+// one team over another team's sprints and board.
+func (a *App) switchContext(project, team string) tea.Cmd {
+	return a.loadContextFor(project, team, false)
+}
+
+func (a *App) loadContextFor(project, team string, refresh bool) tea.Cmd {
+	a.ctxReq++
+	a.ctxLoading = true
+	req := a.ctxReq
+	filterTeam := a.ctx.FilterTeam
+	if project != a.ctx.Project {
+		filterTeam = "" // a team filter does not carry over to another project
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		// The calls are independent, so run them side by side; startup
 		// otherwise waits on each round trip in turn. Any error discards
 		// the whole result (see onContextLoaded).
-		var m contextLoadedMsg
+		m := contextLoadedMsg{req: req, project: project, team: team, refresh: refresh, filterTeam: filterTeam}
 		g, gctx := errgroup.WithContext(ctx)
 		g.Go(func() (err error) { m.me, err = a.client.Me(gctx); return })
 		g.Go(func() (err error) { m.projects, err = a.client.Projects(gctx); return })
@@ -496,7 +609,7 @@ func (a *App) loadContext() tea.Cmd {
 			g.Go(func() (err error) { m.teams, err = a.client.Teams(gctx, project); return })
 			if filterTeam != "" {
 				// Best effort: a bad filter team must not block startup.
-				g.Go(func() error { m.filter, _ = a.client.TeamAreas(gctx, project, filterTeam); return nil })
+				g.Go(func() error { m.filter, m.filterErr = a.client.TeamAreas(gctx, project, filterTeam); return nil })
 			}
 		}
 		if project != "" && team != "" {
@@ -512,11 +625,28 @@ func (a *App) loadContext() tea.Cmd {
 	}
 }
 
+// loadTarget is the data set a view shows: the Sprint, Board and Team
+// views are three layouts of the sprint's items.
+func loadTarget(v viewID) viewID {
+	switch v {
+	case viewBoard, viewTeam:
+		return viewSprint
+	}
+	return v
+}
+
 func (a *App) loadView(v viewID) tea.Cmd {
 	if a.ctx.Project == "" || a.ctx.Team == "" {
 		return nil
 	}
-	if (v == viewSprint || v == viewBoard || v == viewTeam) && a.ctx.Iteration.Path == "" {
+	v = loadTarget(v)
+	if v == viewChanges {
+		return a.loadChanges()
+	}
+	if v == viewItem {
+		return nil // the drill-down refreshes through the lists behind it
+	}
+	if v == viewSprint && a.ctx.Iteration.Path == "" {
 		// Never query with an empty path; the server rejects it and the
 		// message is cryptic. Tell the user what is missing instead.
 		if len(a.iterations) == 0 {
@@ -524,17 +654,17 @@ func (a *App) loadView(v viewID) tea.Cmd {
 		}
 		return a.setFlash("no sprint selected: pick one with :sprint", true)
 	}
-	a.gen++
-	gen := a.gen
+	a.loadGen[v]++
+	gen := a.loadGen[v]
 	a.loading[v] = true
 	c := a.ctx
+	areas := a.filterAreas()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		m := itemsLoadedMsg{view: v, gen: gen}
 		switch v {
-		case viewSprint, viewBoard, viewTeam:
-			m.view = viewSprint
+		case viewSprint:
 			if c.Iteration.Path == c.Project {
 				m.items, m.external, m.err = a.client.Unscheduled(ctx, c.Project, c.Team)
 			} else {
@@ -544,7 +674,7 @@ func (a *App) loadView(v viewID) tea.Cmd {
 				m.err = fmt.Errorf("sprint %q: %w", c.Iteration.Path, m.err)
 			}
 		case viewBacklog:
-			m.items, m.err = a.client.Backlog(ctx, c.Project, c.Team)
+			m.items, m.external, m.err = a.client.Backlog(ctx, c.Project, c.Team, areas)
 		case viewDash:
 			m.items, m.err = a.client.MyItems(ctx, c.Project)
 		}
@@ -552,8 +682,77 @@ func (a *App) loadView(v viewID) tea.Cmd {
 	}
 }
 
+// changesQuery is what the Changes view asks for right now: its period,
+// the selected sprint's items unless widened to all sprints, and the team
+// filter.
+func (a *App) changesQuery() model.ChangeQuery {
+	t := a.changes
+	q := model.ChangeQuery{Areas: a.filterAreas()}
+	q.Since, q.Until = t.period.window(t.now(), a.ctx.Iteration)
+	if !t.allSprints {
+		q.IterationPath = a.ctx.Iteration.Path
+	}
+	return q
+}
+
+// changesKey identifies a query, so the view can tell whether what it
+// holds still answers what it would ask.
+func changesKey(project string, q model.ChangeQuery) string {
+	return fmt.Sprintf("%s|%d|%d|%s|%v", project, q.Since.Unix(), q.Until.Unix(), q.IterationPath, q.Areas)
+}
+
+func (a *App) loadChanges() tea.Cmd {
+	a.changesReq++
+	req := a.changesReq
+	a.loading[viewChanges] = true
+	project, q := a.ctx.Project, a.changesQuery()
+	key := changesKey(project, q)
+	return func() tea.Msg {
+		// Longer than the other loads: a sprint's worth of changes reads
+		// one history per changed item.
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		set, err := a.client.Changes(ctx, project, q)
+		return changesLoadedMsg{req: req, key: key, set: set, err: err}
+	}
+}
+
+// refreshChanges reloads the Changes view when what it holds no longer
+// answers its query, or always with force (after a write, which is itself
+// a change). Off screen it only marks the data stale; switching to the
+// view loads it then.
+func (a *App) refreshChanges(force bool) tea.Cmd {
+	if !a.changes.loaded && !a.loading[viewChanges] {
+		return nil
+	}
+	if force {
+		a.changes.key = ""
+	}
+	if a.view != viewChanges && !(a.view == viewItem && a.itemReturn == viewChanges) {
+		return nil
+	}
+	if a.changes.key == changesKey(a.ctx.Project, a.changesQuery()) && !a.loading[viewChanges] {
+		return nil
+	}
+	return a.loadView(viewChanges)
+}
+
 func (a *App) reloadAll() tea.Cmd {
-	return tea.Batch(a.loadView(viewSprint), a.loadView(viewDash), a.loadView(viewBacklog))
+	cmds := []tea.Cmd{a.loadView(viewSprint), a.loadView(viewDash), a.loadView(viewBacklog)}
+	if a.changes.loaded || a.view == viewChanges {
+		cmds = append(cmds, a.loadView(viewChanges))
+	}
+	return tea.Batch(cmds...)
+}
+
+// refreshEverything is :refresh: settings as well as items. The backend
+// forgets what it cached, so a new sprint, team or board column shows up
+// without a restart.
+func (a *App) refreshEverything() tea.Cmd {
+	if c, ok := a.client.(interface{ Forget() }); ok {
+		c.Forget()
+	}
+	return a.loadContext()
 }
 
 // loadDashLanes bulk-fetches children for the current "my PBIs" set, for
@@ -666,12 +865,12 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.onContextLoaded(msg)
 
 	case itemsLoadedMsg:
+		if msg.gen != a.loadGen[msg.view] {
+			return a, nil // a newer load of the same data is on its way
+		}
 		a.loading[msg.view] = false
 		if msg.err != nil {
 			return a, a.setFlash(msg.err.Error(), true)
-		}
-		if msg.gen < a.gen-3 { // very stale
-			return a, nil
 		}
 		a.lastLoad = time.Now()
 		var cmd tea.Cmd
@@ -680,7 +879,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.sprint.setItems(msg.items, msg.external)
 			a.rebucket(msg.items)
 		case viewBacklog:
-			a.backlog.setItems(msg.items, nil)
+			a.backlog.setItems(msg.items, msg.external)
 		case viewDash:
 			a.myItems = msg.items
 			a.refreshDashboard()
@@ -711,6 +910,23 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// left showing a stale cache from before the reload.
 		return a, tea.Batch(cmd, a.loadPreviewComments(true))
 
+	case changesLoadedMsg:
+		if msg.req != a.changesReq {
+			return a, nil // superseded by a newer fetch
+		}
+		a.loading[viewChanges] = false
+		if msg.err != nil {
+			return a, a.setFlash("changes: "+msg.err.Error(), true)
+		}
+		a.lastLoad = time.Now()
+		a.changes.setData(msg.set, msg.key)
+		if a.pendingJump != 0 && a.view == viewChanges {
+			a.changes.jumpTo(a.pendingJump)
+			a.pendingJump = 0
+		}
+		a.refreshDetail()
+		return a, nil
+
 	case dashLanesLoadedMsg:
 		if msg.req != a.dashLanesReq { // superseded by a newer fetch
 			return a, nil
@@ -730,7 +946,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.setFlash(msg.err.Error(), true)
 		}
 		a.applyUpdate(msg.item)
-		return a, a.setFlash(fmt.Sprintf("saved #%d", msg.item.ID), false)
+		return a, tea.Batch(a.refreshChanges(true), a.setFlash(fmt.Sprintf("saved #%d", msg.item.ID), false))
 
 	case commentAddedMsg:
 		a.busy = ""
@@ -744,7 +960,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.item.setComments(a.comments[msg.id])
 			a.item.showComments = true
 		}
-		return a, a.setFlash(fmt.Sprintf("commented on #%d", msg.id), false)
+		return a, tea.Batch(a.refreshChanges(true), a.setFlash(fmt.Sprintf("commented on #%d", msg.id), false))
 
 	case createdMsg:
 		a.busy = ""
@@ -764,7 +980,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bulkDoneMsg:
 		a.busy = ""
-		return a, a.onBulkDone(msg)
+		return a, tea.Batch(a.onBulkDone(msg), a.refreshChanges(true))
 
 	case popupMsg:
 		a.popup = msg.p
@@ -839,6 +1055,10 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case teamFilterMsg:
+		if msg.req != a.filterReq {
+			return a, nil // another filter was picked, or it was turned off, since
+		}
+		a.filterLoading = false
 		if msg.err != nil {
 			return a, a.setFlash("team filter: "+msg.err.Error(), true)
 		}
@@ -848,7 +1068,7 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.ctx.FilterTeam, a.ctx.FilterAreas = msg.team, msg.areas
 		a.applyTeamFilter()
 		a.persist()
-		return a, a.setFlash("filtering on "+msg.team, false)
+		return a, tea.Batch(a.reloadFiltered(), a.setFlash("filtering on "+msg.team, false))
 
 	case editorDoneMsg:
 		if msg.err != nil {
@@ -891,6 +1111,11 @@ func (a *App) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		l.filter, cmd = l.filter.Update(msg)
 		return a, cmd
 	}
+	if a.view == viewChanges && a.changes.filtering {
+		var cmd tea.Cmd
+		a.changes.filter, cmd = a.changes.filter.Update(msg)
+		return a, cmd
+	}
 	return a, nil
 }
 
@@ -918,18 +1143,49 @@ func (a *App) updatePopup(msg tea.Msg) tea.Cmd {
 }
 
 func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
+	if msg.req != a.ctxReq {
+		return nil // another project or team was picked since
+	}
+	a.ctxLoading = false
 	if msg.err != nil {
+		if msg.project != a.ctx.Project || msg.team != a.ctx.Team {
+			to := msg.team
+			if to == "" {
+				to = msg.project
+			}
+			return a.setFlash(fmt.Sprintf("could not switch to %s: %v", to, msg.err), true)
+		}
 		return a.setFlash(msg.err.Error(), true)
 	}
 	a.me = msg.me
 	a.projects = msg.projects
-	if a.ctx.Project == "" {
+	if msg.project == "" {
 		return a.pickProject()
 	}
+	first := !a.ctxLoaded
+	projectChanged := msg.project != a.ctx.Project
+	teamChanged := projectChanged || msg.team != a.ctx.Team
+	if projectChanged {
+		// Nothing loaded for the old project means anything here.
+		a.ctx.Project, a.ctx.Team, a.ctx.Iteration, a.ctx.Board = msg.project, "", model.Iteration{}, ""
+		a.ctx.FilterTeam, a.ctx.FilterAreas = "", nil
+		a.sprint, a.backlog = newList("sprint is empty"), newList("backlog is empty")
+		a.board, a.team = newBoard(), newTeam()
+		a.dashBoard, a.dashLanes = newBoard(), newLanes()
+		a.changes.setData(model.ChangeSet{}, "")
+		a.changes.loaded = false
+		a.myItems, a.dashChildren = nil, nil
+		a.iterations, a.projectIterations, a.boards = nil, nil, nil
+		a.wireLists()
+		a.sprint.showDone = !a.cfg.HideDone
+		a.board.list, a.team.showDone = a.cfg.BoardList, a.cfg.TeamShowDone
+	}
 	a.teams = msg.teams
-	if a.ctx.Team == "" {
+	if msg.team == "" {
 		return a.pickTeam()
 	}
+	a.ctxLoaded = true
+	a.ctx.Team = msg.team
 	// A synthetic entry alongside the real sprints, picked the same way, so
 	// the user can ask to see items with no sprint at all (project root is
 	// the backlog convention already used by pickMoveTarget's "Backlog").
@@ -937,20 +1193,72 @@ func (a *App) onContextLoaded(msg contextLoadedMsg) tea.Cmd {
 	a.projectIterations = msg.projectIterations
 	a.boards = msg.boards
 	a.ctx.Backlog = msg.backlog
-	a.ctx.FilterAreas = msg.filter
-	if a.ctx.FilterTeam != "" && len(msg.filter) == 0 {
-		a.ctx.FilterTeam = "" // team unknown or without areas: filter off
+
+	var cmds []tea.Cmd
+	filterChanged := false
+	if msg.filterTeam == a.ctx.FilterTeam && msg.filterTeam != "" {
+		switch {
+		case msg.filterErr != nil:
+			// Keep the name: a network blip at startup must not quietly
+			// drop the filter and then save the config without it.
+			cmds = append(cmds, a.setFlash(fmt.Sprintf("team filter %s not applied (%v); r retries", msg.filterTeam, msg.filterErr), true))
+		case len(msg.filter) == 0:
+			a.ctx.FilterTeam = "" // the team has no area paths to filter on
+			filterChanged = len(a.ctx.FilterAreas) > 0
+			a.ctx.FilterAreas = nil
+			cmds = append(cmds, a.setFlash(fmt.Sprintf("team filter off: %q has no area paths", msg.filterTeam), true))
+		default:
+			filterChanged = !slices.Equal(a.ctx.FilterAreas, msg.filter)
+			a.ctx.FilterAreas = msg.filter
+		}
 	}
 	a.applyTeamFilter()
+
+	// Keep the sprint on screen across a refresh; a new team starts on its
+	// own current one.
+	sprintChanged := teamChanged
+	if !teamChanged {
+		kept := false
+		for _, it := range a.iterations {
+			if it.Path == a.ctx.Iteration.Path {
+				a.ctx.Iteration, kept = it, true
+			}
+		}
+		if !kept {
+			a.ctx.Iteration, sprintChanged = model.Iteration{}, true
+		}
+	} else {
+		a.ctx.Iteration = model.Iteration{}
+	}
 	if a.ctx.Iteration.Path == "" {
 		a.ctx.Iteration = a.currentIteration()
 	}
-	if a.ctx.Iteration.Path == "" {
-		a.persist()
-		return tea.Batch(a.loadView(viewDash), a.loadView(viewBacklog), a.loadView(viewSprint)) // sprint load only flashes the reason
+	if teamChanged {
+		a.sprint.clearSelection()
+		a.rebucket(a.sprint.all) // the new team's board columns
 	}
 	a.persist()
-	return a.reloadAll()
+	switch {
+	case first || projectChanged || msg.refresh:
+		cmds = append(cmds, a.reloadAll())
+	default:
+		// Only the team changed. The Backlog and the Dashboard read the
+		// project, not the team, so what they hold is still right.
+		if sprintChanged {
+			a.refreshDashboard()
+			cmds = append(cmds, a.loadView(viewSprint), a.loadDashLanes(), a.refreshChanges(false))
+		}
+		if filterChanged {
+			cmds = append(cmds, a.reloadFiltered())
+		}
+		for _, v := range []viewID{viewBacklog, viewDash} {
+			if a.needsLoad(v) {
+				cmds = append(cmds, a.loadView(v))
+			}
+		}
+	}
+	a.refreshDetail()
+	return tea.Batch(cmds...)
 }
 
 // movableIterations is what the move popup and the edit form's Iteration
@@ -1067,6 +1375,26 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		a.refreshDetail()
 		return cmd
 	}
+	if t := a.changes; a.view == viewChanges && t.filtering {
+		switch msg.String() {
+		case "esc":
+			t.filtering = false
+			t.filter.SetValue("")
+			t.filter.Blur()
+			t.build()
+			a.refreshDetail()
+			return nil
+		case "enter":
+			t.filtering = false
+			t.filter.Blur()
+			return nil
+		}
+		var cmd tea.Cmd
+		t.filter, cmd = t.filter.Update(msg)
+		t.build()
+		a.refreshDetail()
+		return cmd
+	}
 	if a.focusDetail {
 		switch {
 		case key.Matches(msg, keys.Quit):
@@ -1117,7 +1445,7 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		a.cmd.input.SetValue("")
 		return a.cmd.input.Focus()
 	case key.Matches(msg, keys.Refresh):
-		return a.loadView(a.view)
+		return a.refresh()
 	case key.Matches(msg, keys.AutoRefresh):
 		return a.toggleAutoRefresh()
 	case key.Matches(msg, keys.Dashboard):
@@ -1130,6 +1458,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		return a.jumpView(viewBacklog)
 	case key.Matches(msg, keys.Team):
 		return a.jumpView(viewTeam)
+	case key.Matches(msg, keys.Changes):
+		return a.jumpView(viewChanges)
 	case key.Matches(msg, keys.PrevSprint):
 		return a.shiftSprint(-1)
 	case key.Matches(msg, keys.NextSprint):
@@ -1148,6 +1478,8 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 			a.previewBoard = !a.previewBoard
 		case viewTeam:
 			a.previewTeam = !a.previewTeam
+		case viewChanges:
+			a.previewChg = !a.previewChg
 		case viewDash:
 			a.previewDash = !a.previewDash
 		default:
@@ -1191,7 +1523,22 @@ func (a *App) onKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return a.onDashKey(msg)
 	}
+	if a.view == viewChanges {
+		if msg.String() == "enter" { // enter drills in from a change
+			return a.openItem(a.currentItem())
+		}
+		return a.onChangesKey(msg)
+	}
 	return a.onListKey(msg, a.activeList())
+}
+
+// refresh is r: reload what is on screen. It also retries what an earlier
+// failure left missing, the context itself or the team filter's areas.
+func (a *App) refresh() tea.Cmd {
+	if !a.ctxLoaded || a.filterUnresolved() {
+		return a.loadContext()
+	}
+	return a.loadView(a.view)
 }
 
 // dashOverride handles the keys the Dashboard's layout redefines: Tab
@@ -1471,6 +1818,129 @@ func (a *App) onTeamKey(msg tea.KeyMsg) tea.Cmd {
 	return a.loadPreviewComments(false)
 }
 
+func (a *App) onChangesKey(msg tea.KeyMsg) tea.Cmd {
+	t := a.changes
+	switch {
+	case key.Matches(msg, keys.PreviewDown):
+		if a.scrollPreview(true) {
+			return nil
+		}
+		t.move(a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PreviewUp):
+		if a.scrollPreview(false) {
+			return nil
+		}
+		t.move(-a.bodyHeight() / 2)
+	case key.Matches(msg, keys.Down):
+		t.move(1)
+	case key.Matches(msg, keys.Up):
+		t.move(-1)
+	case key.Matches(msg, keys.Top):
+		t.move(-1 << 20)
+	case key.Matches(msg, keys.Bottom):
+		t.move(1 << 20)
+	case key.Matches(msg, keys.PageDown):
+		t.move(a.bodyHeight() / 2)
+	case key.Matches(msg, keys.PageUp):
+		t.move(-a.bodyHeight() / 2)
+	case key.Matches(msg, keys.NextGroup):
+		t.moveGroup(1)
+	case key.Matches(msg, keys.PrevGroup):
+		t.moveGroup(-1)
+	case key.Matches(msg, keys.PeriodShorter):
+		return a.setChangePeriod(t.period.step(-1))
+	case key.Matches(msg, keys.PeriodLonger):
+		return a.setChangePeriod(t.period.step(1))
+	case key.Matches(msg, keys.Period):
+		return a.pickChangePeriod()
+	case key.Matches(msg, keys.Grouping):
+		cur, had := t.currentEntry()
+		t.group = (t.group + 1) % 3
+		t.build()
+		if had { // stay on the same change in the new layout
+			for i, e := range t.entries {
+				if e.c.ItemID == cur.c.ItemID && e.c.At.Equal(cur.c.At) {
+					t.cursor = i
+				}
+			}
+		}
+	case key.Matches(msg, keys.AllSprints):
+		t.allSprints = !t.allSprints
+		return a.loadView(viewChanges)
+	case key.Matches(msg, keys.Filter):
+		t.filtering = true
+		return t.filter.Focus()
+	case key.Matches(msg, keys.ClearSel):
+		t.filter.SetValue("")
+		t.build()
+	default:
+		return a.onActionKey(msg)
+	}
+	a.refreshDetail()
+	return nil
+}
+
+// setChangePeriod changes how far back the Changes view looks and reloads
+// it. A shorter period could be cut from what is loaded, but the reload is
+// cheap (item histories are cached) and keeps one code path.
+func (a *App) setChangePeriod(p changePeriod) tea.Cmd {
+	if p == a.changes.period {
+		return nil
+	}
+	a.changes.period = p
+	a.changes.cursor = 0
+	return a.loadView(viewChanges)
+}
+
+func (a *App) pickChangePeriod() tea.Cmd {
+	now := a.changes.now()
+	var items []pickItem
+	for _, k := range periodCycle {
+		p := changePeriod{kind: k}
+		since, until := p.window(now, a.ctx.Iteration)
+		desc := "from " + since.Format("Mon 2 Jan")
+		if !until.IsZero() {
+			desc += " to " + until.AddDate(0, 0, -1).Format("Mon 2 Jan")
+		}
+		if k == periodSprint && a.ctx.Iteration.Name != "" {
+			desc = a.ctx.Iteration.Name + " · " + desc
+		}
+		items = append(items, pickItem{Label: p.label(now), Desc: desc, Value: p})
+	}
+	a.popup = newPicker("Changes: period", items, func(pi pickItem) tea.Cmd {
+		return a.setChangePeriod(pi.Value.(changePeriod))
+	}).selectValue(func(pi pickItem) bool { return pi.Value.(changePeriod) == a.changes.period })
+	return nil
+}
+
+// changesCommand is :changes [today|yesterday|week|sprint|<days>]: switch
+// to the Changes view, optionally setting its period.
+func (a *App) changesCommand(arg string) tea.Cmd {
+	p := a.changes.period
+	switch strings.ToLower(arg) {
+	case "":
+	case "today":
+		p = changePeriod{kind: periodToday}
+	case "yesterday", "y":
+		p = changePeriod{kind: periodYesterday}
+	case "week", "w":
+		p = changePeriod{kind: periodWeek}
+	case "sprint", "s":
+		p = changePeriod{kind: periodSprint}
+	default:
+		days, err := strconv.Atoi(arg)
+		if err != nil || days < 1 || days > 90 {
+			return a.setFlash("changes: give today, yesterday, week, sprint, or a number of days (1-90)", true)
+		}
+		p = changePeriod{kind: periodDays, days: days}
+	}
+	if p != a.changes.period {
+		a.changes.period = p
+		a.changes.cursor = 0
+	}
+	return a.jumpView(viewChanges)
+}
+
 func (a *App) onCmdKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -1508,7 +1978,13 @@ func (a *App) runCommand(c string) tea.Cmd {
 		}
 		return a.pickIteration()
 	case "team", "t":
-		return a.pickTeam()
+		if arg == "" {
+			return a.pickTeam()
+		}
+		if t, ok := a.findTeam(arg); ok {
+			return a.switchContext(a.ctx.Project, t.Name)
+		}
+		return a.setFlash("unknown team: "+arg, true)
 	case "filter", "tf":
 		if arg == "" {
 			return a.pickTeamFilter()
@@ -1516,12 +1992,12 @@ func (a *App) runCommand(c string) tea.Cmd {
 		if arg == "off" || arg == "all" {
 			return a.setTeamFilter("")
 		}
-		for _, t := range a.teams {
-			if strings.EqualFold(t.Name, arg) {
-				return a.setTeamFilter(t.Name)
-			}
+		if t, ok := a.findTeam(arg); ok {
+			return a.setTeamFilter(t.Name)
 		}
 		return a.setFlash("unknown team: "+arg, true)
+	case "changes", "c":
+		return a.changesCommand(arg)
 	case "project", "proj", "p":
 		return a.pickProject()
 	case "board", "b":
@@ -1531,7 +2007,7 @@ func (a *App) runCommand(c string) tea.Cmd {
 	case "dash", "dashboard", "d":
 		return a.jumpView(viewDash)
 	case "refresh", "r":
-		return a.reloadAll()
+		return a.refreshEverything()
 	case "auto":
 		switch arg {
 		case "":
@@ -1635,6 +2111,9 @@ func (a *App) needsLoad(v viewID) bool {
 		return a.backlog.all == nil && !a.loading[viewBacklog]
 	case viewDash:
 		return a.myItems == nil && !a.loading[viewDash]
+	case viewChanges:
+		// Also when the sprint, filter or day changed since it was loaded.
+		return !a.loading[viewChanges] && (!a.changes.loaded || a.changes.key != changesKey(a.ctx.Project, a.changesQuery()))
 	}
 	return false
 }
@@ -1664,7 +2143,7 @@ func (a *App) setIteration(it model.Iteration) tea.Cmd {
 	// changed.
 	a.refreshDashboard()
 	a.refreshDetail()
-	return tea.Batch(a.loadView(viewSprint), a.loadDashLanes())
+	return tea.Batch(a.loadView(viewSprint), a.loadDashLanes(), a.refreshChanges(false))
 }
 
 // ------------------------------------------------------------ pickers for context
@@ -1675,28 +2154,23 @@ func (a *App) pickProject() tea.Cmd {
 		items = append(items, pickItem{Label: p.Name, Value: p})
 	}
 	a.popup = newPicker("Project", items, func(pi pickItem) tea.Cmd {
-		p := pi.Value.(model.Project)
-		a.ctx.Project, a.ctx.Team, a.ctx.Iteration = p.Name, "", model.Iteration{}
-		a.sprint, a.backlog = newList("sprint is empty"), newList("backlog is empty")
-		a.dashBoard, a.dashLanes = newBoard(), newLanes()
-		a.myItems, a.dashChildren = nil, nil
-		a.wireLists()
-		a.sprint.showDone = !a.cfg.HideDone
-		return a.loadContext()
-	})
+		return a.switchContext(pi.Value.(model.Project).Name, "")
+	}).selectValue(func(pi pickItem) bool { return pi.Value.(model.Project).Name == a.ctx.Project })
 	return nil
 }
 
 func (a *App) pickTeam() tea.Cmd {
 	var items []pickItem
 	for _, t := range a.teams {
-		items = append(items, pickItem{Label: t.Name, Value: t})
+		desc := ""
+		if t.Name == a.ctx.Team {
+			desc = "← current"
+		}
+		items = append(items, pickItem{Label: t.Name, Desc: desc, Value: t})
 	}
 	a.popup = newPicker("Team", items, func(pi pickItem) tea.Cmd {
-		t := pi.Value.(model.Team)
-		a.ctx.Team, a.ctx.Iteration = t.Name, model.Iteration{}
-		return a.loadContext()
-	})
+		return a.switchContext(a.ctx.Project, pi.Value.(model.Team).Name)
+	}).selectValue(func(pi pickItem) bool { return pi.Value.(model.Team).Name == a.ctx.Team })
 	return nil
 }
 
@@ -1783,6 +2257,8 @@ func (a *App) currentItem() *model.WorkItem {
 		return a.board.current()
 	case a.view == viewTeam:
 		return a.team.current()
+	case a.view == viewChanges:
+		return a.changes.current()
 	case a.view == viewDash:
 		if a.dashFocusLanes {
 			return a.dashLanes.current()
@@ -1798,7 +2274,7 @@ func (a *App) currentItem() *model.WorkItem {
 // targetItems is the selection or the highlighted item.
 func (a *App) targetItems() []*model.WorkItem {
 	switch {
-	case a.view == viewItem:
+	case a.view == viewItem, a.view == viewChanges:
 		if it := a.currentItem(); it != nil {
 			return []*model.WorkItem{it}
 		}
@@ -1855,6 +2331,9 @@ func (a *App) lookup(id int) *model.WorkItem {
 			}
 		}
 	}
+	if it, ok := a.changes.items[id]; ok {
+		return it
+	}
 	return nil
 }
 
@@ -1873,6 +2352,7 @@ func (a *App) applyUpdate(it *model.WorkItem) {
 			}
 		}
 	}
+	a.changes.apply(it)
 	a.rebucket(a.sprint.all)
 	a.refreshDashboard()
 	// The drill-down can hold items no list has (children fetched for it),
@@ -1967,9 +2447,16 @@ func (a *App) refreshDetail() {
 		topH, _ := a.dashLayout()
 		height = topH - 2
 	}
+	if a.view == viewChanges && a.detailWidth() > 0 {
+		height-- // the tally line above the panels
+	}
 	a.detail.Width = w
 	a.detail.Height = height
-	a.detail.SetContent(renderDetail(it, parent, children, comments, w, a.ctx.Backlog, a.health))
+	content := renderDetail(it, parent, children, comments, w, a.ctx.Backlog, a.health)
+	if a.view == viewChanges && it != nil {
+		content = a.changes.changesDetail(it, w) + content
+	}
+	a.detail.SetContent(content)
 	a.detail.GotoTop()
 }
 
@@ -2546,7 +3033,7 @@ func (a *App) bodyHeight() int { return max(a.h-3, 1) }
 // boardWidth and dashBoardWidth are the widths the Board and the
 // Dashboard's kanban render at: the screen less the preview pane beside them.
 func (a *App) boardWidth() int {
-	if a.view != viewBoard && a.view != viewTeam {
+	if a.view != viewBoard && a.view != viewTeam && a.view != viewChanges {
 		return a.w
 	}
 	if dw := a.detailWidth(); dw > 0 {
@@ -2576,8 +3063,9 @@ func (a *App) detailWidth() int {
 	if a.w < 110 || a.view == viewItem {
 		return 0 // the drill-down lays out its own panes
 	}
-	if a.view == viewBoard || a.view == viewTeam {
-		if (a.view == viewBoard && !a.previewBoard) || (a.view == viewTeam && !a.previewTeam) {
+	if a.view == viewBoard || a.view == viewTeam || a.view == viewChanges {
+		if (a.view == viewBoard && !a.previewBoard) || (a.view == viewTeam && !a.previewTeam) ||
+			(a.view == viewChanges && !a.previewChg) {
 			return 0
 		}
 		return min(a.w/3, previewMaxW)
@@ -2622,6 +3110,9 @@ func (a *App) renderHeader() string {
 		crumb := sCrumb.Render(a.ctx.Team)
 		if a.ctx.FilterTeam != "" {
 			crumb += sSelected.Render(" ⌕ " + a.ctx.FilterTeam)
+			if a.filterUnresolved() {
+				crumb += sErr.Render(" (not applied)")
+			}
 		}
 		crumbs = append(crumbs, crumb)
 	}
@@ -2692,6 +3183,8 @@ func (a *App) renderHeader() string {
 		summary = sMuted.Render(name)
 	case a.view == viewTeam:
 		summary = sMuted.Render(a.team.summary())
+	case a.view == viewChanges:
+		summary = sMuted.Render(a.changes.scope())
 	case a.view == viewDash:
 		// The counts are on the summary line right below; this just says
 		// which half has the keys.
@@ -2724,6 +3217,9 @@ func orgName(url string) string {
 }
 
 func (a *App) isLoading() bool {
+	if a.ctxLoading || a.filterLoading {
+		return true
+	}
 	for _, v := range a.loading {
 		if v {
 			return true
@@ -2764,6 +3260,17 @@ func (a *App) renderBody() string {
 		left := a.team.view(a.boardWidth(), h, !a.focusDetail)
 		right := detailStyle.Width(dw).Height(h - 2).Render(a.detail.View())
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
+	if a.view == viewChanges {
+		// One line above the panels sums the period up, as on the Dashboard.
+		tally := a.changes.tallyLine(a.w)
+		ph := max(h-1, 3)
+		left := a.changes.view(a.boardWidth(), ph, !a.focusDetail || dw == 0, a.loading[viewChanges])
+		if dw == 0 {
+			return tally + "\n" + left
+		}
+		right := detailStyle.Width(dw).Height(ph - 2).Render(a.detail.View())
+		return tally + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	if a.view == viewDash {
 		return a.renderDash(a.w, h)
@@ -2832,6 +3339,9 @@ func (a *App) renderFooter() string {
 	if l := a.activeList(); l != nil && l.filtering {
 		return l.filter.View() + sMuted.Render("   enter keep · esc clear")
 	}
+	if a.view == viewChanges && a.changes.filtering {
+		return a.changes.filter.View() + sMuted.Render("   enter keep · esc clear")
+	}
 	bindings := footerTree
 	switch {
 	case a.view == viewItem && a.item != nil:
@@ -2855,6 +3365,8 @@ func (a *App) renderFooter() string {
 		bindings = footerBoard
 	case a.view == viewTeam:
 		bindings = footerTeam
+	case a.view == viewChanges:
+		bindings = footerChanges
 	case a.view == viewDash:
 		bindings = footerDashKanban
 		if a.dashFocusLanes {

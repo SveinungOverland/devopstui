@@ -12,15 +12,15 @@ type keymap struct {
 	Focus, Preview, Details                  key.Binding
 	Comments, Comment, Related               key.Binding
 	// jumps: g is a leader; the Goto* bindings match the key after it.
-	Goto, GotoDash, GotoSprint, GotoBoard, GotoBacklog, GotoTeam, GotoParent key.Binding
-	JumpBack, JumpFwd                                                        key.Binding
+	Goto, GotoDash, GotoSprint, GotoBoard, GotoBacklog, GotoTeam, GotoChanges, GotoParent key.Binding
+	JumpBack, JumpFwd                                                                     key.Binding
 	// views
-	Dashboard, Sprint, Board, Backlog, Team key.Binding
-	PrevSprint, NextSprint, CurSprint       key.Binding
-	TeamFilter                              key.Binding
-	Command, Filter, Help, Refresh          key.Binding
-	AutoRefresh                             key.Binding
-	Back, Quit                              key.Binding
+	Dashboard, Sprint, Board, Backlog, Team, Changes key.Binding
+	PrevSprint, NextSprint, CurSprint                key.Binding
+	TeamFilter                                       key.Binding
+	Command, Filter, Help, Refresh                   key.Binding
+	AutoRefresh                                      key.Binding
+	Back, Quit                                       key.Binding
 	// selection
 	Select, Visual, SelectAll, ClearSel key.Binding
 	// actions
@@ -33,6 +33,9 @@ type keymap struct {
 	Left, Right, ColLeft, ColRight key.Binding
 	// team
 	NextPerson, PrevPerson, FocusPerson key.Binding
+	// changes
+	PeriodShorter, PeriodLonger, Period, Grouping, AllSprints key.Binding
+	NextGroup, PrevGroup                                      key.Binding
 }
 
 func b(help string, keys ...string) key.Binding {
@@ -65,6 +68,7 @@ var keys = keymap{
 	GotoBoard:   key.NewBinding(key.WithKeys("b"), key.WithHelp("gb", "show on board")),
 	GotoBacklog: key.NewBinding(key.WithKeys("B"), key.WithHelp("gB", "show in backlog")),
 	GotoTeam:    key.NewBinding(key.WithKeys("t"), key.WithHelp("gt", "show in team")),
+	GotoChanges: key.NewBinding(key.WithKeys("c"), key.WithHelp("gc", "show in changes")),
 	GotoParent:  key.NewBinding(key.WithKeys("p"), key.WithHelp("gp", "go to parent")),
 	// ctrl+i would be vim's forward, but terminals send it as tab.
 	JumpBack: b("jump back", "ctrl+o"),
@@ -75,6 +79,7 @@ var keys = keymap{
 	Board:       b("board", "3"),
 	Backlog:     b("backlog", "4"),
 	Team:        b("team", "5"),
+	Changes:     b("changes", "6"),
 	PrevSprint:  b("prev sprint", "["),
 	NextSprint:  b("next sprint", "]"),
 	CurSprint:   b("current sprint", "S"),
@@ -124,17 +129,28 @@ var keys = keymap{
 	NextPerson:  b("next person", "J"),
 	PrevPerson:  b("previous person", "K"),
 	FocusPerson: b("focus person", "f"),
+
+	PeriodShorter: b("shorter", "h", "left"),
+	PeriodLonger:  b("longer", "l", "right"),
+	Period:        b("period…", "w"),
+	Grouping:      b("group by", "f"),
+	AllSprints:    b("all sprints", "A"),
+	NextGroup:     b("next group", "J"),
+	PrevGroup:     b("previous group", "K"),
 }
 
 // helpGroups drive both the footer hints and the ? overlay.
 var helpGroups = [][]key.Binding{
 	{keys.Up, keys.Down, keys.Top, keys.Bottom, keys.Expand, keys.Collapse, keys.ExpandAll, keys.CollapseAll, keys.Focus, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Details, keys.Comments, keys.Comment, keys.Related},
-	{keys.JumpBack, keys.JumpFwd, keys.GotoDash, keys.GotoSprint, keys.GotoBoard, keys.GotoBacklog, keys.GotoTeam, keys.GotoParent},
-	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.Team, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
+	{keys.JumpBack, keys.JumpFwd, keys.GotoDash, keys.GotoSprint, keys.GotoBoard, keys.GotoBacklog, keys.GotoTeam, keys.GotoChanges, keys.GotoParent},
+	{keys.Dashboard, keys.Sprint, keys.Board, keys.Backlog, keys.Team, keys.Changes, keys.PrevSprint, keys.NextSprint, keys.CurSprint, keys.TeamFilter, keys.Command, keys.Filter, keys.Refresh, keys.AutoRefresh},
 	{keys.Select, keys.Visual, keys.SelectAll, keys.ClearSel},
 	{keys.New, keys.NewBug, keys.Edit, keys.Title, keys.Desc, keys.State, keys.Assign, keys.Iteration, keys.Effort, keys.Priority},
 	{keys.Move, keys.MoveNext, keys.MoveBacklog, keys.Parent},
-	{keys.NextPerson, keys.PrevPerson, keys.FocusPerson},
+	// The Team and Changes views' own keys share a column: J and K mean
+	// the same in both, and a column each would not fit a 40-row screen.
+	{b("next person / group", "J"), b("prev person / group", "K"), keys.FocusPerson,
+		keys.PeriodShorter, keys.PeriodLonger, keys.Period, keys.Grouping, keys.AllSprints},
 	{keys.Open, keys.Yank, keys.Flat, keys.ChildLayout, keys.BoardLayout, keys.Closed, keys.Help, keys.Quit},
 }
 
@@ -142,6 +158,8 @@ var footerTree = []key.Binding{keys.Expand, keys.Select, keys.Details, keys.New,
 var footerBoard = []key.Binding{keys.Left, keys.Right, keys.ColLeft, keys.ColRight, keys.BoardLayout, keys.Select, keys.Details, keys.Edit, keys.State, keys.Move, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 var footerTeam = []key.Binding{keys.NextPerson, keys.PrevPerson, keys.FocusPerson, keys.Closed, keys.ColLeft, keys.ColRight, keys.Select, keys.Details, keys.Edit, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
+
+var footerChanges = []key.Binding{keys.PeriodShorter, keys.PeriodLonger, keys.Period, keys.Grouping, keys.AllSprints, keys.Filter, keys.NextGroup, keys.PrevGroup, keys.Details, keys.State, keys.Assign, keys.Preview, keys.PreviewUp, keys.PreviewDown, keys.Help}
 
 // footerDashKanban and footerDashLanes are the two focus modes of the
 // Dashboard's two-row layout.

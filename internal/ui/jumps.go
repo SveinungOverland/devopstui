@@ -150,6 +150,8 @@ func (a *App) hasItems(v viewID) bool {
 		return a.backlog.all != nil
 	case viewDash:
 		return a.myItems != nil
+	case viewChanges:
+		return a.changes.loaded && !a.needsLoad(viewChanges)
 	}
 	return true
 }
@@ -178,6 +180,8 @@ func (a *App) selectIn(v viewID, id int) bool {
 		return it != nil && it.ID == id
 	case viewTeam:
 		return a.team.jumpTo(id)
+	case viewChanges:
+		return a.changes.jumpTo(id)
 	case viewDash:
 		a.dashBoard.jumpTo(id)
 		if it := a.dashBoard.current(); it != nil && it.ID == id {
@@ -208,6 +212,8 @@ func (a *App) onGotoKey(msg tea.KeyMsg) tea.Cmd {
 		return a.gotoView(viewBacklog)
 	case key.Matches(msg, keys.GotoTeam):
 		return a.gotoView(viewTeam)
+	case key.Matches(msg, keys.GotoChanges):
+		return a.gotoView(viewChanges)
 	case key.Matches(msg, keys.GotoParent):
 		return a.gotoParent()
 	}
