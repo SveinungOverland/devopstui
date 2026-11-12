@@ -407,6 +407,13 @@ var helpWhere = map[string]string{
 	keys.Flat.Help().Desc:        "lists",
 	keys.ChildLayout.Help().Desc: "details",
 	keys.BoardLayout.Help().Desc: "board",
+
+	keys.FocusPerson.Help().Desc:   "team",
+	keys.PeriodShorter.Help().Desc: "changes",
+	keys.PeriodLonger.Help().Desc:  "changes",
+	keys.Period.Help().Desc:        "changes",
+	keys.Grouping.Help().Desc:      "changes",
+	keys.AllSprints.Help().Desc:    "changes",
 }
 
 func padCol(s string) string { return lipgloss.NewStyle().MarginRight(3).Render(s) }
@@ -443,7 +450,7 @@ type cmdbar struct {
 func newCmdbar() cmdbar {
 	in := textinput.New()
 	in.Prompt = ":"
-	in.SetSuggestions([]string{"sprint", "team", "filter", "project", "board", "backlog", "dash", "refresh", "auto", "attention", "stale", "quit"})
+	in.SetSuggestions([]string{"sprint", "team", "filter", "project", "board", "backlog", "dash", "changes", "refresh", "auto", "attention", "stale", "quit"})
 	in.ShowSuggestions = true
 	return cmdbar{input: in}
 }

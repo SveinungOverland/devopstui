@@ -18,11 +18,18 @@ type Fake struct {
 	items    map[int]*model.WorkItem
 	comments map[int][]model.Comment
 	links    []fakeLink
+	history  []model.Change // what happened to the items, for Changes
 	iters    []model.Iteration
 	nextID   int
 	Updates  []FakeUpdate // recorded writes, for tests
 	Latency  time.Duration
 	FailNext error
+	// FailOn fails every call of the named method (Teams, TeamAreas,
+	// Boards) until cleared, where FailNext fails whichever call is next.
+	FailOn map[string]error
+	// Calls counts calls per method, for tests that assert what a flow
+	// did or did not fetch.
+	Calls map[string]int
 }
 
 // fakeLink is a work item link as stored on from; Links reads it from
@@ -168,7 +175,105 @@ func NewFake() *Fake {
 		{1022, 1020, model.RelRelated},
 	}
 	f.nextID = 2000
+	f.seedHistory(now)
 	return f
+}
+
+// seedHistory gives the demo a couple of weeks of activity, so the Changes
+// view has something to show for every period. It is written to agree with
+// the items above: each one's last recorded state is the state it is in.
+func (f *Fake) seedHistory(now time.Time) {
+	const sv, alex, priya = "Sveinung Øverland", "Alex Kim", "Priya Natarajan"
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
+	const day = 24 * time.Hour
+	state := func(from, to string) model.FieldChange {
+		return model.FieldChange{Kind: model.ChangeState, Label: "State", Old: from, New: to}
+	}
+	assign := func(from, to string) model.FieldChange {
+		return model.FieldChange{Kind: model.ChangeAssigned, Label: "Assigned", Old: from, New: to}
+	}
+	comment := func(text string) model.FieldChange {
+		return model.FieldChange{Kind: model.ChangeComment, Label: "Comment", New: text}
+	}
+	created := model.FieldChange{Kind: model.ChangeCreated, Label: "Created"}
+	edited := func(label string) model.FieldChange { return model.FieldChange{Kind: model.ChangeEdit, Label: label} }
+	add := func(id int, at time.Time, by string, fields ...model.FieldChange) {
+		f.history = append(f.history, model.Change{ItemID: id, At: at, By: by, Fields: fields})
+	}
+	// The last few hours.
+	add(1023, ago(25*time.Minute), priya, state("To Do", "In Progress"))
+	add(1013, ago(70*time.Minute), sv, comment("Picking this up now that #1015 landed."))
+	add(1016, ago(2*time.Hour), sv, state("In Progress", "Done"),
+		model.FieldChange{Kind: model.ChangeEdit, Label: "Remaining", Old: "3", New: ""})
+	add(1024, ago(3*time.Hour), priya, created, assign("", priya))
+	add(1003, ago(4*time.Hour), sv, comment("First use only — otherwise a leaked email thread keeps working forever."))
+	add(1020, ago(5*time.Hour), alex, state("New", "Approved"),
+		model.FieldChange{Kind: model.ChangeEdit, Label: "Priority", Old: "2", New: "1"})
+	// The day before, and the rest of the week.
+	add(1013, ago(day+time.Hour), alex, comment("Publisher change is in review, consumer side still needs the header read added."))
+	add(1019, ago(day+2*time.Hour), alex, state("In Progress", "Done"))
+	add(1003, ago(day+3*time.Hour), priya, comment("Should the magic link expire after first use, or stay valid for the full 7 days?"))
+	add(1014, ago(day+5*time.Hour), alex, state("Approved", "Committed"),
+		model.FieldChange{Kind: model.ChangeEdit, Label: "Effort", Old: "5", New: "3"})
+	add(1028, ago(day+6*time.Hour), sv, state("In Progress", "Done"),
+		model.FieldChange{Kind: model.ChangeLink, Label: "Pull Request"})
+	add(1022, ago(2*day+2*time.Hour), alex, assign("", priya))
+	add(1025, ago(2*day+4*time.Hour), sv, created, assign("", sv))
+	add(1026, ago(2*day+4*time.Hour-time.Minute), sv, created, assign("", sv))
+	add(1013, ago(3*day), sv, state("Committed", "In Progress"))
+	add(1021, ago(3*day+3*time.Hour), alex,
+		model.FieldChange{Kind: model.ChangeIteration, Label: "Iteration", Old: "Platform\\Sprint 41", New: "Platform\\Sprint 42"})
+	add(1003, ago(4*day), sv, state("Approved", "Committed"), edited("Description"))
+	add(1004, ago(5*day), priya, state("New", "Approved"),
+		model.FieldChange{Kind: model.ChangeEdit, Label: "Title", Old: "Accept invite", New: "Accept invite and create account"})
+	add(1018, ago(8*day), alex, state("To Do", "In Progress"))
+	add(1012, ago(9*day), sv, state("New", "In Progress"))
+	add(1022, ago(10*day), priya, created)
+	// Outside the sprint: a feature finished in the previous one, and
+	// something parked on the backlog.
+	add(1011, ago(6*day), alex, state("In Progress", "Done"))
+	add(1027, ago(day+4*time.Hour), alex, created)
+	sortChanges(f.history)
+}
+
+// record adds a change made through the fake to its history, so the
+// Changes view shows what a session itself did. The caller holds f.mu.
+func (f *Fake) record(id int, fields ...model.FieldChange) {
+	if len(fields) == 0 {
+		return
+	}
+	f.history = append([]model.Change{{ItemID: id, At: time.Now(), By: f.me, Fields: fields}}, f.history...)
+}
+
+func (f *Fake) Changes(ctx context.Context, project string, q model.ChangeQuery) (model.ChangeSet, error) {
+	_ = f.called("Changes")
+	if err := f.wait(ctx); err != nil {
+		return model.ChangeSet{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var set model.ChangeSet
+	seen := map[int]bool{}
+	for _, c := range f.history {
+		it, ok := f.items[c.ItemID]
+		if !ok || !inProject(it, project) || !q.Covers(c.At) {
+			continue
+		}
+		if q.IterationPath != "" && it.IterationPath != q.IterationPath && !strings.HasPrefix(it.IterationPath, q.IterationPath+"\\") {
+			continue
+		}
+		if len(q.Areas) > 0 && !model.InAreas(it.AreaPath, q.Areas) {
+			continue
+		}
+		set.Changes = append(set.Changes, c)
+		if !seen[it.ID] {
+			seen[it.ID] = true
+			cp := *it
+			set.Items = append(set.Items, &cp)
+		}
+	}
+	sortChanges(set.Changes)
+	return set, nil
 }
 
 // demoComments builds a short back-and-forth discussion, newest last, so
@@ -276,6 +381,17 @@ func (f *Fake) wait(ctx context.Context) error {
 	return nil
 }
 
+// called counts a call of op and returns the failure set for it, if any.
+func (f *Fake) called(op string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Calls == nil {
+		f.Calls = map[string]int{}
+	}
+	f.Calls[op]++
+	return f.FailOn[op]
+}
+
 func (f *Fake) Me(ctx context.Context) (string, error) { return f.me, f.wait(ctx) }
 
 func (f *Fake) Projects(ctx context.Context) ([]model.Project, error) {
@@ -283,6 +399,9 @@ func (f *Fake) Projects(ctx context.Context) ([]model.Project, error) {
 }
 
 func (f *Fake) Teams(ctx context.Context, project string) ([]model.Team, error) {
+	if err := f.called("Teams"); err != nil {
+		return nil, err
+	}
 	return []model.Team{{ID: "t1", Name: "Team Blue"}, {ID: "t2", Name: "Team Green"}}, f.wait(ctx)
 }
 
@@ -309,6 +428,9 @@ func (f *Fake) ProjectIterations(ctx context.Context, project string) ([]model.I
 }
 
 func (f *Fake) Boards(ctx context.Context, project, team string) ([]model.Board, error) {
+	if err := f.called("Boards"); err != nil {
+		return nil, err
+	}
 	return []model.Board{{ID: "b1", Name: "Backlog items", Columns: []model.BoardColumn{
 		{Name: "New", States: []string{"New"}},
 		{Name: "Approved", States: []string{"Approved"}},
@@ -326,6 +448,9 @@ func (f *Fake) BacklogConfig(ctx context.Context, project, team string) (model.B
 }
 
 func (f *Fake) TeamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error) {
+	if err := f.called("TeamAreas"); err != nil {
+		return nil, err
+	}
 	if err := f.wait(ctx); err != nil {
 		return nil, err
 	}
@@ -365,6 +490,11 @@ func (f *Fake) Create(ctx context.Context, project string, n model.NewItem) (*mo
 		patches = append(patches, model.Patch{Field: model.FieldAssignedTo, Value: n.AssignedTo})
 	}
 	f.items[id] = it
+	rec := []model.FieldChange{{Kind: model.ChangeCreated, Label: "Created"}}
+	if it.AssignedTo != "" {
+		rec = append(rec, model.FieldChange{Kind: model.ChangeAssigned, Label: "Assigned", New: it.AssignedTo})
+	}
+	f.record(id, rec...)
 	f.Updates = append(f.Updates, FakeUpdate{ID: id, Parent: n.ParentID, Patches: patches})
 	c := *it
 	return &c, nil
@@ -435,14 +565,20 @@ func (f *Fake) SprintItems(ctx context.Context, project, team, iter string) ([]*
 		return nil, nil, err
 	}
 	items := f.snapshot(func(w *model.WorkItem) bool { return w.IterationPath == iter })
+	return items, f.externalParents(items), nil
+}
+
+// externalParents walks up from items and returns the ancestors that are
+// not among them.
+func (f *Fake) externalParents(items []*model.WorkItem) []*model.WorkItem {
 	in := map[int]bool{}
 	for _, it := range items {
 		in[it.ID] = true
 	}
-	// Walk up to collect external ancestors.
 	var external []*model.WorkItem
 	seen := map[int]bool{}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	for _, it := range items {
 		p := it.ParentID
 		for p != 0 && !in[p] && !seen[p] {
@@ -456,8 +592,7 @@ func (f *Fake) SprintItems(ctx context.Context, project, team, iter string) ([]*
 			}
 		}
 	}
-	f.mu.Unlock()
-	return items, external, nil
+	return external
 }
 
 // Unscheduled reuses SprintItems' exact-match filter with the project root
@@ -467,11 +602,18 @@ func (f *Fake) Unscheduled(ctx context.Context, project, team string) ([]*model.
 	return f.SprintItems(ctx, project, team, project)
 }
 
-func (f *Fake) Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error) {
+func (f *Fake) Backlog(ctx context.Context, project, team string, areas []model.TeamArea) ([]*model.WorkItem, []*model.WorkItem, error) {
+	_ = f.called("Backlog")
 	if err := f.wait(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return f.snapshot(func(w *model.WorkItem) bool { return inProject(w, project) && w.Kind != model.KindTask }), nil
+	items := f.snapshot(func(w *model.WorkItem) bool {
+		return inProject(w, project) && w.Kind != model.KindTask && (len(areas) == 0 || model.InAreas(w.AreaPath, areas))
+	})
+	if len(areas) == 0 {
+		return items, nil, nil
+	}
+	return items, f.externalParents(items), nil
 }
 
 func (f *Fake) MyItems(ctx context.Context, project string) ([]*model.WorkItem, error) {
@@ -609,6 +751,7 @@ func (f *Fake) AddComment(ctx context.Context, project string, id int, text stri
 	}
 	c := model.Comment{ID: len(f.comments[id]) + 1, Author: f.me, CreatedDate: time.Now(), Text: text}
 	f.comments[id] = append(f.comments[id], c)
+	f.record(id, model.FieldChange{Kind: model.ChangeComment, Label: "Comment", New: text})
 	return c, nil
 }
 
@@ -625,32 +768,56 @@ func (f *Fake) Update(ctx context.Context, id, rev int, patches []model.Patch) (
 	if it.Rev != rev {
 		return nil, fmt.Errorf("work item %d changed on server (rev %d, you had %d)", id, it.Rev, rev)
 	}
+	var rec []model.FieldChange
+	note := func(kind model.ChangeKind, label, from, to string) {
+		if from != to {
+			rec = append(rec, model.FieldChange{Kind: kind, Label: label, Old: from, New: to})
+		}
+	}
+	num := func(v float64) string {
+		if v == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%g", v)
+	}
 	for _, p := range patches {
 		switch p.Field {
 		case model.FieldTitle:
+			note(model.ChangeEdit, "Title", it.Title, p.Value.(string))
 			it.Title = p.Value.(string)
 		case model.FieldState:
+			note(model.ChangeState, "State", it.State, p.Value.(string))
 			it.State = p.Value.(string)
 			it.BoardColumn = it.State
 		case model.FieldAssignedTo:
 			// Azure DevOps resolves a sign-in address to the display name.
+			was := it.AssignedTo
 			it.AssignedTo, it.AssignedToUnique = resolvePerson(p.Value.(string))
+			note(model.ChangeAssigned, "Assigned", was, it.AssignedTo)
 		case model.FieldIterationPath:
+			note(model.ChangeIteration, "Iteration", it.IterationPath, p.Value.(string))
 			it.IterationPath = p.Value.(string)
 		case model.FieldDescription:
+			rec = append(rec, model.FieldChange{Kind: model.ChangeEdit, Label: "Description"})
 			it.Description = p.Value.(string)
 		case model.FieldReproSteps:
+			rec = append(rec, model.FieldChange{Kind: model.ChangeEdit, Label: "Repro steps"})
 			it.ReproSteps = p.Value.(string)
 		case model.FieldAcceptanceCriteria:
+			rec = append(rec, model.FieldChange{Kind: model.ChangeEdit, Label: "Acceptance criteria"})
 			it.AcceptanceCriteria = p.Value.(string)
 		case model.FieldEffort, model.FieldStoryPoints:
+			note(model.ChangeEdit, "Effort", num(it.Effort), num(p.Value.(float64)))
 			it.Effort = p.Value.(float64)
 		case model.FieldRemainingWork:
+			note(model.ChangeEdit, "Remaining", num(it.RemainingWork), num(p.Value.(float64)))
 			it.RemainingWork = p.Value.(float64)
 		case model.FieldPriority:
+			note(model.ChangeEdit, "Priority", num(float64(it.Priority)), num(float64(p.Value.(int))))
 			it.Priority = p.Value.(int)
 		}
 	}
+	f.record(id, rec...)
 	it.Rev++
 	it.ChangedDate = time.Now()
 	it.ChangedBy = f.me
@@ -669,6 +836,14 @@ func (f *Fake) SetParent(ctx context.Context, id, parentID int) (*model.WorkItem
 	if !ok {
 		return nil, fmt.Errorf("work item %d not found", id)
 	}
+	link := model.FieldChange{Kind: model.ChangeLink, Label: "Parent", Removed: parentID == 0}
+	if it.ParentID != 0 {
+		link.Old = fmt.Sprintf("#%d", it.ParentID)
+	}
+	if parentID != 0 {
+		link.New = fmt.Sprintf("#%d", parentID)
+	}
+	f.record(id, link)
 	it.ParentID = parentID
 	it.Rev++
 	f.Updates = append(f.Updates, FakeUpdate{ID: id, Parent: parentID})

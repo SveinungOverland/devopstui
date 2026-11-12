@@ -245,6 +245,19 @@ a real organisation (M7 and the integration test).
   and matches Lazygit.
 - **Every write is confirmable and logged** to `~/.local/state/devopstui/audit.log` (id, field,
   old → new) so bulk mistakes can be traced and reverted by hand.
+- **The Changes view reads work item updates, not revisions.** A WIQL query on `ChangedDate`
+  finds the items touched in the period; each item's `/updates` then gives the old and new value
+  of every field per revision. That is one request per changed item, so the history is cached
+  per item revision and capped at 300 items a load. The reporting revisions API would be one
+  call, but it returns whole snapshots with no previous value for the first revision in the
+  window.
+- **Context switches are transactional.** A project or team switch is applied only when
+  everything it needs has loaded, and every load carries a request number so that only the
+  latest answer is used. Team settings are cached for ten minutes in `ado/sdk.go`; `:refresh`
+  drops the cache.
+- **The team filter is applied by the server where the data is unbounded** (Backlog, Changes)
+  and in memory where it is one sprint (Sprint, Board, Team, Dashboard), which keeps toggling it
+  instant on the views used most.
 - **Single org per run.** Switching org is a restart with a different `--org`; multi-org can come
   from named contexts in config later.
 

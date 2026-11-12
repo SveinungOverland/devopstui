@@ -154,7 +154,7 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `tab`             | focus detail pane     | `5`     | team                | `a`     | assign          |      |                     |
 | `z`               | toggle preview pane   | `[` `]` | prev / next sprint  | `n`     | new child item  |      |                     |
 | `ctrl+u` `ctrl+d` | scroll preview pane   | `T`     | team filter         | `N`     | new bug         |      |                     |
-| `D`               | item details view     |         |                     |         |                 |      |                     |
+| `D`               | item details view     | `6`     | changes             |         |                 |      |                     |
 | `C`               | discussion            |         |                     |         |                 |      |                     |
 | `c`               | add comment           |         |                     |         |                 |      |                     |
 | `/`               | filter                | `S`     | current sprint      | `E`     | effort          |      |                     |
@@ -172,11 +172,12 @@ Keys are vim-style mnemonics: the letter is the first letter of the action.
 | `gd` `gs`         | show the highlighted item in the dashboard / sprint |
 | `gb` `gB`         | show the highlighted item on the board / backlog    |
 | `gt`              | show the highlighted item in the team view          |
+| `gc`              | show the highlighted item's latest change           |
 | `gp`              | go to (open) the parent                             |
 | `esc`             | close one level of the item details view            |
 | `q`               | quit, from anywhere                                 |
 
-`ctrl+o` and `ctrl+n` work like vim's jump list. Switching tabs (`1`-`5`, `:backlog`,
+`ctrl+o` and `ctrl+n` work like vim's jump list. Switching tabs (`1`-`6`, `:backlog`,
 `:dash`), `:<id>`, opening an item (`D`/`enter`), leaving one with `esc`, and every `g`
 motion are recorded. `ctrl+o` goes back through them, and that includes going back into an
 item details view and its drill-down trail. `ctrl+n` goes forward again. It isn't `ctrl+i`
@@ -320,6 +321,27 @@ team's area paths, with parents from other teams dimmed so the hierarchy stays r
 items created with `n` land in the filtered team's default area. `:filter off` clears it. The
 choice is saved as `filter_team` in the config.
 
+`:filter green` is enough when only one team's name contains "green"; `:team <name>` switches
+the sprint-owning team the same way, and both pickers open on the current choice.
+
+The Sprint, Board, Team and Dashboard views filter the sprint they already hold, so the filter
+applies at once. The Backlog and the Changes view ask Azure DevOps for the filtered team's
+items only: a large project's backlog is cut off at 2000 items, which used to mean a sub-team's
+own items could be missing from its filtered backlog.
+
+Switching team or filter is safe to do quickly and on a bad connection:
+
+- The last choice wins. Picking one team and then another never ends on whichever answer
+  happened to arrive last, and the same goes for stepping through sprints with `[`/`]`.
+- A switch only takes effect once the new team's sprints, board and settings have all loaded.
+  If one of them fails, you stay on the team you were on, with a message saying why.
+- If the filter team's area paths cannot be read at startup, the filter stays in your config
+  and the header shows `⌕ <team> (not applied)`; `r` retries it.
+- Teams, area paths, sprints and board columns are remembered for ten minutes, so going back
+  and forth between teams does not fetch them again, and switching team no longer refetches the
+  Backlog and Dashboard (they belong to the project). `:refresh` forgets all of it and reloads
+  everything, which is how to pick up a new sprint or team without restarting.
+
 ## Tasks and other children
 
 - PBIs (and Features, Epics) with task-level children show a **`1/3` badge** in the tree and on
@@ -417,7 +439,7 @@ header shows `↻60s` while it is on, and the interval is whatever `refresh_seco
 seconds by default. `:auto 30` sets a different interval. Reloads are skipped while a dialog
 is open or a write is in flight, so nothing shifts under you mid-edit.
 
-Commands: `:sprint [name]`, `:team`, `:filter [team|off]`, `:auto [on|off|seconds]`, `:attention`, `:stale [days|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
+Commands: `:sprint [name]`, `:team [name]`, `:filter [team|off]`, `:changes [today|yesterday|week|sprint|days]`, `:auto [on|off|seconds]`, `:attention`, `:stale [days|off]`, `:project`, `:board`, `:backlog`, `:dash`, `:refresh`,
 `:<id>` to look up a work item, `:q`.
 
 ## Team view
@@ -448,6 +470,58 @@ Dan Berg  4 items · 13 pts · 2 active · 1 done   ◷2 ✓1
 - Everything else works as on the Board: `H`/`L` move an item to the neighbouring column,
   `s`, `a`, `e` and the other change keys edit it, `space` selects, `enter`/`D` opens it, and
   `z` toggles the preview.
+
+## Changes view
+
+The Changes view (`6`) answers "what happened?" for a period: since yesterday for a stand-up,
+or the whole sprint for a review. It lists every change made to the sprint's items, newest
+first, one line per revision.
+
+```
+11 changes on 9 items · 1 created · 3 completed · 3 moved state · 4 comments
+╭───────────────────────────────────────────────────────────────────────────────────────────╮
+│Today · Thu 12 Nov  6 changes · 6 items                                                    │
+│▌12:16  TASK 1023 Wire up magic link email…  State To Do → In Progress                 PN  │
+│ 11:31  PBI  1013 Propagate trace id throu…  comment “Picking this up now that #1015…  SØ  │
+│ 10:41  TASK 1016 Read trace header in con…  State In Progress → Done · Remaining 3 →… SØ  │
+│ 09:41  BUG  1024 Retry budget also drops …  created · Assigned — → Priya Natarajan    PN  │
+│                                                                                           │
+│Yesterday · Wed 11 Nov  5 changes · 5 items                                                │
+│ 10:41  TASK 1019 Build panel JSON           State In Progress → Done                  AK  │
+│ 06:41  PBI  1028 Add SSO login button to …  State In Progress → Done · Pull Request … SØ  │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+- **What counts as a change:** state, assignee, iteration, area, title, effort, remaining
+  work, priority, tags and custom fields with their old and new values; edits to the
+  description, repro steps and acceptance criteria; comments, with the start of the text;
+  a new parent; and links added or removed, including pull requests and commits. Reordering
+  and other bookkeeping is left out.
+- **Period:** `h` and `l` step between *today*, *since yesterday*, *last 7 days* and *this
+  sprint*; `w` picks one from a list, and `:changes 3` sets any number of days. *Since
+  yesterday* is the default and reaches back to the previous working day, so on a Monday it
+  covers Friday. *This sprint* runs from the selected sprint's first day to its last, so
+  stepping back with `[` shows what happened during an earlier sprint.
+- **Scope:** the items in the selected sprint, narrowed by the [team filter](#team-filter)
+  when one is set. `A` widens it to every sprint and the backlog, which is how to catch an
+  item that was moved out of the sprint or a bug filed outside it.
+- **Grouping:** `f` cycles the headings between day, item and person. By item shows each
+  item's history in the period together; by person shows who did what, the most active first.
+  `J`/`K` jump between groups.
+- `/` filters on the item, the person and the change itself, so `/comment`, `/done` or a name
+  all work. `esc` clears it.
+- The preview pane starts with the highlighted item's changes in full (the whole comment, every
+  field), followed by the usual details. `z` toggles it.
+- The change keys (`s`, `a`, `e`, …) act on the highlighted item, `enter`/`D` opens it, and `gc`
+  from any other view shows the highlighted item's latest change here.
+
+The line above the list sums the period up. It also says when the list is incomplete: the
+history of at most 300 items is read per load (the most recently changed ones), and an item
+whose history could not be read is counted rather than failing the page.
+
+Each changed item's history is one request to Azure DevOps, so the first load of a busy sprint
+takes a few seconds. Histories are kept for as long as the item stays unchanged, which makes
+`r`, auto refresh and switching period quick after that.
 
 ## Develop
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +35,8 @@ type SDK struct {
 	me         string
 	states     map[string][]string
 	people     map[string][]model.Person // project → directory cache
+	meta       map[string]metaEntry      // teams, areas, sprints, boards: see memo
+	history    map[int]itemHistory       // work item id → its converted updates
 	ident      identity.Client
 	identTried bool
 
@@ -59,7 +62,49 @@ func NewSDK(ctx context.Context, orgURL, pat string) (*SDK, error) {
 		return nil, fmt.Errorf("work item client: %w", err)
 	}
 	return &SDK{orgURL: orgURL, conn: conn, core: c, work: w, wit: wit,
-		states: map[string][]string{}, people: map[string][]model.Person{}}, nil
+		states: map[string][]string{}, people: map[string][]model.Person{},
+		meta: map[string]metaEntry{}, history: map[int]itemHistory{}}, nil
+}
+
+// metaTTL is how long team and project settings are reused. They change
+// rarely, and switching team or filter back and forth otherwise repeats
+// the same dozen round trips every time.
+const metaTTL = 10 * time.Minute
+
+type metaEntry struct {
+	v  any
+	at time.Time
+}
+
+// memo returns the cached value for key, or loads and caches it. Errors are
+// never cached, so a failed call is retried by the next one.
+func memo[T any](s *SDK, key string, load func() (T, error)) (T, error) {
+	s.mu.Lock()
+	e, ok := s.meta[key]
+	s.mu.Unlock()
+	if ok && time.Since(e.at) < metaTTL {
+		if v, ok := e.v.(T); ok {
+			return v, nil
+		}
+	}
+	v, err := load()
+	if err != nil {
+		return v, err
+	}
+	s.mu.Lock()
+	s.meta[key] = metaEntry{v: v, at: time.Now()}
+	s.mu.Unlock()
+	return v, nil
+}
+
+// Forget drops every cached setting, so the next calls read the server
+// again. The UI calls it on an explicit :refresh.
+func (s *SDK) Forget() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.meta = map[string]metaEntry{}
+	s.people = map[string][]model.Person{}
+	s.states = map[string][]string{}
 }
 
 var fields = []string{
@@ -102,6 +147,11 @@ func (s *SDK) Me(ctx context.Context) (string, error) {
 }
 
 func (s *SDK) Projects(ctx context.Context) ([]model.Project, error) {
+	out, err := memo(s, "projects", func() ([]model.Project, error) { return s.projects(ctx) })
+	return slices.Clone(out), err
+}
+
+func (s *SDK) projects(ctx context.Context) ([]model.Project, error) {
 	var out []model.Project
 	var token string
 	for {
@@ -126,20 +176,44 @@ func (s *SDK) Projects(ctx context.Context) ([]model.Project, error) {
 	return out, nil
 }
 
+// teamPage is how many teams one GetTeams call asks for. The server's
+// default is 100, and it returns no continuation token: without paging, a
+// project with more teams silently loses the rest.
+const teamPage = 100
+
 func (s *SDK) Teams(ctx context.Context, project string) ([]model.Team, error) {
-	teams, err := s.core.GetTeams(ctx, core.GetTeamsArgs{ProjectId: &project})
-	if err != nil {
-		return nil, err
-	}
+	out, err := memo(s, "teams/"+project, func() ([]model.Team, error) { return s.teams(ctx, project) })
+	return slices.Clone(out), err
+}
+
+func (s *SDK) teams(ctx context.Context, project string) ([]model.Team, error) {
 	var out []model.Team
-	for _, t := range *teams {
-		out = append(out, model.Team{ID: t.Id.String(), Name: deref(t.Name)})
+	top := teamPage
+	for skip := 0; ; skip += teamPage {
+		teams, err := s.core.GetTeams(ctx, core.GetTeamsArgs{ProjectId: &project, Top: &top, Skip: &skip})
+		if err != nil {
+			return nil, err
+		}
+		if teams == nil {
+			break
+		}
+		for _, t := range *teams {
+			out = append(out, model.Team{ID: t.Id.String(), Name: deref(t.Name)})
+		}
+		if len(*teams) < teamPage {
+			break
+		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out, nil
 }
 
 func (s *SDK) Iterations(ctx context.Context, project, team string) ([]model.Iteration, error) {
+	out, err := memo(s, "iterations/"+project+"/"+team, func() ([]model.Iteration, error) { return s.iterations(ctx, project, team) })
+	return slices.Clone(out), err
+}
+
+func (s *SDK) iterations(ctx context.Context, project, team string) ([]model.Iteration, error) {
 	its, err := s.work.GetTeamIterations(ctx, work.GetTeamIterationsArgs{Project: &project, Team: &team})
 	if err != nil {
 		return nil, err
@@ -171,6 +245,11 @@ func (s *SDK) Iterations(ctx context.Context, project, team string) ([]model.Ite
 // and would not match the System.IterationPath format the rest of this
 // codebase writes (e.g. "Platform\Sprint 42", see fake.go).
 func (s *SDK) ProjectIterations(ctx context.Context, project string) ([]model.Iteration, error) {
+	out, err := memo(s, "project-iterations/"+project, func() ([]model.Iteration, error) { return s.projectIterations(ctx, project) })
+	return slices.Clone(out), err
+}
+
+func (s *SDK) projectIterations(ctx context.Context, project string) ([]model.Iteration, error) {
 	depth := 25
 	root, err := s.wit.GetClassificationNode(ctx, workitemtracking.GetClassificationNodeArgs{
 		Project:        &project,
@@ -218,6 +297,11 @@ func attrDate(v any) time.Time {
 }
 
 func (s *SDK) Boards(ctx context.Context, project, team string) ([]model.Board, error) {
+	out, err := memo(s, "boards/"+project+"/"+team, func() ([]model.Board, error) { return s.boards(ctx, project, team) })
+	return slices.Clone(out), err
+}
+
+func (s *SDK) boards(ctx context.Context, project, team string) ([]model.Board, error) {
 	refs, err := s.work.GetBoards(ctx, work.GetBoardsArgs{Project: &project, Team: &team})
 	if err != nil {
 		return nil, err
@@ -259,6 +343,10 @@ func (s *SDK) Boards(ctx context.Context, project, team string) ([]model.Board, 
 }
 
 func (s *SDK) BacklogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error) {
+	return memo(s, "backlog-config/"+project+"/"+team, func() (model.BacklogConfig, error) { return s.backlogConfig(ctx, project, team) })
+}
+
+func (s *SDK) backlogConfig(ctx context.Context, project, team string) (model.BacklogConfig, error) {
 	cfg, err := s.work.GetBacklogConfigurations(ctx, work.GetBacklogConfigurationsArgs{Project: &project, Team: &team})
 	if err != nil {
 		return model.BacklogConfig{}, err
@@ -298,6 +386,11 @@ func (s *SDK) BacklogConfig(ctx context.Context, project, team string) (model.Ba
 }
 
 func (s *SDK) TeamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error) {
+	out, err := memo(s, "areas/"+project+"/"+team, func() ([]model.TeamArea, error) { return s.teamAreas(ctx, project, team) })
+	return slices.Clone(out), err
+}
+
+func (s *SDK) teamAreas(ctx context.Context, project, team string) ([]model.TeamArea, error) {
 	tf, err := s.work.GetTeamFieldValues(ctx, work.GetTeamFieldValuesArgs{Project: &project, Team: &team})
 	if err != nil {
 		return nil, err
@@ -501,9 +594,37 @@ func (s *SDK) externalParents(ctx context.Context, project string, items []*mode
 	return external, nil
 }
 
-func (s *SDK) Backlog(ctx context.Context, project, team string) ([]*model.WorkItem, error) {
-	return s.query(ctx, project,
-		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] IN ('Epic','Feature','Product Backlog Item','User Story','Bug') AND [System.State] NOT IN ('Removed','Closed','Done') ORDER BY [Microsoft.VSTS.Common.BacklogPriority] ASC")
+func (s *SDK) Backlog(ctx context.Context, project, team string, areas []model.TeamArea) ([]*model.WorkItem, []*model.WorkItem, error) {
+	items, err := s.query(ctx, project,
+		"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] IN ('Epic','Feature','Product Backlog Item','User Story','Bug') AND [System.State] NOT IN ('Removed','Closed','Done')"+
+			areaClause(areas)+" ORDER BY [Microsoft.VSTS.Common.BacklogPriority] ASC")
+	if err != nil || len(areas) == 0 {
+		return items, nil, err
+	}
+	// The Features and Epics a team's items hang under usually sit in
+	// another team's area, so the filter above leaves them out.
+	external, err := s.externalParents(ctx, project, items)
+	if err != nil {
+		return nil, nil, err
+	}
+	return items, external, nil
+}
+
+// areaClause is the WIQL condition for "in any of these area paths", ready
+// to append to a WHERE; empty when there are none.
+func areaClause(areas []model.TeamArea) string {
+	var parts []string
+	for _, a := range areas {
+		op := "="
+		if a.IncludeChildren {
+			op = "UNDER"
+		}
+		parts = append(parts, fmt.Sprintf("[System.AreaPath] %s '%s'", op, escape(a.Path)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " AND (" + strings.Join(parts, " OR ") + ")"
 }
 
 func (s *SDK) MyItems(ctx context.Context, project string) ([]*model.WorkItem, error) {
